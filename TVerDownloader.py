@@ -1,5 +1,5 @@
 # 파일명: TVerDownloader.py
-# 메인 UI + 큐/스레드 관리. (모듈 분리: history_store/updater/qss/about_dialog)
+# 메인 UI + 큐/스레드 관리. (모듈 분리: history_store/updater/qss/about_dialog/bulk_dialog)
 import sys
 import os
 import subprocess
@@ -19,6 +19,7 @@ from src.history_store import HistoryStore
 from src.updater import maybe_show_update
 from src.qss import build_qss
 from src.about_dialog import AboutDialog
+from src.bulk_dialog import BulkAddDialog, parse_urls  # ★ 추가
 
 # 기존 모듈
 from src.utils import (
@@ -26,7 +27,7 @@ from src.utils import (
     handle_exception, open_file_location,
 )
 from src.icon import get_app_icon
-from src.themes import ThemeSwitch, apply_theme  # ← 전역 QSS 적용용 함수 추가
+from src.themes import ThemeSwitch
 from src.widgets import DownloadItemWidget
 from src.workers import SetupThread, SeriesParseThread, DownloadThread
 from src.dialogs import SettingsDialog
@@ -37,7 +38,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.version = "2.0.2"
+        self.version = "2.1.0"  # 다중 다운로드 기능 추가
         self.setWindowTitle("티버 다운로더")
         self.resize(1120, 760)
         self.center()
@@ -59,6 +60,11 @@ class MainWindow(QMainWindow):
         # 기록
         self.history_store = HistoryStore("urlhistory.json")
         self.history_store.load()
+
+        # 시리즈 일괄 파서 큐(드래그/다중입력용)
+        self._bulk_series_queue: List[str] = []
+        self._bulk_series_active: bool = False
+        self._bulk_series_thread: SeriesParseThread | None = None
 
         # 트레이
         self.tray_icon = QSystemTrayIcon(self)
@@ -126,8 +132,16 @@ class MainWindow(QMainWindow):
         input_layout = QHBoxLayout(self.input_bar); input_layout.setContentsMargins(16,12,16,12); input_layout.setSpacing(10)
         self.url_input = QLineEdit(placeholderText="TVer 영상 URL 붙여넣기 또는 드래그하세요", objectName="UrlInput")
         self.url_input.returnPressed.connect(self.process_input_url)
-        self.add_button = QPushButton("다운로드", objectName="AccentButton"); self.add_button.clicked.connect(self.process_input_url)
-        input_layout.addWidget(self.url_input, 1); input_layout.addWidget(self.add_button, 0)
+        self.add_button = QPushButton("다운로드", objectName="AccentButton")
+        self.add_button.clicked.connect(self.process_input_url)
+
+        # ★ 다중 다운로드 버튼
+        self.bulk_button = QPushButton("다중 다운로드", objectName="PrimaryButton")
+        self.bulk_button.clicked.connect(self.open_bulk_dialog)
+
+        input_layout.addWidget(self.url_input, 1)
+        input_layout.addWidget(self.add_button, 0)
+        input_layout.addWidget(self.bulk_button, 0)
 
         # 탭
         self.tabs = QTabWidget(objectName="MainTabs")
@@ -182,31 +196,26 @@ class MainWindow(QMainWindow):
         version_label = QLabel(f"Version: {self.version}"); version_label.setObjectName("VersionLabel")
         self.statusBar().addPermanentWidget(version_label)
 
-        self.url_input.setEnabled(False); self.add_button.setEnabled(False)
+        self.url_input.setEnabled(False); self.add_button.setEnabled(False); self.bulk_button.setEnabled(False)
 
         self.refresh_history_list()
-        # 항상 위 초기 반영
         self.set_always_on_top(self.on_top_btn.isChecked())
 
-    # ================== 스타일 ==================
+    # ================== 스타일/테마 ==================
     def apply_stylesheet(self, theme: str):
-        # 앱 전역으로 QSS 초기화 → 재적용 (누적 방지)
-        app = QApplication.instance()
-        if app is None:
-            return
-        apply_theme(app, theme)
+        self.setStyleSheet(build_qss(theme))
         if hasattr(self, "theme_button"):
-            self.theme_button.update_theme(theme)
+            # ThemeSwitch는 내부 색만 갱신
+            if theme == "dark":
+                self.theme_button.setChecked(True)
+            else:
+                self.theme_button.setChecked(False)
 
-    # ================== 테마 ==================
     def toggle_theme(self, is_dark: bool):
-        theme = "dark" if is_dark else "light"
-        if self.current_theme == theme:
-            return
-        self.current_theme = theme
-        self.config["theme"] = theme
+        self.current_theme = "dark" if is_dark else "light"
+        self.config["theme"] = self.current_theme
         save_config(self.config)
-        self.apply_stylesheet(theme)
+        self.apply_stylesheet(self.current_theme)
 
     # ================== 트레이/종료 ==================
     def on_tray_icon_activated(self, reason):
@@ -299,6 +308,7 @@ class MainWindow(QMainWindow):
             self.append_log("\n환경 설정 완료. 다운로드를 시작할 수 있습니다.")
             self.url_input.setEnabled(True)
             self.add_button.setEnabled(True)
+            self.bulk_button.setEnabled(True)
             self.theme_button.setChecked(self.current_theme == "dark")
         else:
             self.append_log(self.LOG_RULE + "\n[치명적 오류] 환경 설정 실패. 로그를 확인하고 재시작하세요.")
@@ -324,24 +334,81 @@ class MainWindow(QMainWindow):
             self.apply_stylesheet(self.current_theme)
             self.append_log("설정이 저장되었습니다.")
 
-    # ================== URL 처리 ==================
+    # ================== URL 처리(단일) ==================
     def process_input_url(self):
         url = self.url_input.text().strip()
         if not url: return
         if "/series/" in url:
-            self.series_parse_thread = SeriesParseThread(url, self.ytdlp_exe_path)
-            self.series_parse_thread.log.connect(self.append_log)
-            self.series_parse_thread.finished.connect(self.on_series_parsed)
-            self.series_parse_thread.start()
-            self.url_input.setEnabled(False); self.add_button.setEnabled(False)
+            self._start_series_parse_single(url)
         else:
             self.add_url_to_queue(url)
         self.url_input.clear()
 
+    def _start_series_parse_single(self, url: str):
+        self.series_parse_thread = SeriesParseThread(url, self.ytdlp_exe_path)
+        self.series_parse_thread.log.connect(self.append_log)
+        self.series_parse_thread.finished.connect(self.on_series_parsed)
+        self.series_parse_thread.start()
+        self.url_input.setEnabled(False); self.add_button.setEnabled(False); self.bulk_button.setEnabled(False)
+
     def on_series_parsed(self, episode_urls: List[str]):
-        self.url_input.setEnabled(True); self.add_button.setEnabled(True)
+        self.url_input.setEnabled(True); self.add_button.setEnabled(True); self.bulk_button.setEnabled(True)
         for url in episode_urls:
             self.add_url_to_queue(url)
+
+    # ================== URL 처리(다중) ==================
+    def open_bulk_dialog(self):
+        dlg = BulkAddDialog(self)
+        if dlg.exec():
+            urls = dlg.urls()
+            if urls:
+                self.start_bulk_add(urls)
+
+    def start_bulk_add(self, urls: List[str]):
+        # URL 정규화/중복 제거
+        norm = []
+        seen = set()
+        for u in urls:
+            u = u.strip()
+            if not u or u in seen: continue
+            seen.add(u); norm.append(u)
+
+        # 일반/시리즈 분리
+        normal = [u for u in norm if "/series/" not in u]
+        series = [u for u in norm if "/series/" in u]
+
+        # 일반은 즉시 추가
+        for u in normal:
+            self.add_url_to_queue(u)
+
+        # 시리즈는 큐로 순차 파싱
+        if series:
+            self._bulk_series_queue.extend(series)
+            if not self._bulk_series_active:
+                self._bulk_series_active = True
+                self._start_next_series_parse_bulk()
+
+    def _start_next_series_parse_bulk(self):
+        # 큐가 비면 종료
+        if not self._bulk_series_queue:
+            self._bulk_series_active = False
+            self._bulk_series_thread = None
+            return
+        url = self._bulk_series_queue.pop(0)
+        self.append_log(f"[일괄] 시리즈 분석 시작: {url}")
+        th = SeriesParseThread(url, self.ytdlp_exe_path)
+        th.log.connect(self.append_log)
+        th.finished.connect(self._on_series_parsed_bulk)
+        self._bulk_series_thread = th
+        th.start()
+
+    def _on_series_parsed_bulk(self, episode_urls: List[str]):
+        cnt = len(episode_urls)
+        self.append_log(f"[일괄] 시리즈 분석 완료: {cnt}개 에피소드 추가 예정")
+        for u in episode_urls:
+            self.add_url_to_queue(u)
+        # 다음 시리즈 진행
+        self._start_next_series_parse_bulk()
 
     # ================== 다운로드 큐 ==================
     def add_url_to_queue(self, url: str):
@@ -391,6 +458,7 @@ class MainWindow(QMainWindow):
 
             parts = self.config.get("filename_parts", {})
             order = self.config.get("filename_order", ["series", "upload_date", "episode_number", "episode", "id"])
+            # 구분자: 공백(2.0.2 반영)
             filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
             if parts.get("id", False): filename_format += " [%(id)s]"
             filename_format += ".mp4"
@@ -499,6 +567,34 @@ class MainWindow(QMainWindow):
         self.history_store.remove(url)
         self.refresh_history_list()
         self.append_log(f"[알림] 기록에서 제거됨: {url}")
+
+    # ================== 드래그&드롭(.txt 지원) ==================
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            # 파일 드래그만 메인에서 받는다 (텍스트는 입력창이 처리)
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        if not e.mimeData().hasUrls():
+            return
+        paths = [u.toLocalFile() for u in e.mimeData().urls()]
+        all_text = []
+        for p in paths:
+            if not p: continue
+            if os.path.isfile(p) and p.lower().endswith(".txt"):
+                try:
+                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                        all_text.append(f.read())
+                except Exception as ex:
+                    self.append_log(f"[오류] 텍스트 파일 읽기 실패: {p} ({ex})")
+            else:
+                # 파일이 .txt가 아니면 무시 (개별 URL은 입력창으로)
+                pass
+        if all_text:
+            urls = parse_urls("\n".join(all_text))
+            if urls:
+                self.start_bulk_add(urls)
+        e.acceptProposedAction()
 
 
 if __name__ == "__main__":
