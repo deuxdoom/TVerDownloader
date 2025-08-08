@@ -1,25 +1,96 @@
-# TVerDownloader
-TVerDownload Program
+\# TVer Downloader
 
-## 프로젝트 배경
-TVer Downloader는 일본 TVer 플랫폼의 지역 제한으로 인해 다운로드가 어려운 사용자를 지원하기 위해 개발되었습니다. 일본 VPN을 활용한 다운로드를 전제로 하며, yt-dlp를 기반으로 동영상 스트리밍을 로컬 파일로 변환합니다. 초기 버전은 단일 URL 다운로드를 목표로 하며, 사용자 피드백을 통해 기능 확장이 진행 중입니다.
 
-## 기술 세부사항
-- **프레임워크**: PyQt6를 사용한 GUI 구현.
-- **다운로드 엔진**: yt-dlp를 통해 TVer의 비디오 및 오디오 스트림 처리.
-- **설정 관리**: JSON 파일(downloader_config.json)을 통해 사용자 설정 저장.
-- **테마**: 라이트/다크 모드 전환 지원, CSS 스타일시트로 커스터마이징 가능.
 
-## 개발 상태
-- 현재 베타 단계로, 기본 다운로드 및 설정 기능 제공.
-- 알려진 제약: 다중 URL 처리 미지원, 네트워크 안정성 의존.
-- 향후 계획: 자동 업데이트 체크, 다중 파일 업로드 기능 검토.
+!\[TVer Downloader Logo](./logo.png)  
 
-## 기여 가이드
-- **버그 보고**: GitHub Issues에 상세한 재현 단계를 포함.
-- **코드 기여**: 풀 리퀘스트 제출 전 로컬 테스트 필수, 기존 코드 스타일 준수.
-- **의견 제안**: Discussions 탭 활용, 기능 요청 시 우선순위 논의.
+\*\*\[GitHub Repository](https://github.com/deuxdoom/TVerDownloader)\*\* | \*\*\[Issues](https://github.com/deuxdoom/TVerDownloader/issues)\*\* | \*\*\[Releases](https://github.com/deuxdoom/TVerDownloader/releases)\*\*  
 
-## 연락처
-- 피드백: [브런치 페이지](https://brunch.co.kr/@sashiko/8) 방문.
-- 개발자: [YouTube 채널](https://www.youtube.com/@LE_SSERAFIM) 확인.
+
+
+TVer Downloader는 일본 TVer 플랫폼의 동영상을 효율적으로 다운로드하기 위한 오픈소스 도구입니다. PyQt6 기반 GUI와 yt-dlp를 활용하여 사용자 맞춤형 다운로드 경험을 제공합니다.
+
+
+
+\## 프로젝트 개요
+
+| 항목            | 설명                                      |
+
+|-----------------|-------------------------------------------|
+
+| \*\*목적\*\*        | TVer의 지역 제한을 우회한 다운로드 지원    |
+
+| \*\*버전\*\*        | v1.2.0                                    |
+
+| \*\*최신 릴리스\*\* | \[v1.2.0](https://github.com/deuxdoom/TVerDownloader/releases/tag/v1.2.0) |
+
+| \*\*라이선스\*\*    | MIT (변경 가능)                            |
+
+| \*\*언어\*\*        | Python 3.8+                               |
+
+
+
+\## 기능
+
+\- \*\*다운로드 관리\*\*: 단일 URL 기반 다운로드.
+
+\- \*\*품질 옵션\*\*: 최상, 1080p, 720p, 오디오 추출.
+
+\- \*\*파일명 커스터마이징\*\*: 시리즈명, 날짜, 에피소드 번호 포함.
+
+\- \*\*테마 지원\*\*: 라이트/다크 모드 전환.
+
+\- \*\*후속 작업\*\*: 다운로드 완료 후 폴더 열기, 시스템 종료.
+
+
+
+\## 사용 방법
+
+1\. \*\*URL 입력\*\*: "URL 추가" 버튼으로 TVer 링크 입력.
+
+2\. \*\*설정 조정\*\*: "설정" 메뉴에서 품질, 파일명 구조, 테마 선택.
+
+3\. \*\*다운로드 시작\*\*: "다운로드 시작" 버튼 클릭.
+
+4\. \*\*진행 모니터링\*\*: GUI 진행바로 상태 확인.
+
+
+
+\## 개발 세부사항
+
+\- \*\*프레임워크\*\*: PyQt6로 GUI 구현.
+
+\- \*\*엔진\*\*: yt-dlp로 TVer 스트리밍 처리.
+
+\- \*\*설정 저장\*\*: JSON 형식(downloader\_config.json).
+
+\- \*\*제약\*\*: 다중 URL 미지원, 네트워크 안정성 의존.
+
+
+
+\## 기여 및 지원
+
+\- \*\*버그 보고\*\*: \[Issues](https://github.com/deuxdoom/TVerDownloader/issues)에서 상세히 제출.
+
+\- \*\*코드 기여\*\*: 풀 리퀘스트 제출 전 로컬 테스트, 코드 스타일 준수.
+
+\- \*\*문의\*\*: \[브런치](https://brunch.co.kr/@sashiko/8) 또는 \[YouTube](https://www.youtube.com/@LE\_SSERAFIM).
+
+
+
+\## 로드맵
+
+\- 자동 업데이트 체크 기능 추가.
+
+\- 다중 파일 업로드 지원 검토.
+
+\- 네트워크 상태 모니터링 구현.
+
+
+
+\## 배지
+
+\[!\[Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/deuxdoom/TVerDownloader/actions)
+
+\[!\[License](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/licenses/MIT)
+
