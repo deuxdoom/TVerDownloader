@@ -19,7 +19,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 ## 📝 개요
 
 - **목적**: TVer 지역 제한 우회 다운로드
-- **릴리스**: [v1.2.3](https://github.com/deuxdoom/TVerDownloader/releases/tag/v1.2.3)
+- **릴리스**: [v2.0.0](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.0.0)
 - **라이선스**: MIT
 - **언어**: Python 3.8+
 
