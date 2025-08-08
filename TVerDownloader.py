@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
         self.developer_label.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.developer_label.clicked.connect(open_developer_link)
         version_label = QLabel(f"Version: {self.version}")
-        self.feedback_button = QPushButton("피드백/문의하기")
+        self.feedback_button = QPushButton("버그제보")
         self.feedback_button.setObjectName("statusBarButton")
         self.feedback_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.feedback_button.clicked.connect(open_feedback_link)
