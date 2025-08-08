@@ -1,12 +1,11 @@
-# TVerDownloader.py
-
 import sys
 import os
 import subprocess  # subprocess 임포트 추가
+import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel, QListWidget,
                              QListWidgetItem, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon)
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtCore import Qt, QEvent, QUrl
 from PyQt6.QtGui import QCursor, QAction, QIcon
 from src.utils import load_config, save_config, load_history, add_to_history, get_startupinfo, open_file_location, handle_exception, get_app_icon, open_feedback_link, open_developer_link
 from src.themes import ThemeSwitch  # ThemeSwitch만 임포트
@@ -17,8 +16,8 @@ from src.dialogs import SettingsDialog
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.version = "1.2.0"
-        self.setWindowTitle("TVer 다운로더 프로")
+        self.version = "1.2.1"
+        self.setWindowTitle("TVer 다운로더")
         self.resize(800, 700)
         self.center()
         self.setAcceptDrops(True)
@@ -53,6 +52,8 @@ class MainWindow(QMainWindow):
         self.setup_thread.finished.connect(self.on_setup_finished)
         self.setup_thread.start()
         self.append_log("프로그램 시작. 환경 설정을 시작합니다...")
+        # 버전 체크 추가
+        self.check_for_updates()
 
     def setup_ui(self):
         # UI 설정을 메인 파일로 복원
@@ -152,11 +153,11 @@ class MainWindow(QMainWindow):
                 QTabWidget::pane { border: 1px solid #4f5b6e; }
                 QTabBar::tab { background: #2c313c; color: #d0d0d0; padding: 8px 20px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
                 QTabBar::tab:selected { background: #1e2128; }
-                QCheckBox { color: #ffffff; background-color: #2c313c; }  # 텍스트 색상 밝게 조정 (시인성 향상)
-                QCheckBox::indicator { width: 18px; height: 18px; }  # 크기 증가 (시인성 향상)
-                QCheckBox::indicator:unchecked { background-color: #333a4d; border: 2px solid #6b7280; }  # 배경 더 어두운 색으로, 테두리 두께 증가
-                QCheckBox::indicator:checked { background-color: #4caf50; border: 2px solid #4caf50; }  # 체크된 상태 색상 변경, 테두리 두께 증가
-                QCheckBox::indicator:checked::after { content: '✓'; color: #ffffff; font-size: 14px; font-weight: bold; }  # 체크 표시 밝은 색으로, 크기 증가
+                QCheckBox { color: #ffffff; background-color: #2c313c; } # 텍스트 색상 밝게 조정 (시인성 향상)
+                QCheckBox::indicator { width: 18px; height: 18px; } # 크기 증가 (시인성 향상)
+                QCheckBox::indicator:unchecked { background-color: #333a4d; border: 2px solid #6b7280; } # 배경 더 어두운 색으로, 테두리 두께 증가
+                QCheckBox::indicator:checked { background-color: #4caf50; border: 2px solid #4caf50; } # 체크된 상태 색상 변경, 테두리 두께 증가
+                QCheckBox::indicator:checked::after { content: '✓'; color: #ffffff; font-size: 14px; font-weight: bold; } # 체크 표시 밝은 색으로, 크기 증가
                 QComboBox { background-color: #2c2f3a; color: #e0e0e0; border: 1px solid #4f5b6e; border-radius: 4px; padding: 4px; }
                 QComboBox::drop-down { border: none; }
                 QComboBox QAbstractItemView { background-color: #2c313c; color: #d0d0d0; border: 1px solid #4f5b6e; selection-background-color: #62a0ea; }
@@ -191,14 +192,14 @@ class MainWindow(QMainWindow):
                 QTabWidget::pane { border: 1px solid #dcdcdc; }
                 QTabBar::tab { background: #e1e1e1; color: #212121; padding: 8px 20px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
                 QTabBar::tab:selected { background: #f0f2f5; }
-                QCheckBox { color: #000000; }  # 텍스트 색상 검정 유지
-                QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #808080; }  # 테두리 두께 증가, 회색으로 조정
-                QCheckBox::indicator:unchecked { background-color: #f0f0f0; }  # 체크되지 않은 배경 연한 회색으로 (시인성 향상)
-                QCheckBox::indicator:checked { background-color: #ffffff; }  # 체크된 배경 흰색 유지
-                QCheckBox::indicator:checked::after { content: '✓'; color: #4caf50; font-size: 14px; font-weight: bold; }  # 체크 표시 녹색으로 변경, 크기 증가 (시인성 향상)
+                QCheckBox { color: #000000; } # 텍스트 색상 검정 유지
+                QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #808080; } # 테두리 두께 증가, 회색으로 조정
+                QCheckBox::indicator:unchecked { background-color: #f0f0f0; } # 체크되지 않은 배경 연한 회색으로 (시인성 향상)
+                QCheckBox::indicator:checked { background-color: #ffffff; } # 체크된 배경 흰색 유지
+                QCheckBox::indicator:checked::after { content: '✓'; color: #4caf50; font-size: 14px; font-weight: bold; } # 체크 표시 녹색으로 변경, 크기 증가 (시인성 향상)
                 QComboBox { background-color: #f0f2f5; color: #333333; border: 1px solid #dcdcdc; border-radius: 4px; padding: 4px; }
                 QComboBox::drop-down { border: none; }
-                QComboBox QAbstractItemView { background-color: #ffffff; color: #212121; border: 1px solid #dcdcdc; selection-background-color: #0078d4; }  # 드롭다운 배경 하얀색으로 수정
+                QComboBox QAbstractItemView { background-color: #ffffff; color: #212121; border: 1px solid #dcdcdc; selection-background-color: #0078d4; } # 드롭다운 배경 하얀색으로 수정
                 @keyframes progress { from { background-position: 0px; } to { background-position: 40px; } }
             """
         self.setStyleSheet(stylesheet)
@@ -465,6 +466,30 @@ class MainWindow(QMainWindow):
         self.task_queue = [t for t in self.task_queue if t['url'] != url]
         if url in self.active_urls:
             self.active_urls.remove(url)
+
+    def check_for_updates(self):
+        # GitHub Releases API 호출
+        url = "https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest"
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            latest_release = response.json()
+            latest_version = latest_release["tag_name"]
+            # 버전 비교 (v 제거 후 숫자 비교)
+            current_ver = self.version.lstrip('v')
+            latest_ver = latest_version.lstrip('v')
+            if latest_ver > current_ver:
+                reply = QMessageBox.question(
+                    self,
+                    "업데이트 확인",
+                    f"최신 버전 {latest_version}이 있습니다. Releases 페이지로 이동하시겠습니까?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    QDesktopServices.openUrl(QUrl("https://github.com/deuxdoom/TVerDownloader/releases"))
+        except requests.RequestException:
+            # 네트워크 오류 무시, 알림 생략
+            pass
 
 if __name__ == "__main__":
     sys.excepthook = handle_exception
