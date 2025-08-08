@@ -26,7 +26,7 @@ from src.utils import (
     handle_exception, open_file_location,
 )
 from src.icon import get_app_icon
-from src.themes import ThemeSwitch
+from src.themes import ThemeSwitch, apply_theme  # ← 전역 QSS 적용용 함수 추가
 from src.widgets import DownloadItemWidget
 from src.workers import SetupThread, SeriesParseThread, DownloadThread
 from src.dialogs import SettingsDialog
@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.version = "2.0.1"
+        self.version = "2.0.2"
         self.setWindowTitle("티버 다운로더")
         self.resize(1120, 760)
         self.center()
@@ -190,19 +190,23 @@ class MainWindow(QMainWindow):
 
     # ================== 스타일 ==================
     def apply_stylesheet(self, theme: str):
-        self.setStyleSheet(build_qss(theme))
+        # 앱 전역으로 QSS 초기화 → 재적용 (누적 방지)
+        app = QApplication.instance()
+        if app is None:
+            return
+        apply_theme(app, theme)
         if hasattr(self, "theme_button"):
             self.theme_button.update_theme(theme)
 
     # ================== 테마 ==================
     def toggle_theme(self, is_dark: bool):
-        self.current_theme = "dark" if is_dark else "light"
-        self.config["theme"] = self.current_theme
+        theme = "dark" if is_dark else "light"
+        if self.current_theme == theme:
+            return
+        self.current_theme = theme
+        self.config["theme"] = theme
         save_config(self.config)
-        self.apply_stylesheet(self.current_theme)
-        if hasattr(self, 'theme_button'):
-            self.theme_button.setChecked(is_dark)
-            self.theme_button.update_theme(self.current_theme)
+        self.apply_stylesheet(theme)
 
     # ================== 트레이/종료 ==================
     def on_tray_icon_activated(self, reason):
@@ -387,7 +391,7 @@ class MainWindow(QMainWindow):
 
             parts = self.config.get("filename_parts", {})
             order = self.config.get("filename_order", ["series", "upload_date", "episode_number", "episode", "id"])
-            filename_format = " - ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
+            filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
             if parts.get("id", False): filename_format += " [%(id)s]"
             filename_format += ".mp4"
             quality_format = self.config.get("quality", "bv*+ba/b")
