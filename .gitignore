@@ -1,13 +1,28 @@
+# Python
 __pycache__/
-src/__pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+pip-wheel-metadata/
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs/temps
+*.log
+*.tmp
+
+# PyInstaller/빌드
 dist/
 build/
-*.log
-downloader_config.json
-urlhistory.json
-.env
-.idea/
-.vscode/
+*.spec
+# (릴리스에 exe를 올릴 땐 GitHub Release 자산으로 올리고, 저장소엔 넣지 않는 게 일반적)

@@ -1,3 +1,4 @@
+# 파일명: src/dialogs.py
 import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QCheckBox, QComboBox, QSpinBox, QTabWidget, QWidget, QGridLayout,
@@ -15,7 +16,7 @@ class FileNameItemWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.checkbox = QCheckBox(name)
         self.checkbox.setChecked(checked)
-        self.checkbox.setStyleSheet("font-size: 16px;")  # 텍스트 크기 증가 유지
+        self.checkbox.setStyleSheet("font-size: 16px;")
         layout.addWidget(self.checkbox)
         layout.addStretch()
 
@@ -33,18 +34,18 @@ class SettingsDialog(QDialog):
         self.create_quality_tab()
         self.create_post_action_tab()
         self.buttons = QDialogButtonBox()
-        save_button = self.buttons.addButton("저장", QDialogButtonBox.ButtonRole.AcceptRole)
-        cancel_button = self.buttons.addButton("나가기", QDialogButtonBox.ButtonRole.RejectRole)
+        save_button = self.buttons.addButton("설정 저장", QDialogButtonBox.ButtonRole.AcceptRole)
+        exit_button = self.buttons.addButton("나가기", QDialogButtonBox.ButtonRole.RejectRole)  # 텍스트 변경
         self.layout.addWidget(self.buttons)
         save_button.clicked.connect(self.save_settings)
-        cancel_button.clicked.connect(self.reject)
+        exit_button.clicked.connect(self.reject)
 
     def create_general_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         folder_layout = QHBoxLayout()
         folder_layout.addWidget(QLabel("다운로드 폴더:"))
-        self.folder_path_edit = QLineEdit(self.config.get("download_folder", ""))
+        self.folder_path_edit = QLineEdit(self.config.get("download_folder"))
         self.folder_path_edit.setReadOnly(True)
         folder_layout.addWidget(self.folder_path_edit)
         browse_button = QPushButton("찾아보기...")
@@ -66,49 +67,48 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addWidget(QLabel("파일명 구성 요소 선택 및 순서 설정:"))
+
         self.order_list = QListWidget()
         self.order_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.order_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         part_names = {
-            "series": "시리즈명",
-            "upload_date": "방송날짜",
-            "episode_number": "회차번호",
-            "episode": "타이틀",
-            "id": "에피소드 ID"
+            "series": "시리즈명", "upload_date": "업로드 날짜",
+            "episode_number": "에피소드 번호", "episode": "에피소드 제목", "id": "에피소드 ID"
         }
         parts = self.config.get("filename_parts", {})
         current_order = self.config.get("filename_order", list(part_names.keys()))
+
         for key in current_order:
             if key in part_names:
                 item = QListWidgetItem()
                 widget = FileNameItemWidget(key, part_names[key], parts.get(key, True), self)
-                widget.checkbox.stateChanged.connect(self.update_preview)  # 체크박스 상태 변경 시 미리보기 갱신
+                widget.checkbox.stateChanged.connect(self.update_preview)
                 item.setSizeHint(widget.sizeHint())
                 self.order_list.addItem(item)
                 self.order_list.setItemWidget(item, widget)
-        self.order_list.model().rowsMoved.connect(self.update_preview)  # 순서 변경 시 미리보기 갱신
+
+        self.order_list.model().rowsMoved.connect(self.update_preview)
         layout.addWidget(self.order_list)
 
-        # 파일명 미리보기 추가
         preview_layout = QHBoxLayout()
         preview_layout.addWidget(QLabel("파일명 미리보기:"))
         self.preview_label = QLabel()
         preview_layout.addWidget(self.preview_label)
         preview_layout.addStretch()
         layout.addLayout(preview_layout)
-        self.update_preview()  # 초기 미리보기 설정
+
+        self.update_preview()
         layout.addStretch(1)
         self.tabs.addTab(tab, "파일명")
 
     def update_preview(self, *args):
-        """파일명 미리보기 업데이트 함수"""
         selected_parts = []
         for i in range(self.order_list.count()):
             item = self.order_list.item(i)
             widget = self.order_list.itemWidget(item)
             if widget.checkbox.isChecked():
                 selected_parts.append(widget.checkbox.text())
-        preview_text = " ".join(selected_parts)  # 공백으로 구분
+        preview_text = " - ".join(selected_parts)
         if "에피소드 ID" in selected_parts:
             preview_text = preview_text.replace("에피소드 ID", "[에피소드 ID]")
         preview_text += ".mp4" if preview_text else "(선택된 항목 없음)"
