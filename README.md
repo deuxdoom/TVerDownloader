@@ -9,6 +9,7 @@
 📦 [**Releases**](https://github.com/deuxdoom/TVerDownloader/releases)
 
 ---
+> ⚠️ **중요:** 프로그램 실행 전에 [Microsoft Visual C++ 재배포 가능 패키지 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) 를 반드시 설치해야 합니다.
 
 **TVer Downloader**는 일본 TVer 플랫폼의 동영상을 다운로드하기 위한 오픈소스 도구입니다.  
 PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기능을 제공합니다.
@@ -18,7 +19,6 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 ## 📝 개요
 
 - **목적**: TVer 지역 제한 우회 다운로드
-- **버전**: v1.2.0
 - **릴리스**: [v1.2.0](https://github.com/deuxdoom/TVerDownloader/releases/tag/v1.2.0)
 - **라이선스**: MIT
 - **언어**: Python 3.8+
