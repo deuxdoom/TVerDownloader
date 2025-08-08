@@ -26,7 +26,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 ## 📝 개요
 
 - **목적**: TVer 지역 제한 우회 다운로드
-- **릴리스**: [v2.0.2](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.0.2)
+- **릴리스**: [v2.1.0](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.0.2)
 - **라이선스**: MIT
 - **언어**: Python 3.8+
 
@@ -34,7 +34,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 
 ## ✨ 주요 기능
 
-- 단일 URL 다운로드 지원
+- 단일 및 다중 다운로드 지원
 - 다운로드 엔진 yt-dlp + ffmpeg 자동 최신화
 - 화질 선택 기능 (최상, 1080p, 720p, 오디오 전용)
 - 파일명 커스터마이징 (시리즈명, 날짜 등)
@@ -74,8 +74,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 
 ## 🗺️ 로드맵
 
-- 새로운 버젼 알림 다운로드 기능
-- 다중 배치 파일 다운로드 지원
+- 여러분의 아이디어를 기다립니다!
 - 기타 등등 생각만 많음 o_o;
 
 ---
