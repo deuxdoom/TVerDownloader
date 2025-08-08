@@ -53,11 +53,10 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 
 ---
 
-## 🤝 기여 및 지원
+## 🤝 지원
 
-- 버그 제보는 [Issues](https://github.com/deuxdoom/TVerDownloader/issues) 탭에 등록
-- 코드 기여 전 테스트 필수 (풀 리퀘스트 환영)
-- 문의: [브런치](https://brunch.co.kr/@sashiko/8) | [YouTube](https://www.youtube.com/@LE_SSERAFIM)
+- 문의 및 버그 제보는 [Issues](https://github.com/deuxdoom/TVerDownloader/issues) 탭에서!
+- 응원의 구독! [YouTube](https://www.youtube.com/@LE_SSERAFIM)
 
 ---
 
