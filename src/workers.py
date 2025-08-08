@@ -1,4 +1,3 @@
-# src/workers.py
 import os
 import json
 import requests
@@ -13,6 +12,7 @@ from src.utils import get_startupinfo
 class SetupThread(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal(bool, str, str)
+
     BIN_DIR = Path("bin")
     YTDLP_API_URL = "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest"
     FFMPEG_API_URL = "https://api.github.com/repos/GyanD/codexffmpeg/releases/latest"
@@ -41,7 +41,7 @@ class SetupThread(QThread):
             return None
 
     def _download_and_place(self, url, target_path):
-        self.log.emit(f"   -> 다운로드 시작: {url}")
+        self.log.emit(f" -> 다운로드 시작: {url}")
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
@@ -53,13 +53,13 @@ class SetupThread(QThread):
     def _download_and_unzip(self, url, target_dir, file_name):
         target_dir.mkdir(parents=True, exist_ok=True)
         zip_path = target_dir / file_name
-        self.log.emit(f"   -> 다운로드 시작: {url}")
+        self.log.emit(f" -> 다운로드 시작: {url}")
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(zip_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        self.log.emit(f"   -> 압축 해제 중: {zip_path}")
+        self.log.emit(f" -> 압축 해제 중: {zip_path}")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(target_dir)
         os.remove(zip_path)
@@ -75,16 +75,16 @@ class SetupThread(QThread):
         latest_version = release_info.get("tag_name")
         current_version = version_file.read_text().strip() if version_file.exists() else None
         if latest_version == current_version and ytdlp_exe_path.exists():
-            self.log.emit(f"   ... yt-dlp.exe가 이미 최신 버전입니다 ({latest_version}).")
+            self.log.emit(f" ... yt-dlp.exe가 이미 최신 버전입니다 ({latest_version}).")
         else:
-            self.log.emit(f"   ... 새 버전 발견: {latest_version} (현재: {current_version or '없음'})")
+            self.log.emit(f" ... 새 버전 발견: {latest_version} (현재: {current_version or '없음'})")
             asset = next((a for a in release_info["assets"] if a['name'] == 'yt-dlp.exe'), None)
             if not asset:
                 self.log.emit("[오류] yt-dlp.exe 에셋을 찾을 수 없습니다.")
                 return None
             if self._download_and_place(asset['browser_download_url'], ytdlp_exe_path):
                 version_file.write_text(latest_version)
-                self.log.emit("   ... yt-dlp.exe 업데이트 완료.")
+                self.log.emit(" ... yt-dlp.exe 업데이트 완료.")
         return str(ytdlp_exe_path)
 
     def _update_ffmpeg(self):
@@ -97,9 +97,9 @@ class SetupThread(QThread):
         latest_version = release_info.get("tag_name")
         current_version = version_file.read_text().strip() if version_file.exists() else None
         if latest_version == current_version and ffmpeg_exe_path.exists():
-            self.log.emit(f"   ... FFmpeg가 이미 최신 버전입니다 ({latest_version}).")
+            self.log.emit(f" ... FFmpeg가 이미 최신 버전입니다 ({latest_version}).")
         else:
-            self.log.emit(f"   ... 새 버전 발견: {latest_version} (현재: {current_version or '없음'})")
+            self.log.emit(f" ... 새 버전 발견: {latest_version} (현재: {current_version or '없음'})")
             asset = next((a for a in release_info["assets"] if self.FFMPEG_ASSET_KEYWORD in a['name'] and a['name'].endswith(self.FFMPEG_ASSET_EXTENSION)), None)
             if not asset:
                 self.log.emit(f"[오류] FFmpeg .zip 에셋을 찾을 수 없습니다.")
@@ -116,14 +116,14 @@ class SetupThread(QThread):
                     if ffmpeg_exe_path.exists():
                         os.remove(ffmpeg_exe_path)
                     shutil.move(str(source_exe_path), str(ffmpeg_exe_path))
-                    self.log.emit(f"   -> {ffmpeg_exe_path}로 이동 완료.")
+                    self.log.emit(f" -> {ffmpeg_exe_path}로 이동 완료.")
                 else:
                     self.log.emit("[오류] 압축 해제된 파일에서 ffmpeg.exe를 찾을 수 없습니다.")
                     shutil.rmtree(temp_ffmpeg_dir)
                     return None
                 shutil.rmtree(temp_ffmpeg_dir)
                 version_file.write_text(latest_version)
-                self.log.emit("   ... FFmpeg 업데이트 완료.")
+                self.log.emit(" ... FFmpeg 업데이트 완료.")
         return str(ffmpeg_exe_path) if ffmpeg_exe_path.exists() else None
 
 class SeriesParseThread(QThread):
@@ -159,7 +159,7 @@ class SeriesParseThread(QThread):
                 if "予告" not in title:
                     final_urls.append(url)
                 else:
-                    self.log.emit(f"   -> 예고편 제외: {title}")
+                    self.log.emit(f" -> 예고편 제외: {title}")
             self.log.emit(f"최종적으로 {len(final_urls)}개의 에피소드를 다운로드 목록에 추가합니다.")
             self.finished.emit(final_urls)
         except Exception as e:
@@ -212,12 +212,13 @@ class DownloadThread(QThread):
                 '--no-keep-fragments', '--no-check-certificate', '--no-mtime',
                 '--windows-filenames', '--no-cache-dir', '--abort-on-error', '--no-continue',
                 '--add-header', 'Accept-Language:ja-JP', '--console-title', '--progress',
-                '--encoding', 'utf-8', '--newline'
+                '--encoding', 'utf-8', '--newline',
+                '--write-subs', '--sub-format', 'vtt', '--embed-subs'  # 자막 VTT로 고정 및 임베드
             ]
             if self.quality_format == "audio_only":
                 command.extend(['-f', 'bestaudio', '-x', '--audio-format', 'mp3'])
             else:
-                command.extend(['-f', self.quality_format, '--merge-output-format', 'mp4', '--write-subs', '--embed-subs'])
+                command.extend(['-f', self.quality_format, '--merge-output-format', 'mp4'])
             self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, startupinfo=startupinfo)
             current_component = "비디오"
             for line_bytes in iter(self.process.stdout.readline, b''):
@@ -236,6 +237,8 @@ class DownloadThread(QThread):
                     self.progress.emit(self.url, {'status': status_text, 'percent': percent, 'speed': speed, 'eta': eta, 'log': line})
                 elif '[ffmpeg] Merging formats' in line or '[EmbedSubtitle] Embedding subtitles' in line or '[ExtractAudio] Destination' in line:
                     self.progress.emit(self.url, {'status': '후처리 중...', 'log': line})
+                elif '[download] Writing subtitle file' in line:
+                    self.progress.emit(self.url, {'status': '자막 처리 중...', 'log': line})
                 else:
                     self.progress.emit(self.url, {'log': line})
             self.process.wait()

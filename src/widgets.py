@@ -1,29 +1,60 @@
-# src/widgets.py
-
 import os
 import requests
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QProgressBar, QPushButton, QDialog
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QBrush
+from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QBrush, QImage
 
 class ThumbnailDialog(QDialog):
     """썸네일 확대를 위한 다이얼로그"""
-    def __init__(self, pixmap, parent=None):
+    def __init__(self, url, parent=None):
         super().__init__(parent)
         self.setWindowTitle("썸네일 확대")
         self.setModal(True)
+        self.url = url
         layout = QVBoxLayout(self)
         self.image_label = QLabel()
-        scaled_pixmap = pixmap.scaled(400, 225, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        self.image_label.setPixmap(scaled_pixmap)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.load_high_quality_thumbnail()
         layout.addWidget(self.image_label)
-        self.setFixedSize(scaled_pixmap.width() + 20, scaled_pixmap.height() + 20)
+        self.setFixedSize(420, 245)  # 기본 크기, 이미지에 따라 조정
+        self.setStyleSheet("background-color: #2c313c;")
+
+    def load_high_quality_thumbnail(self):
+        """고화질 썸네일 로드 (yt-dlp JSON으로 대체 필요 시)"""
+        try:
+            response = requests.get(self.url, timeout=10)
+            response.raise_for_status()
+            image = QImage.fromData(response.content)
+            scaled_pixmap = QPixmap.fromImage(image).scaled(
+                400, 225, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+            self.image_label.setPixmap(scaled_pixmap)
+            self.setFixedSize(scaled_pixmap.width() + 20, scaled_pixmap.height() + 20)
+        except requests.RequestException:
+            self.image_label.setText("고화질 로드 실패")
 
     def mousePressEvent(self, event):
-        """이미지 클릭 시 다이얼로그 닫기 (X 버튼과 동일 효과)"""
+        """이미지 클릭 시 다이얼로그 닫기"""
         self.close()
         event.accept()
+
+class ThumbnailDownloader(QThread):
+    finished = pyqtSignal(bytes)
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        if not self.url:
+            self.finished.emit(None)
+            return
+        try:
+            response = requests.get(self.url, timeout=10)
+            response.raise_for_status()
+            self.finished.emit(response.content)
+        except:
+            self.finished.emit(None)
 
 class DownloadItemWidget(QWidget):
     stop_requested = pyqtSignal(str)
@@ -34,6 +65,7 @@ class DownloadItemWidget(QWidget):
         self.url = url
         self.status = '대기 중'
         self.final_filepath = None
+        self.thumbnail_url = None
         self.thumbnail_pixmap = None
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 5, 10, 5)
@@ -71,6 +103,7 @@ class DownloadItemWidget(QWidget):
         layout.addLayout(info_layout, 1)
         layout.addStretch()
         self.thumbnail_thread = ThumbnailDownloader(None)
+        self.thumbnail_thread.finished.connect(self.set_thumbnail)
         self.stop_button.clicked.connect(lambda: self.stop_requested.emit(self.url))
         self.setMouseTracking(True)
 
@@ -82,17 +115,36 @@ class DownloadItemWidget(QWidget):
 
     def show_thumbnail_dialog(self, event):
         """썸네일 클릭 시 확대 다이얼로그 표시"""
-        if self.thumbnail_pixmap:
-            dialog = ThumbnailDialog(self.thumbnail_pixmap, self)
+        if self.thumbnail_url:
+            dialog = ThumbnailDialog(self.thumbnail_url, self)
             dialog.exec()
         event.accept()
+
+    def set_thumbnail(self, image_data):
+        if image_data:
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_data)
+            self.thumbnail_pixmap = pixmap.scaled(
+                128, 72, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation
+            )
+            rounded = QPixmap(self.thumbnail_pixmap.size())
+            rounded.fill(QColor("transparent"))
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            brush = QBrush(self.thumbnail_pixmap)
+            painter.setBrush(brush)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(self.thumbnail_pixmap.rect(), 4, 4)
+            painter.end()
+            self.thumbnail_label.setPixmap(rounded)
 
     def update_progress(self, data):
         self.status = data.get('status', self.status)
         if 'title' in data:
             self.title_label.setText(data['title'])
         if 'thumbnail_url' in data and data['thumbnail_url']:
-            self.thumbnail_thread = ThumbnailDownloader(data['thumbnail_url'])
+            self.thumbnail_url = data['thumbnail_url']
+            self.thumbnail_thread = ThumbnailDownloader(self.thumbnail_url)
             self.thumbnail_thread.finished.connect(self.set_thumbnail)
             self.thumbnail_thread.start()
         if 'final_filepath' in data:
@@ -124,37 +176,3 @@ class DownloadItemWidget(QWidget):
                 self.status_icon_label.setStyleSheet("color: #e57373; font-size: 18px;")
                 self.status_icon_label.show()
                 self.status_label.setText("오류")
-
-    def set_thumbnail(self, image_data):
-        if image_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(image_data)
-            self.thumbnail_pixmap = pixmap.scaled(128, 72, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-            rounded = QPixmap(self.thumbnail_pixmap.size())
-            rounded.fill(QColor("transparent"))
-            painter = QPainter(rounded)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            brush = QBrush(self.thumbnail_pixmap)
-            painter.setBrush(brush)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(self.thumbnail_pixmap.rect(), 4, 4)
-            painter.end()
-            self.thumbnail_label.setPixmap(rounded)
-
-class ThumbnailDownloader(QThread):
-    finished = pyqtSignal(bytes)
-
-    def __init__(self, url):
-        super().__init__()
-        self.url = url
-
-    def run(self):
-        if not self.url:
-            self.finished.emit(None)
-            return
-        try:
-            response = requests.get(self.url, timeout=10)
-            response.raise_for_status()
-            self.finished.emit(response.content)
-        except:
-            self.finished.emit(None)

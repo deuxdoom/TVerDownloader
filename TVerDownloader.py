@@ -2,12 +2,14 @@ import sys
 import os
 import subprocess  # subprocess 임포트 추가
 import requests
+import json
+from datetime import datetime
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel, QListWidget,
-                             QListWidgetItem, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon)
-from PyQt6.QtCore import Qt, QEvent, QUrl
+                             QListWidgetItem, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QTabWidget)
+from PyQt6.QtCore import Qt, QEvent, QUrl, QSize  # QSize 임포트
 from PyQt6.QtGui import QCursor, QAction, QIcon, QDesktopServices
-from src.utils import load_config, save_config, load_history, add_to_history, get_startupinfo, open_file_location, handle_exception, get_app_icon, open_feedback_link, open_developer_link
+from src.utils import load_config, save_config, load_history, add_to_history, remove_from_history, get_startupinfo, open_file_location, handle_exception, get_app_icon, open_feedback_link, open_developer_link
 from src.themes import ThemeSwitch  # ThemeSwitch만 임포트
 from src.widgets import DownloadItemWidget
 from src.workers import SetupThread, SeriesParseThread, DownloadThread
@@ -27,7 +29,7 @@ class MainWindow(QMainWindow):
         self.task_queue = []
         self.active_downloads = {}
         self.active_urls = set()
-        self.history = load_history()
+        self.history = load_history()  # 리스트로 반환, 기존 딕셔너리 호환
         self.config = load_config()
         self.current_theme = self.config.get("theme", "light")
         self.force_quit = False  # 완전 종료 플래그 추가
@@ -56,18 +58,29 @@ class MainWindow(QMainWindow):
         self.check_for_updates()
 
     def setup_ui(self):
-        # UI 설정을 메인 파일로 복원
+        # UI 설정을 QTabWidget로 수정
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # 탭 위젯 추가
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # 다운로드 탭
+        download_tab = QWidget()
+        download_layout = QVBoxLayout(download_tab)
+        download_layout.setContentsMargins(0, 0, 0, 0)
+        download_layout.setSpacing(0)
+
         input_container = QWidget()
         input_container.setObjectName("inputContainer")
         input_layout = QHBoxLayout(input_container)
         input_layout.setContentsMargins(15, 10, 15, 10)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("다운로드할 TVer URL을 여기에 붙여넣거나 드래그하세요")  # 이전 요청 반영
+        self.url_input.setPlaceholderText("다운로드할 TVer URL을 여기에 붙여넣거나 드래그하세요")
         self.url_input.returnPressed.connect(self.process_input_url)
         self.add_button = QPushButton("다운로드")
         self.settings_button = QPushButton("설정")
@@ -76,12 +89,14 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self.add_button)
         input_layout.addWidget(self.settings_button)
         input_layout.addWidget(self.theme_button)
-        layout.addWidget(input_container)
+        download_layout.addWidget(input_container)
+
         self.download_list = QListWidget()
         self.download_list.setAlternatingRowColors(True)
         self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.download_list.customContextMenuRequested.connect(self.show_context_menu)
-        layout.addWidget(self.download_list, 1)
+        self.download_list.customContextMenuRequested.connect(self.show_download_context_menu)
+        download_layout.addWidget(self.download_list, 1)
+
         log_container = QWidget()
         log_container.setObjectName("logContainer")
         log_layout = QVBoxLayout(log_container)
@@ -99,13 +114,28 @@ class MainWindow(QMainWindow):
         log_button_layout.addStretch(1)
         log_layout.addWidget(self.log_output, 1)
         log_layout.addLayout(log_button_layout)
-        layout.addWidget(log_container)
+        download_layout.addWidget(log_container)
+
         self.clear_log_button.clicked.connect(lambda: self.append_log("로그 내역이 삭제되었습니다."))
         self.add_button.clicked.connect(self.process_input_url)
         self.settings_button.clicked.connect(self.open_settings)
         self.theme_button.toggled.connect(self.toggle_theme)
         self.url_input.setEnabled(False)
         self.add_button.setEnabled(False)
+        self.tab_widget.addTab(download_tab, "다운로드")
+
+        # 기록 탭
+        history_tab = QWidget()
+        history_layout = QVBoxLayout(history_tab)
+        self.history_list = QListWidget()
+        self.history_list.setAlternatingRowColors(True)
+        self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
+        self.history_list.setSpacing(5)  # 노트 줄 간격 수준 (5px)
+        self._load_history_items()
+        history_layout.addWidget(self.history_list)
+        self.tab_widget.addTab(history_tab, "기록")
+
         status_bar = self.statusBar()
         self.developer_label = QPushButton("개발자 : 사시코")
         self.developer_label.setObjectName("statusBarButton")
@@ -121,6 +151,73 @@ class MainWindow(QMainWindow):
         status_bar.addPermanentWidget(version_label)
         status_bar.addPermanentWidget(QLabel(" | "))
         status_bar.addPermanentWidget(self.feedback_button)
+
+    def _load_history_items(self):
+        self.history = load_history()  # 리스트로 반환, 기존 딕셔너리 호환
+        self.history_list.clear()
+        for index, entry in enumerate(self.history, 1):  # 1부터 번호 시작
+            date = entry.get("date", "날짜 없음")
+            item_text = f"{index}. {entry.get('title', '제목 없음')} - {date}"
+            item = QListWidgetItem(item_text)
+            item.setSizeHint(QSize(0, 20))  # 항목 높이 조정 (노트 줄 간격에 맞춤)
+            self.history_list.addItem(item)
+
+    def show_download_context_menu(self, pos):
+        item = self.download_list.itemAt(pos)
+        if not item:
+            return
+        widget = self.download_list.itemWidget(item)
+        url = widget.url
+        status = widget.status
+        menu = QMenu()
+        if status == '완료' and widget.final_filepath and os.path.exists(widget.final_filepath):
+            open_folder_action = QAction("파일 위치 열기", self)
+            open_folder_action.triggered.connect(lambda: open_file_location(widget.final_filepath))
+            menu.addAction(open_folder_action)
+            play_action = QAction("영상 재생", self)
+            play_action.triggered.connect(lambda: self.play_file(widget.final_filepath))
+            menu.addAction(play_action)
+            menu.addSeparator()
+        if status not in ['다운로드 중', '정보 분석 중...', '후처리 중...']:
+            remove_action = QAction("목록에서 제거", self)
+            remove_action.triggered.connect(lambda: self.remove_item(item, url))
+            menu.addAction(remove_action)
+        if menu.actions():
+            menu.exec(self.download_list.mapToGlobal(pos))
+
+    def show_history_context_menu(self, pos):
+        item = self.history_list.itemAt(pos)
+        if not item:
+            return
+        title_date = item.text().split(" - ")
+        if len(title_date) < 2:
+            return
+        title = title_date[0].split(". ", 1)[1] if ". " in title_date[0] else title_date[0]
+        url = next((entry["url"] for entry in self.history if entry.get("title") == title), None)
+        if not url:
+            return
+        menu = QMenu()
+        remove_action = QAction("기록 삭제", self)
+        remove_action.triggered.connect(lambda: self.remove_history_item(item, url))
+        redownload_action = QAction("다시 다운로드", self)
+        redownload_action.triggered.connect(lambda: self.requeue_item(url))
+        menu.addAction(remove_action)
+        menu.addAction(redownload_action)
+        if menu.actions():
+            menu.exec(self.history_list.mapToGlobal(pos))
+
+    def remove_history_item(self, item, url):
+        if remove_from_history(url):
+            self.history_list.takeItem(self.history_list.row(item))
+            self.history = [entry for entry in self.history if entry["url"] != url]
+            self._load_history_items()  # 번호 재정렬 위해 갱신
+            self.append_log(f"기록 삭제: {url}")
+        else:
+            self.append_log(f"[오류] 기록 삭제 실패: {url}")
+
+    def requeue_item(self, url):
+        self.add_url_to_queue(url)
+        self.append_log(f"다시 다운로드 예약: {url}")
 
     def apply_stylesheet(self, theme):
         # apply_stylesheet 로직을 TVerDownloader로 복원
@@ -141,7 +238,7 @@ class MainWindow(QMainWindow):
                 QPushButton#stopButton { font-size: 16px; font-weight: bold; padding: 0px; padding-bottom: 2px; }
                 QPushButton#stopButton:hover { background-color: #e57373; color: #ffffff; }
                 QListWidget { background-color: #1e2128; border: none; color: #d0d0d0; }
-                QListWidget::item { border-bottom: 1px solid #2c313c; }
+                QListWidget::item { border-bottom: 1px solid #2c313c; padding: 2px 0; }  /* 간격 조정 */
                 QListWidget::item:alternate { background-color: #23272e; }
                 QWidget#logContainer { background-color: #1a1d23; border-top: 1px solid #2c313c; }
                 QTextEdit#logOutput { background-color: #1a1d23; border: none;
@@ -180,7 +277,7 @@ class MainWindow(QMainWindow):
                 QPushButton#stopButton { font-size: 16px; font-weight: bold; padding: 0px; padding-bottom: 2px; }
                 QPushButton#stopButton:hover { background-color: #e57373; color: #ffffff; border: 1px solid #d32f2f; }
                 QListWidget { background-color: #f0f2f5; border: none; color: #212121; }
-                QListWidget::item { border-bottom: 1px solid #e0e0e0; }
+                QListWidget::item { border-bottom: 1px solid #e0e0e0; padding: 2px 0; }  /* 간격 조정 */
                 QListWidget::item:alternate { background-color: #ffffff; }
                 QWidget#logContainer { background-color: #ffffff; border-top: 1px solid #dcdcdc; }
                 QTextEdit#logOutput { background-color: #ffffff; border: none;
@@ -328,20 +425,21 @@ class MainWindow(QMainWindow):
     def on_series_parsed(self, episode_urls):
         self.url_input.setEnabled(True)
         self.add_button.setEnabled(True)
-        for url in episode_urls:
-            self.add_url_to_queue(url)
+        for url, thumbnail_url in episode_urls:  # 썸네일 URL 포함
+            self.add_url_to_queue(url, thumbnail_url)
 
-    def add_url_to_queue(self, url):
+    def add_url_to_queue(self, url, thumbnail_url=None):
         if not url:
             return
         if url in self.active_urls:
             self.append_log(f"[알림] 해당 URL은 이미 대기열에 있거나 다운로드 중입니다: {url}")
             return
-        if url in self.history:
+        if url in [entry["url"] for entry in self.history]:  # 리스트 기반 중복 체크
             msg_box = QMessageBox(self)
             msg_box.setIcon(QMessageBox.Icon.Question)
             msg_box.setWindowTitle('중복 다운로드')
-            msg_box.setText(f"이 항목은 이미 다운로드한 기록이 있습니다:\n\n{self.history[url]['title']}\n\n다시 다운로드하시겠습니까?")
+            history_entry = next((entry for entry in self.history if entry["url"] == url), {"title": "제목 없음"})
+            msg_box.setText(f"이 항목은 이미 다운로드한 기록이 있습니다:\n\n{history_entry['title']}\n\n다시 다운로드하시겠습니까?")
             yes_button = msg_box.addButton("예", QMessageBox.ButtonRole.YesRole)
             no_button = msg_box.addButton("아니오", QMessageBox.ButtonRole.NoRole)
             msg_box.setDefaultButton(no_button)
@@ -358,6 +456,9 @@ class MainWindow(QMainWindow):
         self.download_list.insertItem(0, item)
         self.download_list.setItemWidget(item, widget)
         self.task_queue.append({'item': item, 'widget': widget, 'url': url})
+        # 초기 썸네일 URL 전달
+        if thumbnail_url:
+            widget.update_progress({'thumbnail_url': thumbnail_url})
         self.check_queue_and_start()
 
     def check_queue_and_start(self):
@@ -375,7 +476,7 @@ class MainWindow(QMainWindow):
                     continue
             parts = self.config.get("filename_parts", {})
             order = self.config.get("filename_order", ["series", "upload_date", "episode_number", "episode", "id"])
-            filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')  # 공백 유지
+            filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
             if parts.get("id", False):
                 filename_format += " [%(id)s]"
             filename_format += ".mp4"
@@ -398,7 +499,12 @@ class MainWindow(QMainWindow):
             title = widget.title_label.text()
             if success:
                 self.append_log(f"--- '{title}' 다운로드 성공 ---")
-                add_to_history(self.history, url, title)
+                add_to_history(self.history, url, {
+                    "title": title,
+                    "filepath": widget.final_filepath,
+                    "date": datetime.now().isoformat()
+                })
+                self._load_history_items()
             else:
                 self.append_log(f"--- '{title}' 다운로드 실패 ---")
             del self.active_downloads[url]

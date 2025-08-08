@@ -1,5 +1,3 @@
-# src/utils.py
-
 import json
 import os
 import sys
@@ -49,18 +47,45 @@ def load_history():
     if HISTORY_FILE.exists():
         with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
             try:
-                return json.load(f)
+                history_dict = json.load(f)
+                if not isinstance(history_dict, dict):
+                    return []
+                return [{"url": url, **data} for url, data in history_dict.items()]
             except json.JSONDecodeError:
-                return {}
-    return {}
+                return []
+    return []
 
-def add_to_history(history, url, title):
-    history[url] = {
-        "title": title,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+def add_to_history(history, url, data):
+    # history는 리스트, 새로운 항목 추가
+    if not isinstance(data, dict):
+        data = {"title": data}  # 이전 호환성을 위해 기본 title만 처리
+    if "date" not in data:
+        data["date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if "filepath" not in data:
+        data["filepath"] = ""
+    # 중복 체크 후 추가
+    if not any(entry["url"] == url for entry in history):
+        history.append({"url": url, **data})
+    # 파일에 딕셔너리 형식으로 저장
+    history_dict = {entry["url"]: {k: v for k, v in entry.items() if k != "url"} for entry in history}
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(history, f, indent=4, ensure_ascii=False)
+        json.dump(history_dict, f, indent=4, ensure_ascii=False)
+    return True
+
+def remove_from_history(url):
+    history_path = HISTORY_FILE
+    if history_path.exists():
+        with open(history_path, 'r', encoding='utf-8') as f:
+            try:
+                history_dict = json.load(f)
+                if url in history_dict:
+                    del history_dict[url]
+                    with open(history_path, 'w', encoding='utf-8') as f:
+                        json.dump(history_dict, f, indent=4, ensure_ascii=False)
+                    return True
+            except json.JSONDecodeError:
+                return False
+    return False
 
 def get_startupinfo():
     if os.name == 'nt':
