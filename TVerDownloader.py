@@ -5,8 +5,8 @@ import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel, QListWidget,
                              QListWidgetItem, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon)
-from PyQt6.QtCore import Qt, QEvent, QUrl
-from PyQt6.QtGui import QCursor, QAction, QIcon
+from PyQt6.QtCore import Qt, QEvent, QUrl  # QDesktopServices 제거
+from PyQt6.QtGui import QCursor, QAction, QIcon, QDesktopServices  # QDesktopServices 추가
 from src.utils import load_config, save_config, load_history, add_to_history, get_startupinfo, open_file_location, handle_exception, get_app_icon, open_feedback_link, open_developer_link
 from src.themes import ThemeSwitch  # ThemeSwitch만 임포트
 from src.widgets import DownloadItemWidget
