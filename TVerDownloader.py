@@ -5,8 +5,8 @@ import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QTextEdit, QLabel, QListWidget,
                              QListWidgetItem, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon)
-from PyQt6.QtCore import Qt, QEvent, QUrl  # QDesktopServices 제거
-from PyQt6.QtGui import QCursor, QAction, QIcon, QDesktopServices  # QDesktopServices 추가
+from PyQt6.QtCore import Qt, QEvent, QUrl
+from PyQt6.QtGui import QCursor, QAction, QIcon, QDesktopServices
 from src.utils import load_config, save_config, load_history, add_to_history, get_startupinfo, open_file_location, handle_exception, get_app_icon, open_feedback_link, open_developer_link
 from src.themes import ThemeSwitch  # ThemeSwitch만 임포트
 from src.widgets import DownloadItemWidget
@@ -16,7 +16,7 @@ from src.dialogs import SettingsDialog
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.version = "1.2.1"
+        self.version = "1.2.2"  # 버전 유지
         self.setWindowTitle("TVer 다운로더")
         self.resize(800, 700)
         self.center()
@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
         input_layout = QHBoxLayout(input_container)
         input_layout.setContentsMargins(15, 10, 15, 10)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("다운로드할 TVer 에피소드/시리즈 URL을 입력하거나 여기에 드래그하세요")
+        self.url_input.setPlaceholderText("다운로드할 TVer URL을 여기에 붙여넣거나 드래그하세요")  # 이전 요청 반영
         self.url_input.returnPressed.connect(self.process_input_url)
         self.add_button = QPushButton("다운로드")
         self.settings_button = QPushButton("설정")
@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
                     continue
             parts = self.config.get("filename_parts", {})
             order = self.config.get("filename_order", ["series", "upload_date", "episode_number", "episode", "id"])
-            filename_format = " - ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
+            filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')  # 공백 유지
             if parts.get("id", False):
                 filename_format += " [%(id)s]"
             filename_format += ".mp4"
@@ -474,15 +474,19 @@ class MainWindow(QMainWindow):
             response = requests.get(url, timeout=5)
             response.raise_for_status()
             latest_release = response.json()
-            latest_version = latest_release["tag_name"]
-            # 버전 비교 (v 제거 후 숫자 비교)
-            current_ver = self.version.lstrip('v')
-            latest_ver = latest_version.lstrip('v')
-            if latest_ver > current_ver:
+            latest_version = latest_release["tag_name"].lstrip("v")  # "v" 접두사 제거
+            # 버전 파싱: major.minor.patch
+            def parse_version(ver):
+                parts = ver.split(".")
+                return [int(p) if p.isdigit() else 0 for p in parts[:3]] + [0] * (3 - len(parts))
+            current_ver_parts = parse_version(self.version)
+            latest_ver_parts = parse_version(latest_version)
+            # 숫자 비교
+            if latest_ver_parts > current_ver_parts:
                 reply = QMessageBox.question(
                     self,
                     "업데이트 확인",
-                    f"최신 버전 {latest_version}이 있습니다. Releases 페이지로 이동하시겠습니까?",
+                    f"최신 버전 {latest_release['tag_name']}이 있습니다. Releases 페이지로 이동하시겠습니까?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
                 if reply == QMessageBox.StandardButton.Yes:
