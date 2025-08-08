@@ -93,7 +93,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     error_box.exec()
 
 def open_feedback_link():
-    webbrowser.open('https://brunch.co.kr/@sashiko/8')
+    webbrowser.open('https://github.com/deuxdoom/TVerDownloader/issues')
 
 def open_developer_link():
     webbrowser.open('https://www.youtube.com/@LE_SSERAFIM')
