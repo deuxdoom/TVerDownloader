@@ -18,7 +18,7 @@ from src.dialogs import SettingsDialog
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.version = "1.2.2"  # 버전 유지
+        self.version = "1.2.3"  # 버전 유지
         self.setWindowTitle("TVer 다운로더")
         self.resize(800, 700)
         self.center()
