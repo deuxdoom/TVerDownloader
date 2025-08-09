@@ -1,8 +1,9 @@
 # 파일명: TVerDownloader.py
-# 메인 UI + 큐/스레드 관리. (모듈 분리: history_store/updater/qss/about_dialog/bulk_dialog)
+# 메인 UI + 큐/스레드 관리. (테마 스위치 제거, 다크 테마 고정, 다중다운로드 + 즐겨찾기)
 import sys
 import os
 import subprocess
+import webbrowser
 from typing import Optional, List
 
 from PyQt6.QtWidgets import (
@@ -19,7 +20,8 @@ from src.history_store import HistoryStore
 from src.updater import maybe_show_update
 from src.qss import build_qss
 from src.about_dialog import AboutDialog
-from src.bulk_dialog import BulkAddDialog, parse_urls  # ★ 추가
+from src.bulk_dialog import BulkAddDialog  # ★ 다중 다운로드 다이얼로그
+from src.favorites_store import FavoritesStore  # ★ 즐겨찾기 저장소
 
 # 기존 모듈
 from src.utils import (
@@ -27,7 +29,6 @@ from src.utils import (
     handle_exception, open_file_location,
 )
 from src.icon import get_app_icon
-from src.themes import ThemeSwitch
 from src.widgets import DownloadItemWidget
 from src.workers import SetupThread, SeriesParseThread, DownloadThread
 from src.dialogs import SettingsDialog
@@ -38,7 +39,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.version = "2.1.0"  # 다중 다운로드 기능 추가
+        self.version = "2.2.0"  # 즐겨찾기 추가
         self.setWindowTitle("티버 다운로더")
         self.resize(1120, 760)
         self.center()
@@ -52,19 +53,21 @@ class MainWindow(QMainWindow):
         self.active_downloads = {}
         self.active_urls = set()
 
-        # 설정/테마
+        # 설정
         self.config = load_config()
-        self.current_theme = self.config.get("theme", "light")
-        self.force_quit = False
+        self.force_quit = False  # 완전 종료 플래그
 
-        # 기록
+        # 기록/즐겨찾기
         self.history_store = HistoryStore("urlhistory.json")
         self.history_store.load()
 
-        # 시리즈 일괄 파서 큐(드래그/다중입력용)
-        self._bulk_series_queue: List[str] = []
-        self._bulk_series_active: bool = False
-        self._bulk_series_thread: SeriesParseThread | None = None
+        self.fav_store = FavoritesStore("favorites.json")     # ★
+        self.fav_store.load()
+
+        # 즐겨찾기 확인용 상태
+        self._fav_check_queue: List[str] = []                 # ★
+        self._fav_current_url: Optional[str] = None           # ★
+        self._fav_thread: Optional[SeriesParseThread] = None  # ★
 
         # 트레이
         self.tray_icon = QSystemTrayIcon(self)
@@ -80,7 +83,7 @@ class MainWindow(QMainWindow):
 
         # UI
         self._build_ui()
-        self.apply_stylesheet(self.current_theme)
+        self.apply_stylesheet()  # 다크 고정
 
         # 준비 스레드
         self.setup_thread = SetupThread()
@@ -101,7 +104,6 @@ class MainWindow(QMainWindow):
         self.header = QFrame(objectName="AppHeader")
         header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(16,10,16,10); header_layout.setSpacing(8)
         self.app_title = QLabel("티버 다운로더 (TVer Downloader)", objectName="AppTitle")
-        self.theme_button = ThemeSwitch(); self.theme_button.toggled.connect(self.toggle_theme)
 
         self.settings_button = QPushButton("설정", objectName="PrimaryButton")
         self.settings_button.clicked.connect(self.open_settings)
@@ -125,23 +127,24 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.about_button)
         header_layout.addWidget(self.settings_button)
         header_layout.addWidget(self.on_top_btn)
-        header_layout.addWidget(self.theme_button)
 
         # 입력바
         self.input_bar = QFrame(objectName="InputBar")
         input_layout = QHBoxLayout(self.input_bar); input_layout.setContentsMargins(16,12,16,12); input_layout.setSpacing(10)
         self.url_input = QLineEdit(placeholderText="TVer 영상 URL 붙여넣기 또는 드래그하세요", objectName="UrlInput")
         self.url_input.returnPressed.connect(self.process_input_url)
-        self.add_button = QPushButton("다운로드", objectName="AccentButton")
-        self.add_button.clicked.connect(self.process_input_url)
 
         # ★ 다중 다운로드 버튼
         self.bulk_button = QPushButton("다중 다운로드", objectName="PrimaryButton")
-        self.bulk_button.clicked.connect(self.open_bulk_dialog)
+        self.bulk_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.bulk_button.clicked.connect(self.open_bulk_add)
+
+        self.add_button = QPushButton("다운로드", objectName="AccentButton")
+        self.add_button.clicked.connect(self.process_input_url)
 
         input_layout.addWidget(self.url_input, 1)
-        input_layout.addWidget(self.add_button, 0)
         input_layout.addWidget(self.bulk_button, 0)
+        input_layout.addWidget(self.add_button, 0)
 
         # 탭
         self.tabs = QTabWidget(objectName="MainTabs")
@@ -169,8 +172,8 @@ class MainWindow(QMainWindow):
         self.clear_log_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.clear_log_button.clicked.connect(self.clear_log)
         log_row.addWidget(self.log_title); log_row.addStretch(1); log_row.addWidget(self.clear_log_button)
-        right_layout.addLayout(log_row)
         self.log_output = QTextEdit(objectName="LogOutput"); self.log_output.setReadOnly(True); self.log_output.setAcceptRichText(True)
+        right_layout.addLayout(log_row)
         right_layout.addWidget(self.log_output, 1)
 
         self.splitter.addWidget(left_frame); self.splitter.addWidget(right_frame); self.splitter.setSizes([640,480])
@@ -188,34 +191,49 @@ class MainWindow(QMainWindow):
         self.history_list.customContextMenuRequested.connect(self.show_history_menu)
         his_layout.addLayout(top); his_layout.addWidget(self.history_list, 1)
 
+        # [즐겨찾기] ★ 추가
+        self.fav_tab = QWidget(objectName="FavoritesTab")
+        fav_layout = QVBoxLayout(self.fav_tab); fav_layout.setContentsMargins(12,12,12,12); fav_layout.setSpacing(8)
+
+        fav_top = QHBoxLayout(); fav_top.setContentsMargins(0,0,0,0); fav_top.setSpacing(6)
+        self.fav_title = QLabel("즐겨찾기(시리즈)", objectName="PaneTitle")
+        self.fav_subtitle = QLabel("등록된 시리즈의 새 에피소드를 자동으로 확인/다운로드", objectName="PaneSubtitle")
+        fav_top.addWidget(self.fav_title); fav_top.addStretch(1); fav_top.addWidget(self.fav_subtitle)
+        fav_layout.addLayout(fav_top)
+
+        fav_ctrl = QHBoxLayout(); fav_ctrl.setContentsMargins(0,0,0,0); fav_ctrl.setSpacing(6)
+        self.fav_input = QLineEdit(placeholderText="TVer 시리즈 URL (예: https://tver.jp/series/....)")
+        self.fav_add_btn = QPushButton("추가");   self.fav_add_btn.clicked.connect(self.add_favorite)
+        self.fav_del_btn = QPushButton("삭제");   self.fav_del_btn.clicked.connect(self.remove_selected_favorite)
+        self.fav_chk_btn = QPushButton("전체 확인"); self.fav_chk_btn.clicked.connect(self.check_all_favorites)
+        fav_ctrl.addWidget(self.fav_input, 1); fav_ctrl.addWidget(self.fav_add_btn); fav_ctrl.addWidget(self.fav_del_btn); fav_ctrl.addWidget(self.fav_chk_btn)
+        fav_layout.addLayout(fav_ctrl)
+
+        self.fav_list = QListWidget(objectName="FavoritesList")
+        self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.fav_list.customContextMenuRequested.connect(self.show_fav_menu)
+        fav_layout.addWidget(self.fav_list, 1)
+
         self.tabs.addTab(self.download_tab, "다운로드")
         self.tabs.addTab(self.history_tab, "기록")
+        self.tabs.addTab(self.fav_tab, "즐겨찾기")  # ★
 
         root.addWidget(self.header); root.addWidget(self.input_bar); root.addWidget(self.tabs, 1)
 
         version_label = QLabel(f"Version: {self.version}"); version_label.setObjectName("VersionLabel")
         self.statusBar().addPermanentWidget(version_label)
 
-        self.url_input.setEnabled(False); self.add_button.setEnabled(False); self.bulk_button.setEnabled(False)
+        self.url_input.setEnabled(False); self.add_button.setEnabled(False)
 
         self.refresh_history_list()
+        self.refresh_fav_list()  # ★
+        # 항상 위 초기 반영
         self.set_always_on_top(self.on_top_btn.isChecked())
 
-    # ================== 스타일/테마 ==================
-    def apply_stylesheet(self, theme: str):
-        self.setStyleSheet(build_qss(theme))
-        if hasattr(self, "theme_button"):
-            # ThemeSwitch는 내부 색만 갱신
-            if theme == "dark":
-                self.theme_button.setChecked(True)
-            else:
-                self.theme_button.setChecked(False)
-
-    def toggle_theme(self, is_dark: bool):
-        self.current_theme = "dark" if is_dark else "light"
-        self.config["theme"] = self.current_theme
-        save_config(self.config)
-        self.apply_stylesheet(self.current_theme)
+    # ================== 스타일 ==================
+    def apply_stylesheet(self):
+        # 다크 테마 고정
+        self.setStyleSheet(build_qss())
 
     # ================== 트레이/종료 ==================
     def on_tray_icon_activated(self, reason):
@@ -308,8 +326,11 @@ class MainWindow(QMainWindow):
             self.append_log("\n환경 설정 완료. 다운로드를 시작할 수 있습니다.")
             self.url_input.setEnabled(True)
             self.add_button.setEnabled(True)
-            self.bulk_button.setEnabled(True)
-            self.theme_button.setChecked(self.current_theme == "dark")
+
+            # ★ 시작 시 즐겨찾기 자동 확인
+            if self.config.get("auto_check_favorites_on_start", True):
+                QTimer.singleShot(1200, self.check_all_favorites)
+
         else:
             self.append_log(self.LOG_RULE + "\n[치명적 오류] 환경 설정 실패. 로그를 확인하고 재시작하세요.")
             QMessageBox.critical(self, "환경 설정 실패",
@@ -331,84 +352,97 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.config, self)
         if dialog.exec():
             self.config = load_config()
-            self.apply_stylesheet(self.current_theme)
+            self.apply_stylesheet()  # 다크 고정
             self.append_log("설정이 저장되었습니다.")
 
-    # ================== URL 처리(단일) ==================
+    # ================== URL 처리 ==================
     def process_input_url(self):
         url = self.url_input.text().strip()
         if not url: return
         if "/series/" in url:
-            self._start_series_parse_single(url)
+            self.series_parse_thread = SeriesParseThread(url, self.ytdlp_exe_path)
+            self.series_parse_thread.log.connect(self.append_log)
+            self.series_parse_thread.finished.connect(self.on_series_parsed)
+            self.series_parse_thread.start()
+            self.url_input.setEnabled(False); self.add_button.setEnabled(False)
         else:
             self.add_url_to_queue(url)
         self.url_input.clear()
 
-    def _start_series_parse_single(self, url: str):
-        self.series_parse_thread = SeriesParseThread(url, self.ytdlp_exe_path)
-        self.series_parse_thread.log.connect(self.append_log)
-        self.series_parse_thread.finished.connect(self.on_series_parsed)
-        self.series_parse_thread.start()
-        self.url_input.setEnabled(False); self.add_button.setEnabled(False); self.bulk_button.setEnabled(False)
-
     def on_series_parsed(self, episode_urls: List[str]):
-        self.url_input.setEnabled(True); self.add_button.setEnabled(True); self.bulk_button.setEnabled(True)
+        self.url_input.setEnabled(True); self.add_button.setEnabled(True)
         for url in episode_urls:
             self.add_url_to_queue(url)
 
-    # ================== URL 처리(다중) ==================
-    def open_bulk_dialog(self):
+    # ★★★ 다중 다운로드 UI/로직 ★★★
+    def open_bulk_add(self):
+        """다중 URL 입력 다이얼로그 열기"""
         dlg = BulkAddDialog(self)
         if dlg.exec():
-            urls = dlg.urls()
-            if urls:
-                self.start_bulk_add(urls)
+            urls = dlg.get_urls()  # List[str] 기대
+            self.add_urls_to_queue(urls)
 
-    def start_bulk_add(self, urls: List[str]):
-        # URL 정규화/중복 제거
-        norm = []
-        seen = set()
+    def add_urls_to_queue(self, urls: List[str]):
+        """여러 URL을 한 번에 추가"""
+        if not urls: return
+        added = 0
         for u in urls:
-            u = u.strip()
-            if not u or u in seen: continue
-            seen.add(u); norm.append(u)
-
-        # 일반/시리즈 분리
-        normal = [u for u in norm if "/series/" not in u]
-        series = [u for u in norm if "/series/" in u]
-
-        # 일반은 즉시 추가
-        for u in normal:
+            u = (u or "").strip()
+            if not u: continue
             self.add_url_to_queue(u)
+            added += 1
+        if added:
+            self.append_log(f"[알림] 다중 추가: {added}개 URL 대기열에 등록됨.")
 
-        # 시리즈는 큐로 순차 파싱
-        if series:
-            self._bulk_series_queue.extend(series)
-            if not self._bulk_series_active:
-                self._bulk_series_active = True
-                self._start_next_series_parse_bulk()
+    # 드래그 앤 드롭으로 .txt 파일에서 일괄 추가 지원
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
 
-    def _start_next_series_parse_bulk(self):
-        # 큐가 비면 종료
-        if not self._bulk_series_queue:
-            self._bulk_series_active = False
-            self._bulk_series_thread = None
-            return
-        url = self._bulk_series_queue.pop(0)
-        self.append_log(f"[일괄] 시리즈 분석 시작: {url}")
-        th = SeriesParseThread(url, self.ytdlp_exe_path)
-        th.log.connect(self.append_log)
-        th.finished.connect(self._on_series_parsed_bulk)
-        self._bulk_series_thread = th
-        th.start()
+    def dropEvent(self, e):
+        try:
+            if e.mimeData().hasUrls():
+                local_files = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+                txts = [p for p in local_files if p.lower().endswith(".txt")]
+                if txts:
+                    total = 0
+                    for path in txts:
+                        urls = self._read_urls_from_txt(path)
+                        self.add_urls_to_queue(urls)
+                        total += len(urls)
+                    if total:
+                        self.append_log(f"[알림] TXT에서 {total}개 URL 추가됨.")
+                else:
+                    # 드래그된 게 일반 파일이 아니거나 txt가 아니면 무시 (개별 URL은 입력창으로)
+                    pass
+            e.acceptProposedAction()
+        except Exception as ex:
+            self.append_log(f"[오류] 드롭 처리 실패: {ex}")
 
-    def _on_series_parsed_bulk(self, episode_urls: List[str]):
-        cnt = len(episode_urls)
-        self.append_log(f"[일괄] 시리즈 분석 완료: {cnt}개 에피소드 추가 예정")
-        for u in episode_urls:
-            self.add_url_to_queue(u)
-        # 다음 시리즈 진행
-        self._start_next_series_parse_bulk()
+    def _read_urls_from_txt(self, path: str) -> List[str]:
+        """텍스트 파일에서 URL 라인 파싱(공백/중복/주석 제거)"""
+        urls: List[str] = []
+        seen = set()
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    s = raw.strip()
+                    if not s or s.startswith("#"):  # 빈 줄/주석 제외
+                        continue
+                    if s not in seen:
+                        seen.add(s)
+                        urls.append(s)
+        except UnicodeDecodeError:
+            # CP949 등 현지 인코딩 재시도
+            with open(path, "r", encoding="cp949", errors="ignore") as f:
+                for raw in f:
+                    s = raw.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    if s not in seen:
+                        seen.add(s)
+                        urls.append(s)
+        return urls
 
     # ================== 다운로드 큐 ==================
     def add_url_to_queue(self, url: str):
@@ -458,7 +492,6 @@ class MainWindow(QMainWindow):
 
             parts = self.config.get("filename_parts", {})
             order = self.config.get("filename_order", ["series", "upload_date", "episode_number", "episode", "id"])
-            # 구분자: 공백(2.0.2 반영)
             filename_format = " ".join(f"%({key})s" for key in order if parts.get(key, False) and key != 'id')
             if parts.get("id", False): filename_format += " [%(id)s]"
             filename_format += ".mp4"
@@ -568,33 +601,106 @@ class MainWindow(QMainWindow):
         self.refresh_history_list()
         self.append_log(f"[알림] 기록에서 제거됨: {url}")
 
-    # ================== 드래그&드롭(.txt 지원) ==================
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls():
-            # 파일 드래그만 메인에서 받는다 (텍스트는 입력창이 처리)
-            e.acceptProposedAction()
+    # ================== 즐겨찾기 탭 ==================
+    def refresh_fav_list(self):
+        self.fav_list.clear()
+        for url, meta in self.fav_store.sorted_entries():
+            added = meta.get("added", "")
+            last = meta.get("last_check", "")
+            txt = f"{url}\n추가: {added}   마지막 확인: {last or '-'}"
+            item = QListWidgetItem(txt)
+            item.setData(Qt.ItemDataRole.UserRole, url)
+            self.fav_list.addItem(item)
 
-    def dropEvent(self, e):
-        if not e.mimeData().hasUrls():
+    def add_favorite(self):
+        url = (self.fav_input.text() or "").strip()
+        if not url or "/series/" not in url:
+            QMessageBox.information(self, "알림", "유효한 TVer 시리즈 URL을 입력하세요.\n예: https://tver.jp/series/....")
             return
-        paths = [u.toLocalFile() for u in e.mimeData().urls()]
-        all_text = []
-        for p in paths:
-            if not p: continue
-            if os.path.isfile(p) and p.lower().endswith(".txt"):
-                try:
-                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
-                        all_text.append(f.read())
-                except Exception as ex:
-                    self.append_log(f"[오류] 텍스트 파일 읽기 실패: {p} ({ex})")
-            else:
-                # 파일이 .txt가 아니면 무시 (개별 URL은 입력창으로)
-                pass
-        if all_text:
-            urls = parse_urls("\n".join(all_text))
-            if urls:
-                self.start_bulk_add(urls)
-        e.acceptProposedAction()
+        if self.fav_store.exists(url):
+            QMessageBox.information(self, "알림", "이미 즐겨찾기에 있습니다.")
+            return
+        self.fav_store.add(url)
+        self.fav_input.clear()
+        self.refresh_fav_list()
+        self.append_log(f"[즐겨찾기] 추가: {url}")
+
+    def remove_selected_favorite(self):
+        items = self.fav_list.selectedItems()
+        if not items:
+            return
+        for it in items:
+            url = it.data(Qt.ItemDataRole.UserRole)
+            self.fav_store.remove(url)
+            self.append_log(f"[즐겨찾기] 삭제: {url}")
+        self.refresh_fav_list()
+
+    def show_fav_menu(self, pos):
+        item = self.fav_list.itemAt(pos)
+        if not item: return
+        url = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu()
+        a1 = QAction("이 시리즈 확인", self); a1.triggered.connect(lambda: self.check_single_favorite(url)); menu.addAction(a1)
+        a2 = QAction("브라우저에서 열기", self); a2.triggered.connect(lambda: webbrowser.open(url)); menu.addAction(a2)
+        menu.addSeparator()
+        a3 = QAction("즐겨찾기에서 제거", self); a3.triggered.connect(lambda: (self.fav_store.remove(url), self.refresh_fav_list())); menu.addAction(a3)
+        menu.exec(self.fav_list.mapToGlobal(pos))
+
+    def check_all_favorites(self):
+        """등록된 모든 시리즈를 순차 확인"""
+        if self._fav_thread:  # 이미 진행 중이면 무시
+            self.append_log("[즐겨찾기] 확인 작업이 이미 진행 중입니다.")
+            return
+        series_list = self.fav_store.list_series()
+        if not series_list:
+            self.append_log("[즐겨찾기] 등록된 시리즈가 없습니다.")
+            return
+        self._fav_check_queue = list(series_list)
+        self.append_log(f"[즐겨찾기] 전체 확인 시작: {len(self._fav_check_queue)}개 시리즈")
+        self._run_next_fav()
+
+    def check_single_favorite(self, series_url: str):
+        """단일 시리즈만 확인"""
+        if self._fav_thread:
+            self.append_log("[즐겨찾기] 다른 확인 작업이 진행 중입니다. 잠시 후 다시 시도하세요.")
+            return
+        self._fav_check_queue = [series_url]
+        self.append_log(f"[즐겨찾기] 시리즈 확인: {series_url}")
+        self._run_next_fav()
+
+    def _run_next_fav(self):
+        if not self._fav_check_queue:
+            self.append_log("[즐겨찾기] 확인 완료.")
+            self._fav_current_url = None
+            self._fav_thread = None
+            return
+
+        self._fav_current_url = self._fav_check_queue.pop(0)
+        self._fav_thread = SeriesParseThread(self._fav_current_url, self.ytdlp_exe_path)
+        self._fav_thread.log.connect(self.append_log)
+        self._fav_thread.finished.connect(self._on_fav_series_parsed)
+        self._fav_thread.start()
+
+    def _on_fav_series_parsed(self, episode_urls: List[str]):
+        series_url = self._fav_current_url or ""
+        try:
+            already_in_queue = {t['url'] for t in self.task_queue}
+            added = 0
+            for ep in episode_urls:
+                # 히스토리에 있거나, 이미 대기/진행 중이면 스킵
+                if self.history_store.exists(ep): 
+                    continue
+                if ep in self.active_urls or ep in already_in_queue:
+                    continue
+                self.add_url_to_queue(ep)
+                added += 1
+
+            self.append_log(f"[즐겨찾기] {series_url} → 신규 {added}개 큐에 추가")
+            self.fav_store.touch_last_check(series_url)
+            self.refresh_fav_list()
+        finally:
+            self._fav_thread = None
+            self._run_next_fav()
 
 
 if __name__ == "__main__":
@@ -602,6 +708,13 @@ if __name__ == "__main__":
     if sys.stdin is None:
         sys.stdin = open(os.devnull, 'r')
     app = QApplication(sys.argv)
+
+    # 전역 다크 테마 적용 (themes.py 없이 직접)
+    from src.qss import build_qss
+    app.setStyle("")         # 초기화
+    app.setStyle("Fusion")   # 플랫폼 편차 줄이기
+    app.setStyleSheet(build_qss())
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QSpinBox, QTabWidget, QWidget, QFileDialog,
     QDialogButtonBox, QListWidget, QListWidgetItem, QAbstractItemView,
-    QToolButton, QStyle, QStyledItemDelegate, QListView
+    QToolButton, QStyle, QListView
 )
 
 from src.utils import save_config
@@ -16,28 +16,13 @@ from src.utils import save_config
 ROLE_KEY = Qt.ItemDataRole.UserRole  # 각 항목의 실제 키(series/id 등) 저장
 
 
-class FixedHeightDelegate(QStyledItemDelegate):
-    """리스트 아이템 높이를 고정해서 폰트 재계산/깜빡임 방지"""
-    def __init__(self, row_height: int, parent=None):
-        super().__init__(parent)
-        self._h = row_height
-
-    def sizeHint(self, option, index):
-        sz = super().sizeHint(option, index)
-        return QSize(sz.width(), self._h)
-
-
 class StableComboBox(QComboBox):
-    """QComboBox 팝업이 레이아웃/스타일 영향으로 점프하는 문제를 방지.
-    팝업 컨테이너(window)를 강제로 콤보박스 바로 아래로 이동시킨다.
-    """
+    """QComboBox 팝업이 레이아웃/스타일 영향으로 점프하는 문제 방지."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 드롭다운 뷰를 명시적으로 지정(팝업 컨테이너 일관성 확보)
         view = QListView()
         view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setView(view)
-        # 폭이 바뀌어도 레이아웃 흔들림을 최소화
         self.setMinimumContentsLength(14)
         self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
 
@@ -45,9 +30,7 @@ class StableComboBox(QComboBox):
         super().showPopup()
         try:
             popup = self.view().window()  # QComboBoxPrivateContainer
-            # 콤보박스 아래쪽에 정렬
             below = self.mapToGlobal(self.rect().bottomLeft())
-            # 팝업 폭을 콤보박스 이상으로
             w = max(popup.width(), self.width())
             popup.resize(w, popup.height())
             popup.move(QPoint(below.x(), below.y()))
@@ -61,7 +44,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("설정")
-        self.setMinimumSize(560, 400)  # 요청: 560x400
+        self.setMinimumSize(560, 400)
 
         root = QVBoxLayout(self)
         self.tabs = QTabWidget(self)
@@ -119,17 +102,15 @@ class SettingsDialog(QDialog):
         self.order_list = QListWidget()
         self.order_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.order_list.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)  # 드래그 비활성(안정성)
-        self.order_list.setSpacing(2)
-
-        # 깜빡임/클리핑 방지 옵션들
-        fm = self.order_list.fontMetrics()
-        row_h = max(28, fm.height() + 10)  # 고정 높이 기준
-        self.order_list.setUniformItemSizes(True)  # 모든 아이템 동일 높이로 처리
-        self.order_list.setWordWrap(False)         # 워드랩 금지
         self.order_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.order_list.setItemDelegate(FixedHeightDelegate(row_h, self.order_list))
+        self.order_list.setAlternatingRowColors(False)
 
-        # 우측 화살표 버튼들(세로 스택)
+        # 텍스트 뭉개짐/클리핑 방지: per-item sizeHint + 내부 패딩
+        fm = self.order_list.fontMetrics()
+        row_h = max(28, fm.height() + 12)
+        self.order_list.setStyleSheet("QListWidget::item{ padding:6px 8px; }")
+
+        # 우측 화살표 버튼들
         btn_col = QVBoxLayout()
         self.up_btn = QToolButton()
         self.down_btn = QToolButton()
@@ -150,7 +131,7 @@ class SettingsDialog(QDialog):
         list_row.addLayout(btn_col)
         layout.addLayout(list_row, 1)
 
-        # 표시명 매핑 (요청 반영)
+        # 표시명 매핑
         self.part_names: dict[str, str] = {
             "series": "시리즈명",
             "upload_date": "방송날짜",
@@ -158,11 +139,10 @@ class SettingsDialog(QDialog):
             "episode": "타이틀",
             "id": "고유ID",
         }
-
         parts_cfg: dict = self.config.get("filename_parts", {})
         current_order = self.config.get("filename_order", list(self.part_names.keys()))
 
-        # 체크 가능한 QListWidgetItem 생성 (인디케이터 커스텀 X → OS 기본 ✔ 사용)
+        # 체크 가능한 QListWidgetItem 생성(✔ 기본 렌더링 유지)
         for key in current_order:
             if key not in self.part_names:
                 continue
@@ -173,7 +153,10 @@ class SettingsDialog(QDialog):
                 | Qt.ItemFlag.ItemIsSelectable
                 | Qt.ItemFlag.ItemIsUserCheckable
             )
-            item.setCheckState(Qt.CheckState.Checked if parts_cfg.get(key, True) else Qt.CheckState.Unchecked)
+            item.setCheckState(
+                Qt.CheckState.Checked if parts_cfg.get(key, True) else Qt.CheckState.Unchecked
+            )
+            item.setSizeHint(QSize(0, row_h))
             self.order_list.addItem(item)
 
         # 미리보기
@@ -203,6 +186,8 @@ class SettingsDialog(QDialog):
         item = self.order_list.takeItem(row)
         self.order_list.insertItem(new_row, item)
         self.order_list.setCurrentRow(new_row)
+        # ▼ 이동 후 선택 항목이 항상 보이도록 스크롤 맞춤(UX 개선)
+        self.order_list.scrollToItem(item)
         self._update_preview()
         self._sync_move_buttons()
 
@@ -316,7 +301,7 @@ class SettingsDialog(QDialog):
             if parent and hasattr(parent, "add_url_to_queue"):
                 try:
                     parent.add_url_to_queue(url)  # type: ignore[attr-defined]
-                    self.accept()
+                    self.accept()  # 드롭으로 추가 후 설정창 닫기(기존 동작 유지)
                 except Exception:
                     pass
             e.acceptProposedAction()

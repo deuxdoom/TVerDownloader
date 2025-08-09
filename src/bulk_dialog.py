@@ -1,5 +1,5 @@
 # 파일명: src/bulk_dialog.py
-# 다중 URL 입력 다이얼로그: 한 줄(Shift+Enter 포함)당 하나의 URL. 공백/쉼표도 처리.
+# 다중 URL 입력 다이얼로그: 한 줄 하나의 URL. 공백/쉼표도 처리.
 from __future__ import annotations
 
 import re
@@ -25,7 +25,7 @@ class BulkAddDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        caption = QLabel("여러 개의 TVer URL을 붙여넣으세요.\n(권장: 한 줄에 하나 · Shift+Enter로 줄바꿈)")
+        caption = QLabel("여러 개의 TVer URL을 붙여넣으세요.\n(한 줄에 하나의 URL만! · Enter로 줄바꿈)")
         root.addWidget(caption)
 
         self.edit = QPlainTextEdit()
