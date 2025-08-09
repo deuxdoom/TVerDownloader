@@ -1,67 +1,61 @@
+# -*- coding: utf-8 -*-
 # 파일명: src/bulk_dialog.py
-# 다중 URL 입력 다이얼로그: 한 줄 하나의 URL. 공백/쉼표도 처리.
-from __future__ import annotations
+# 목적: 여러 개의 URL을 한 번에 입력받아 반환
+# 특징:
+#  - get_urls(): 줄 단위로 URL을 파싱하여 리스트로 반환
+#  - 공백/중복 제거
+#  - 시리즈/일반 URL 구분은 호출측(TVerDownloader.open_bulk_add)에서 처리
 
-import re
-from typing import List
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPlainTextEdit, QDialogButtonBox, QPushButton, QWidget
+    QTextEdit, QPushButton
 )
+from PyQt6.QtCore import Qt
 
-URL_RE = re.compile(r"https?://\S+")
-
-def parse_urls(text: str) -> List[str]:
-    # 줄/공백/쉼표 섞여도 안전하게 URL만 추출
-    return [u.strip() for u in URL_RE.findall(text or "") if u.strip()]
 
 class BulkAddDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("다중 다운로드")
-        self.setMinimumSize(520, 360)
-        self._urls: List[str] = []
+        self.resize(600, 420)
 
-        root = QVBoxLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
 
-        caption = QLabel("여러 개의 TVer URL을 붙여넣으세요.\n(한 줄에 하나의 URL만! · Enter로 줄바꿈)")
-        root.addWidget(caption)
+        self.desc = QLabel(
+            "각 줄에 하나의 URL을 입력하세요.\n"
+            "- 일반 에피소드 URL은 그대로 추가됩니다.\n"
+            "- 시리즈 URL은 에피소드로 확장되어 여러 항목으로 추가됩니다."
+        )
+        self.desc.setWordWrap(True)
+        layout.addWidget(self.desc)
 
-        self.edit = QPlainTextEdit()
-        self.edit.setPlaceholderText("예)\nhttps://tver.jp/episodes/xxxx\nhttps://tver.jp/series/yyyy\n...")
-        root.addWidget(self.edit, 1)
+        self.text = QTextEdit(self)
+        self.text.setPlaceholderText("예:\nhttps://tver.jp/episodes/...\nhttps://tver.jp/series/...")
+        layout.addWidget(self.text, 1)
 
-        # 상태줄(개수)
-        status_row = QHBoxLayout()
-        self.count_label = QLabel("0개 URL")
-        status_row.addWidget(self.count_label)
-        status_row.addStretch(1)
-        root.addLayout(status_row)
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        btns.addStretch(1)
+        self.ok_btn = QPushButton("추가")
+        self.cancel_btn = QPushButton("취소")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btns.addWidget(self.ok_btn)
+        btns.addWidget(self.cancel_btn)
+        layout.addLayout(btns)
 
-        # 버튼
-        self.buttons = QDialogButtonBox()
-        add_btn = self.buttons.addButton("목록 추가", QDialogButtonBox.ButtonRole.AcceptRole)
-        cancel_btn = self.buttons.addButton("취소", QDialogButtonBox.ButtonRole.RejectRole)
-        root.addWidget(self.buttons)
-
-        add_btn.clicked.connect(self._on_accept)
-        cancel_btn.clicked.connect(self.reject)
-        self.edit.textChanged.connect(self._update_count)
-
-        self._update_count()
-
-    def _update_count(self):
-        urls = parse_urls(self.edit.toPlainText())
-        self.count_label.setText(f"{len(urls)}개 URL")
-
-    def _on_accept(self):
-        self._urls = parse_urls(self.edit.toPlainText())
-        if not self._urls:
-            # 비어있어도 그냥 닫지 말고 개수만 갱신
-            self._update_count()
-            return
-        self.accept()
-
-    def urls(self) -> List[str]:
-        return self._urls[:]
+    def get_urls(self) -> list[str]:
+        raw = self.text.toPlainText() or ""
+        lines = [l.strip() for l in raw.splitlines()]
+        out = []
+        seen = set()
+        for s in lines:
+            if not s:
+                continue
+            if s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+        return out

@@ -5,12 +5,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from src.icon import get_app_icon
+    # utils의 함수 시그니처/동작은 기존 그대로 사용
 from src.utils import open_developer_link, open_feedback_link
 
 class AboutDialog(QDialog):
     def __init__(self, version: str, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle("정보 - 티버 다운로더 (TVer Downloader)")
+        self.setWindowTitle("정보")
         self.setWindowIcon(get_app_icon())
         self.setModal(True)
         self.setMinimumSize(640, 480)
@@ -24,7 +25,7 @@ class AboutDialog(QDialog):
         icon_label = QLabel()
         icon_label.setPixmap(get_app_icon().pixmap(32, 32))
         title_box = QVBoxLayout()
-        title = QLabel("티버 다운로더 (TVer Downloader)"); title.setObjectName("PaneTitle")
+        title = QLabel("티버 다운로더"); title.setObjectName("PaneTitle")
         subtitle = QLabel(f"버전: {version}"); subtitle.setObjectName("PaneSubtitle")
         title_box.addWidget(title); title_box.addWidget(subtitle)
         header.addWidget(icon_label); header.addLayout(title_box); header.addStretch(1)
@@ -38,11 +39,12 @@ class AboutDialog(QDialog):
 
         # 하단 버튼
         btn_row = QHBoxLayout()
-        youtube_btn = QPushButton("유투브"); youtube_btn.setObjectName("LinkButton"); youtube_btn.clicked.connect(open_developer_link)
+        youtube_btn = QPushButton("제작자 유투브"); youtube_btn.setObjectName("LinkButton"); youtube_btn.clicked.connect(open_developer_link)
         contact_btn = QPushButton("문의하기"); contact_btn.setObjectName("LinkButton"); contact_btn.clicked.connect(open_feedback_link)
         btn_row.addWidget(youtube_btn); btn_row.addWidget(contact_btn); btn_row.addStretch(1)
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close_box.button(QDialogButtonBox.StandardButton.Close).setText("닫기")
         close_box.rejected.connect(self.reject)
         btn_row.addWidget(close_box)
 
@@ -81,9 +83,6 @@ class AboutDialog(QDialog):
                 <li><a href="https://pypi.org/project/requests/">requests</a></li>
                 <li><a href="https://github.com/deuxdoom/TVerDownloader">TVerDownloader (GitHub)</a></li>
             </ul>
-
-            <h3>버전</h3>
-            <p>현재 버전: <b>{version}</b></p>
 
             <p style="color:#6b7280;">* 사용자는 콘텐츠 제공자의 약관과 저작권을 준수해야 합니다.</p>
         </body>
