@@ -27,7 +27,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 ## 📝 개요
 
 - **목적**: TVer의 영상들을 일본VPN을 통해 다운로드하고 재생 및 관리
-- **릴리스**: [v2.3.1](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.3.1)
+- **릴리스**: [v2.3.2](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.3.2)
 - **라이선스**: MIT
 - **언어**: Python 3.8+
 
