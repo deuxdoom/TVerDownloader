@@ -1,5 +1,7 @@
 # src/utils.py
-# 목적: 설정 저장/로드, 예외 핸들러, 파일 위치 열기, 포맷팅, 설정 정규화 등 범용 유틸
+# 수정:
+# - FILENAME_TITLE_MAX_LENGTH: 파일명에 사용될 제목의 최대 길이를 80자로 정의
+# - construct_filename_template: 생성되는 파일명 템플릿에서 제목 부분에 길이 제한 구문을 적용
 
 import json
 import os
@@ -16,6 +18,8 @@ CONFIG_FILE = "downloader_config.json"
 DEFAULT_PARALLEL = 3
 PARALLEL_MIN = 1
 PARALLEL_MAX = 5
+# 파일명으로 사용될 동영상 제목의 최대 길이 (OS 경로 길이 제한 오류 방지)
+FILENAME_TITLE_MAX_LENGTH = 80
 
 
 def load_config() -> Dict[str, Any]:
@@ -41,16 +45,14 @@ def load_config() -> Dict[str, Any]:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
-                # 로드한 설정으로 기본값 덮어쓰기 (하위 호환성 유지)
                 for k, v in loaded.items():
                     if isinstance(v, dict) and k in config and isinstance(config[k], dict):
                         config[k].update(v)
                     else:
                         config[k] = v
         except (json.JSONDecodeError, IOError):
-            pass # 파일이 손상되었거나 읽을 수 없는 경우 기본값 사용
+            pass
 
-    # 로드 후 동시 다운로드 설정값 정규화
     config["max_concurrent_downloads"] = canonicalize_config_parallel(config)
     return config
 
@@ -67,7 +69,6 @@ def save_config(config: dict):
 def construct_filename_template(config: Dict[str, Any]) -> str:
     """
     설정값에서 파일명 순서와 사용 여부를 조합하여 yt-dlp용 출력 템플릿을 생성합니다.
-    예: "%(series)s/%(title)s [%(id)s].%(ext)s"
     """
     parts_cfg = config.get("filename_parts", {})
     order = config.get("filename_order", [])
@@ -77,15 +78,15 @@ def construct_filename_template(config: Dict[str, Any]) -> str:
         "series": "%(series)s",
         "upload_date": "%(upload_date>%Y-%m-%d)s",
         "episode_number": "%(episode_number)s",
-        "episode": "%(title)s",
+        "episode": f"%(title:.{FILENAME_TITLE_MAX_LENGTH})s", # 제목(episode)에 길이 제한 적용
         "id": "[%(id)s]"
     }
     
     selected_parts = [key_map[key] for key in order if parts_cfg.get(key, False) and key in key_map]
     
     # 시리즈명이 있으면 하위 폴더로, 없으면 현재 폴더로
-    # TVer는 series 메타가 없을 때 playlist_title을 대신 사용하기도 함
     if parts_cfg.get("series"):
+        # TVer는 series 메타가 없을 때 playlist_title을 대신 사용하기도 함
         return f"%(series,playlist_title)s/{' '.join(selected_parts)}.%(ext)s"
     else:
         return f"{' '.join(selected_parts)}.%(ext)s"
@@ -94,7 +95,6 @@ def construct_filename_template(config: Dict[str, Any]) -> str:
 def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
     """
     다양한 키 이름으로 저장될 수 있는 동시 다운로드 설정값을 정규화하여 단일 키로 통합합니다.
-    (기존 TVerDownloader.py의 _canonicalize_parallel_config 메서드를 이전)
     """
     def clamp(n: Any) -> int:
         try:
@@ -103,11 +103,9 @@ def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
         except (ValueError, TypeError):
             return DEFAULT_PARALLEL
 
-    # 가장 우선순위가 높은 표준 키
     if "max_concurrent_downloads" in config:
         return clamp(config["max_concurrent_downloads"])
 
-    # 구버전 또는 다른 이름의 키 탐색
     legacy_keys = [
         "max_parallel", "max_parallel_downloads", "parallel_downloads",
         "concurrent_downloads", "max_concurrent", "concurrency"
@@ -116,7 +114,6 @@ def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
         if key in config:
             return clamp(config[key])
             
-    # 중첩된 dict 내부 탐색
     for container_key in ["downloads", "download", "settings", "general", "app"]:
         if isinstance(config.get(container_key), dict):
             nested_dict = config[container_key]

@@ -1,5 +1,7 @@
 # src/threads/download_thread.py
-# 수정: _kill_process_tree 내 taskkill 호출 시 CREATE_NO_WINDOW 플래그 추가
+# 수정:
+# - _parse_line: 로그 필터링 기능 추가. 'Destination', 'Merging', 'Embedding', 'ERROR' 등
+#                핵심 키워드가 포함된 로그만 UI에 표시하여 불필요한 frag 로그를 제거.
 
 import os
 import re
@@ -27,9 +29,9 @@ class DownloadThread(QThread):
         self.ffmpeg_exe_path = os.path.dirname(ffmpeg_exe_path)
         self.output_template = output_template
         self.quality_format = quality_format
-
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False
+        self._current_component: str = "비디오"
 
     def stop(self):
         if self._stop_flag: return
@@ -51,11 +53,9 @@ class DownloadThread(QThread):
                 p.wait(timeout=2)
         except (ProcessLookupError, subprocess.TimeoutExpired, OSError): pass
 
-        # 프로세스가 여전히 살아있으면 강제 종료
         if p.poll() is None:
             try:
                 if os.name == "nt":
-                    # taskkill 실행 시 콘솔 창이 뜨지 않도록 creationflags 추가
                     flags = subprocess.CREATE_NO_WINDOW
                     subprocess.run(
                         ["taskkill", "/PID", str(p.pid), "/T", "/F"],
@@ -75,7 +75,6 @@ class DownloadThread(QThread):
             is_successful = False
             log_msg = f"다운로드 스레드 예외 발생: {e}"
             self.progress.emit(self.url, {"status": "오류", "log": log_msg})
-
         self.finished.emit(self.url, is_successful)
 
     def _execute_download(self) -> bool:
@@ -132,22 +131,55 @@ class DownloadThread(QThread):
     def _parse_line(self, line: str):
         line = (line or "").strip()
         if not line: return
-        payload: Dict[str, Any] = {"log": line}
-        m = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
-        if m:
-            payload.update({"status": "다운로드 중", "percent": float(m.group(1)), "speed": m.group(2), "eta": m.group(3)})
-        elif "Merging formats" in line:
-            payload["status"] = "후처리 중 (병합)"
-        elif "Embedding subtitles" in line:
-            payload["status"] = "후처리 중 (자막)"
-        
+
+        # payload를 미리 만들지 않고, 필요한 정보가 있을 때만 생성
+        payload: Dict[str, Any] = {}
+
+        # --- 로그 필터링 로직 ---
+        # 로그로 표시할 키워드 목록
+        log_keywords = [
+            "[download] Destination:", # 각 컴포넌트(비디오/오디오) 다운로드 완료
+            "Merging formats into",   # 포맷 병합 시작
+            "Embedding subtitles",    # 자막 병합 시작
+            "[error]",                # 오류 메시지
+            "ERROR:",                 # 오류 메시지
+        ]
+        # 키워드 중 하나라도 포함된 경우에만 로그를 payload에 추가
+        if any(keyword in line for keyword in log_keywords):
+            payload["log"] = line
+
         if "[download] Destination:" in line:
+            destination_path = line.split("Destination:", 1)[1].lower()
+            if ".m4a" in destination_path or "audio" in destination_path:
+                self._current_component = "오디오"
+            else:
+                self._current_component = "비디오"
+            # 파일 경로 추출 로직도 여기에 포함
             payload["final_filepath"] = line.split("Destination:", 1)[1].strip()
-        elif "Merging formats into" in line:
+
+        # 진행률 표시줄(%)이 포함된 라인은 항상 처리
+        m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
+        if m_progress:
+            payload.update({
+                "status": "다운로드 중",
+                "percent": float(m_progress.group(1)),
+                "speed": m_progress.group(2),
+                "eta": m_progress.group(3),
+                "component": self._current_component
+            })
+        
+        # 후처리 상태 업데이트
+        if "Merging formats" in line:
+            payload["status"] = "후처리 중 (병합)"
+            # 병합 시 최종 파일 경로 갱신
             m_path = re.search(r'Merging formats into "(.*?)"', line)
             if m_path: payload["final_filepath"] = m_path.group(1).strip()
+        elif "Embedding subtitles" in line:
+            payload["status"] = "후처리 중 (자막)"
                 
-        self.progress.emit(self.url, payload)
+        # 처리할 내용이 payload에 담긴 경우에만 시그널을 보냄
+        if payload:
+            self.progress.emit(self.url, payload)
 
     def _emit_quick_metadata(self):
         try:

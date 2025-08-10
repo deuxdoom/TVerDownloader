@@ -1,9 +1,6 @@
 # src/widgets.py
 # 수정:
-# - ImagePreviewDialog:
-#   - 좌클릭 시 창이 닫히는 기능 유지
-#   - 우클릭 시 '이미지 저장' 컨텍스트 메뉴가 나타나는 기능 추가
-#   - '이미지 저장' 선택 시 파일 저장 대화상자를 통해 원본 이미지를 저장하는 기능 구현
+# - update_progress: 상태 표시 텍스트를 '비디오/오디오 다운로드 중...'에서 '비디오/오디오 다운 중...'으로 축약
 
 from __future__ import annotations
 import os
@@ -53,7 +50,7 @@ class ImagePreviewDialog(QDialog):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.addWidget(self.scroll_area)
 
-        # 이미지 라벨의 마우스 이벤트를 처리할 메서드 연결
+        # 이미지 라벨 클릭 시 창 닫기
         self.image_label.mousePressEvent = self._handle_mouse_press
 
     def showEvent(self, event):
@@ -171,16 +168,32 @@ class DownloadItemWidget(QWidget):
             self._start_thumb_download(self._thumb_url)
         
         if payload.get("title"): self.title_label.setText(payload["title"])
-        if "percent" in payload: self.progress.setValue(int(payload["percent"]))
         if "final_filepath" in payload: self.final_filepath = payload["final_filepath"]
+
+        component = payload.get("component")
+        percent = payload.get("percent", self.progress.value())
+        
+        if component == "비디오":
+            progress_value = int(percent / 2)
+        elif component == "오디오":
+            progress_value = 50 + int(percent / 2)
+        else:
+            progress_value = self.progress.value()
+
+        self.progress.setValue(progress_value)
 
         if "status" in payload:
             self.status = payload["status"]
             status_text = self.status
+            
             if self.status == "다운로드 중":
                 speed = payload.get('speed', '')
                 eta = payload.get('eta', '')
-                if speed and eta: status_text = f"다운로드 중... {speed} (남은 시간: {eta})"
+                comp_text = f"{component} " if component else ""
+                speed_eta_text = f"... {speed} (남은 시간: {eta})" if speed and eta else "..."
+                # "다운로드 중"을 "다운 중"으로 수정
+                status_text = f"{comp_text}다운 중{speed_eta_text}"
+
             self.status_label.setText(status_text)
 
             state_prop = "active"
