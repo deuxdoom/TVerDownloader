@@ -12,7 +12,6 @@
 [![PyQt6](https://img.shields.io/badge/PyQt-6-green?style=for-the-badge)](https://pypi.org/project/PyQt6/)
 [![Made with yt-dlp](https://img.shields.io/badge/made%20with-yt--dlp-orange?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=for-the-badge&logo=ffmpeg)](https://ffmpeg.org/)
-[![GitHub stars](https://img.shields.io/github/stars/deuxdoom/TVerDownloader?style=for-the-badge&logo=github)](https://github.com/deuxdoom/TVerDownloader/stargazers)
 
 📌 [**Repository**](https://github.com/deuxdoom/TVerDownloader)  
 🐞 [**Issues**](https://github.com/deuxdoom/TVerDownloader/issues)  
@@ -34,7 +33,7 @@ PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기�
 
 ## 📝 개요
 
-- **목적**: TVer의 영상들을 일본VPN을 통해 다운로드하고 재생 및 관리
+- **목적**: 티버(TVer)의 스트리밍 영상들을 일본VPN을 통해 다운로드하는 툴
 - **릴리스**: [v2.3.2](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.3.2)
 - **라이선스**: MIT
 - **언어**: Python 3.8+
