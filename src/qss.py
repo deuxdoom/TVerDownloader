@@ -1,14 +1,5 @@
-# -*- coding: utf-8 -*-
-# 파일명: src/qss.py
-# 역할: 앱 전역 스타일(QSS) 생성
-#
-# 콘셉트: 고급스러운 다크 그레이 톤 + 포인트 컬러
-# - 텍스트/배경: #0B0B0C ~ #1C1C1E 계열
-# - 기본 포인트(진행/강조): 파란색 #3B82F6
-# - 완료: 녹색 #22C55E
-# - 위험/오류: 빨간 #EF4444
-#
-# 진행바는 동적 프로퍼티 state(active/done/error)로 색상 전환
+# src/qss.py
+# 수정: 주황색(#OrangeButton)과 보라색(#PurpleButton) 버튼 스타일 추가
 
 def build_qss() -> str:
     return """
@@ -31,13 +22,22 @@ def build_qss() -> str:
         color: #F3F4F6;
     }
 
-    /* 버튼 */
-    QPushButton#PrimaryButton, QPushButton#AccentButton, QPushButton#DangerButton, QPushButton#GhostButton {
+    /* 버튼 공통 스타일 */
+    QPushButton#PrimaryButton, QPushButton#AccentButton, QPushButton#DangerButton, 
+    QPushButton#GhostButton, QPushButton#OrangeButton, QPushButton#PurpleButton {
         padding: 6px 12px;
         border-radius: 8px;
         border: 1px solid transparent;
         font-weight: 600;
     }
+    QPushButton:hover {
+        filter: brightness(1.05);
+    }
+    QPushButton:disabled {
+        opacity: .6;
+    }
+
+    /* 버튼 개별 색상 */
     QPushButton#PrimaryButton {
         background: #1F2937;
         color: #E5E7EB;
@@ -55,11 +55,14 @@ def build_qss() -> str:
         color: #9CA3AF;
         border-color: #374151;
     }
-    QPushButton:hover {
-        filter: brightness(1.05);
+    /* 새로 추가된 버튼 스타일 */
+    QPushButton#OrangeButton {
+        background: #F97316; /* 주황색 */
+        color: white;
     }
-    QPushButton:disabled {
-        opacity: .6;
+    QPushButton#PurpleButton {
+        background: #8B5CF6; /* 보라색 */
+        color: white;
     }
 
     /* 입력 */
@@ -123,6 +126,7 @@ def build_qss() -> str:
         border: 1px solid #1F2937;
         border-radius: 7px;
         min-height: 14px;
+        max-height: 14px;
     }
     QProgressBar#Progress::chunk {
         border-radius: 7px;
