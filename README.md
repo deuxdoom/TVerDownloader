@@ -3,11 +3,19 @@
 
 ![TVer Downloader Logo](./logo.png)
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=for-the-badge&logo=windows)](https://github.com/deuxdoom/TVerDownloader)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
+[![PyQt6](https://img.shields.io/badge/PyQt-6-green?style=for-the-badge)](https://pypi.org/project/PyQt6/)
+[![Made with yt-dlp](https://img.shields.io/badge/made%20with-yt--dlp-orange?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
+[![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=for-the-badge&logo=ffmpeg)](https://ffmpeg.org/)
+[![GitHub stars](https://img.shields.io/github/stars/deuxdoom/TVerDownloader?style=for-the-badge&logo=github)](https://github.com/deuxdoom/TVerDownloader/stargazers)
 
 📌 [**Repository**](https://github.com/deuxdoom/TVerDownloader)  
 🐞 [**Issues**](https://github.com/deuxdoom/TVerDownloader/issues)  
-📦 [**Releases**](https://github.com/deuxdoom/TVerDownloader/releases)
 
 --- 
 
