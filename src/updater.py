@@ -1,64 +1,72 @@
-# 파일명: src/updater.py
+# src/updater.py
+# 수정: 업데이트 안내 메시지 박스의 텍스트를 수정하고, 릴리스 노트 미리보기 기능 제거
+
 from __future__ import annotations
 import re
 import webbrowser
 
 def _norm(tag: str) -> tuple[int,int,int]:
+    """버전 태그를 비교 가능한 튜플로 변환합니다. (예: 'v2.3.1' -> (2, 3, 1))"""
     if not tag: return (0,0,0)
     t = tag.strip()
-    if t[:1].lower() == "v": t = t[1:]
+    if t.lower().startswith("v"): t = t[1:]
     t = t.split('-',1)[0].split('+',1)[0]
     nums = re.findall(r'\d+', t)[:3]
     parts = [int(x) for x in nums] + [0]*(3-len(nums))
     return tuple(parts[:3])
 
 def _newer(cur: str, latest: str) -> bool:
+    """최신 버전 태그가 현재 버전보다 높은지 비교합니다."""
     return _norm(latest) > _norm(cur)
 
 def maybe_show_update(parent, current_version: str) -> None:
-    """GitHub /releases/latest → 최신 태그 비교 후 안내. 실패 시 조용히 리턴."""
+    """GitHub /releases/latest API를 호출하여 최신 태그를 확인하고, 새 버전이 있으면 안내창을 표시합니다."""
     try:
         import requests
-    except Exception:
+    except ImportError:
+        # requests 모듈이 없는 환경에서는 업데이트 확인을 건너뜁니다.
         return
 
-    API = "https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest"
-    PAGE = "https://github.com/deuxdoom/TVerDownloader/releases/latest"
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "TVerDownloader (update-check)"}
+    API_URL = "https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest"
+    RELEASE_PAGE_URL = "https://github.com/deuxdoom/TVerDownloader/releases/latest"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "TVerDownloader-UpdateCheck"}
 
-    latest_tag, html_url, body = "", PAGE, ""
+    latest_tag = ""
+    html_url = RELEASE_PAGE_URL
+    
     try:
-        r = requests.get(API, headers=headers, timeout=10); r.raise_for_status()
-        js = r.json()
-        latest_tag = js.get("tag_name") or js.get("name") or ""
-        html_url = js.get("html_url") or PAGE
-        body = js.get("body") or ""
-    except Exception:
-        try:
-            r = requests.get(PAGE, headers=headers, timeout=10); r.raise_for_status()
-            m = re.search(r'>\s*v?(\d+\.\d+\.\d+)\s*<', r.text)
-            latest_tag = f"v{m.group(1)}" if m else ""
-            html_url = PAGE
-            body = ""
-        except Exception:
-            return
+        # GitHub API를 통해 최신 릴리스 정보 요청
+        response = requests.get(API_URL, headers=headers, timeout=10)
+        response.raise_for_status()
+        release_data = response.json()
+        latest_tag = release_data.get("tag_name") or release_data.get("name") or ""
+        html_url = release_data.get("html_url") or RELEASE_PAGE_URL
+    except requests.exceptions.RequestException:
+        # API 호출 실패 시 조용히 종료
+        return
 
+    # 새 버전이 없으면 아무 작업도 하지 않음
     if not latest_tag or not _newer(current_version, latest_tag):
         return
 
+    # PyQt6.QtWidgets는 UI 스레드에서만 import하는 것이 안전하므로 함수 내에서 import
     from PyQt6.QtWidgets import QMessageBox
-    msg = QMessageBox(parent)
-    msg.setWindowTitle("새 버전 확인")
-    text = f"새 버전 {latest_tag} 이(가) 공개되었습니다.\n지금 릴리스 페이지로 이동할까요?"
-    if body:
-        preview = body.strip().splitlines()[0][:140]
-        if preview:
-            text += f"\n\n- 릴리스 노트: {preview}"
-    msg.setText(text)
-    go_btn = msg.addButton("이동", QMessageBox.ButtonRole.AcceptRole)
-    later_btn = msg.addButton("나중에", QMessageBox.ButtonRole.RejectRole)
-    msg.setDefaultButton(go_btn)
-    msg.exec()
-    if msg.clickedButton() == go_btn:
-        try: webbrowser.open(html_url)
-        except Exception: pass
+    
+    msg_box = QMessageBox(parent)
+    msg_box.setWindowTitle("새 버전 확인")
+    
+    # 요청하신 문구로 수정
+    text = f"새 버전 {latest_tag}이(가) 릴리스 되었습니다.\n지금 다운받으러 이동하시겠습니까?"
+    msg_box.setText(text)
+    
+    go_btn = msg_box.addButton("이동", QMessageBox.ButtonRole.AcceptRole)
+    later_btn = msg_box.addButton("나중에", QMessageBox.ButtonRole.RejectRole)
+    msg_box.setDefaultButton(go_btn)
+    
+    msg_box.exec()
+    
+    if msg_box.clickedButton() == go_btn:
+        try:
+            webbrowser.open(html_url)
+        except Exception:
+            pass # 브라우저 열기 실패는 치명적인 오류가 아니므로 무시

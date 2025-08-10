@@ -1,7 +1,7 @@
 # src/qss.py
-# 수정: QToolButton#OnTopButton 스타일 규칙 변경
-#      - 기본 상태(비활성화)에서는 회색 아이콘
-#      - 체크 상태(활성화)에서는 파란색 아이콘으로 표시
+# 수정:
+# - QTabBar::tab: 활성/비활성 탭의 구분을 명확하게 하기 위한 스타일 추가
+# - QListWidget#HistoryList::item, QListWidget#FavoritesList::item: 각 항목에 하단 구분선 추가
 
 def build_qss() -> str:
     return """
@@ -26,7 +26,8 @@ def build_qss() -> str:
 
     /* 버튼 공통 스타일 */
     QPushButton#PrimaryButton, QPushButton#AccentButton, QPushButton#DangerButton, 
-    QPushButton#GhostButton, QPushButton#OrangeButton, QPushButton#PurpleButton {
+    QPushButton#GhostButton, QPushButton#OrangeButton, QPushButton#PurpleButton,
+    QPushButton#InfoButton {
         padding: 6px 12px;
         border-radius: 8px;
         border: 1px solid transparent;
@@ -46,6 +47,7 @@ def build_qss() -> str:
     QPushButton#GhostButton { background: transparent; color: #9CA3AF; border-color: #374151; }
     QPushButton#OrangeButton { background: #F97316; color: white; }
     QPushButton#PurpleButton { background: #8B5CF6; color: white; }
+    QPushButton#InfoButton { background: #22C55E; color: white; }
 
     /* '항상 위' 버튼 스타일 */
     QToolButton#OnTopButton {
@@ -53,15 +55,15 @@ def build_qss() -> str:
         border: none;
         font-size: 16px;
         padding: 2px;
-        color: #9CA3AF; /* 비활성화(기본) 상태 아이콘 색상: 회색 */
+        color: #9CA3AF;
     }
     QToolButton#OnTopButton:hover {
         background: #374151;
         border-radius: 4px;
     }
     QToolButton#OnTopButton:checked {
-        background: transparent;
-        color: #3B82F6; /* 활성화 상태 아이콘 색상: 파란색 */
+        background: #3B82F6;
+        border-radius: 4px;
     }
 
     /* 입력 */
@@ -79,6 +81,22 @@ def build_qss() -> str:
 
     /* 탭/패널 */
     #MainTabs::pane { border: none; }
+    QTabBar::tab {
+        background: #0F0F10;
+        color: #9CA3AF;
+        padding: 10px 20px;
+        border: none;
+        font-weight: 600;
+    }
+    QTabBar::tab:hover {
+        background: #1F2937;
+    }
+    QTabBar::tab:selected {
+        background: #1F2937;
+        color: #FFFFFF;
+        border-top: 2px solid #3B82F6;
+    }
+
     #LeftPane, #RightPane, #DownloadTab, #HistoryTab, #FavoritesTab { background: #0F0F10; }
     #PaneTitle { color: #E5E7EB; font-weight: 600; }
     #PaneSubtitle { color: #9CA3AF; }
@@ -89,6 +107,11 @@ def build_qss() -> str:
         border: 1px solid #1F2937;
         border-radius: 8px;
         padding: 6px;
+    }
+    /* 기록, 즐겨찾기 탭 아이템 구분선 추가 */
+    QListWidget#HistoryList::item, QListWidget#FavoritesList::item {
+        padding: 8px;
+        border-bottom: 1px solid #1F2937;
     }
 
     /* 다운로드 아이템 */

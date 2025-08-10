@@ -1,7 +1,7 @@
 # TVerDownloader.py
 # 수정:
-# - QLocalServer와 QLocalSocket을 이용한 단일 인스턴스 실행 기능 추가
-# - 프로그램 중복 실행 시, 이미 실행된 창을 활성화하고 새 인스턴스는 종료
+# - check_all_favorites: '신규 영상 확인' 버튼 클릭 시 다운로드 탭(인덱스 0)으로 전환
+# - show_fav_menu: 컨텍스트 메뉴의 '이 시리즈 확인' 클릭 시 다운로드 탭(인덱스 0)으로 전환
 
 import sys
 import os
@@ -33,8 +33,8 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.3.1"
-SOCKET_NAME = "TVerDownloader_IPC_Socket" # 단일 인스턴스 확인을 위한 고유 소켓 이름
+APP_VERSION = "2.3.3"
+SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -70,7 +70,6 @@ class MainWindow(QMainWindow):
         self.setup_thread.start()
 
     def _connect_signals(self):
-        """UI와 매니저 간의 시그널-슬롯을 연결합니다."""
         self.ui.add_button.clicked.connect(self.process_input_url)
         self.ui.url_input.returnPressed.connect(self.process_input_url)
         self.ui.bulk_button.clicked.connect(self.open_bulk_add)
@@ -79,6 +78,7 @@ class MainWindow(QMainWindow):
         self.ui.clear_log_button.clicked.connect(self.clear_log)
         self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
         
+        self.ui.clear_completed_button.clicked.connect(self._clear_completed_downloads)
         self.ui.download_list.customContextMenuRequested.connect(self.show_download_context_menu)
         
         self.ui.history_list.customContextMenuRequested.connect(self.show_history_menu)
@@ -102,17 +102,36 @@ class MainWindow(QMainWindow):
 
         self.tray_icon.activated.connect(self._on_tray_icon_activated)
 
+    def set_always_on_top(self, on: bool):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        self.show()
+        self.ui.on_top_btn.setChecked(on)
+        self.ui.on_top_btn.setText("📍" if on else "📌")
+        self.config["always_on_top"] = on
+        save_config(self.config)
+
+    def _clear_completed_downloads(self):
+        for i in range(self.ui.download_list.count() - 1, -1, -1):
+            item = self.ui.download_list.item(i)
+            widget = self.ui.download_list.itemWidget(item)
+            if not isinstance(widget, DownloadItemWidget): continue
+            url = widget.url
+            is_active = url in self.download_manager._active_threads
+            is_queued = url in self.download_manager._task_queue
+            if not is_active and not is_queued:
+                self.ui.download_list.takeItem(i)
+
     def _handle_new_instance(self):
-        """새로운 인스턴스가 실행되었을 때 호출되는 슬롯."""
-        # 혹시 모를 연결은 무시하고, 창을 활성화하는 데 집중
         server = self.sender()
         if isinstance(server, QLocalServer):
             server.nextPendingConnection().close()
-        
-        # 창이 최소화되어 있다면 원래 크기로 복원하고, 맨 앞으로 가져와 활성화
-        self.showNormal()
-        self.activateWindow()
+        self.bring_to_front()
+
+    def bring_to_front(self):
+        if self.isMinimized(): self.showNormal()
+        elif not self.isVisible(): self.show()
         self.raise_()
+        self.activateWindow()
 
     def _set_input_enabled(self, enabled: bool):
         self.ui.url_input.setEnabled(enabled)
@@ -122,9 +141,7 @@ class MainWindow(QMainWindow):
         
     def _ensure_download_folder(self) -> bool:
         folder = self.config.get("download_folder")
-        if folder and os.path.isdir(folder):
-            return True
-
+        if folder and os.path.isdir(folder): return True
         new_folder = QFileDialog.getExistingDirectory(self, "다운로드 폴더 선택")
         if new_folder:
             self.config["download_folder"] = new_folder
@@ -132,17 +149,14 @@ class MainWindow(QMainWindow):
             self.download_manager.update_config(self.config)
             self.append_log(f"다운로드 폴더가 '{new_folder}'(으)로 설정되었습니다.")
             return True
-        
         return False
 
     def process_input_url(self):
         url = self.ui.url_input.text().strip()
         if not url: return
-
         if not self._ensure_download_folder():
             self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
             return
-
         if "/series/" in url:
             self._set_input_enabled(False)
             self.series_parser.parse('single', [url])
@@ -160,25 +174,20 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 self.append_log(f"[알림] 중복 다운로드 취소: {url}")
                 return
-        
         self.download_manager.add_task(url)
 
     def open_bulk_add(self):
         if not self._ensure_download_folder():
             self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
             return
-
         dialog = BulkAddDialog(self)
         if dialog.exec():
             urls = dialog.get_urls()
             if not urls: return
-
             normal_urls = [u for u in urls if "/series/" not in u]
             series_urls = [u for u in urls if "/series/" in u]
-
             for url in normal_urls:
                 self._request_add_task(url)
-            
             if series_urls:
                 self.series_parser.parse('bulk', series_urls)
 
@@ -187,16 +196,12 @@ class MainWindow(QMainWindow):
             self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다.")
             QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요.")
             return
-
         self.download_manager.set_paths(ytdlp_path, ffmpeg_path)
         self.series_parser.set_ytdlp_path(ytdlp_path)
         self._set_input_enabled(True)
-
         self.append_log(f"{'=' * 44}\n📢 [안내] TVer는 일본 지역 제한이 있습니다.\n📢 원활한 다운로드를 위해 반드시 일본 VPN을 켜고 사용해주세요.\n{'=' * 44}")
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
-        
         QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
-
         if self.config.get("auto_check_favorites_on_start", True):
             self.check_all_favorites()
 
@@ -204,15 +209,12 @@ class MainWindow(QMainWindow):
         if context == 'single':
             self._set_input_enabled(True)
             self.append_log(f"[시리즈] 분석 완료. {len(episode_urls)}개 에피소드를 추가합니다.")
-
         added_count = 0
         for url in episode_urls:
             if context == 'fav-check' and self.history_store.exists(url):
                 continue
-            
             self._request_add_task(url)
             added_count += 1
-        
         if context == 'fav-check':
             self.fav_store.touch_last_check(series_url)
             self.refresh_fav_list()
@@ -242,7 +244,6 @@ class MainWindow(QMainWindow):
     def _on_task_finished(self, url: str, success: bool):
         widget = self._find_item_widget(url)
         if not widget: return
-
         if success:
             title = widget.title_label.text()
             self.history_store.add(url, title, widget.final_filepath)
@@ -252,7 +253,6 @@ class MainWindow(QMainWindow):
     def _on_all_downloads_finished(self):
         self.append_log("모든 다운로드가 완료되었습니다.")
         self.tray_icon.showMessage("다운로드 완료", "모든 작업이 끝났습니다!", self.windowIcon(), 5000)
-        
         post_action = self.config.get("post_action", "None")
         if post_action == "Open Folder":
             folder = self.config.get("download_folder")
@@ -270,7 +270,6 @@ class MainWindow(QMainWindow):
         if not item: return
         widget = self.ui.download_list.itemWidget(item)
         if not isinstance(widget, DownloadItemWidget): return
-        
         url = widget.url; menu = QMenu()
         if url in self.download_manager._active_threads:
             menu.addAction("중지", lambda: self.download_manager.stop_task(url))
@@ -333,11 +332,9 @@ class MainWindow(QMainWindow):
         if not selected_items:
             QMessageBox.information(self, "알림", "삭제할 항목을 목록에서 선택하세요.")
             return
-        
         reply = QMessageBox.question(self, "삭제 확인", f"{len(selected_items)}개의 항목을 삭제할까요?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
-        
         if reply == QMessageBox.StandardButton.Yes:
             for item in selected_items:
                 url = item.data(Qt.ItemDataRole.UserRole)
@@ -355,12 +352,20 @@ class MainWindow(QMainWindow):
             if self.sender() == self.ui.fav_chk_btn: QMessageBox.information(self, "알림", "등록된 즐겨찾기가 없습니다.")
             return
         self.append_log(f"[즐겨찾기] 전체 확인 시작 ({len(urls)}개 시리즈)"); self.series_parser.parse('fav-check', urls)
+        # 확인 작업 시작 후 다운로드 탭으로 전환
+        self.ui.tabs.setCurrentIndex(0)
         
     def show_fav_menu(self, pos):
         item = self.ui.fav_list.itemAt(pos);
         if not item: return
         url = item.data(Qt.ItemDataRole.UserRole); menu = QMenu()
-        menu.addAction("이 시리즈 확인", lambda: self.series_parser.parse('fav-check', [url]))
+        
+        # '이 시리즈 확인' 액션을 лямбда 함수로 만들어 여러 동작을 연결
+        def check_this_series():
+            self.series_parser.parse('fav-check', [url])
+            self.ui.tabs.setCurrentIndex(0) # 다운로드 탭으로 전환
+        
+        menu.addAction("이 시리즈 확인", check_this_series)
         menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url))
         menu.addAction("삭제", lambda: self.remove_favorite(url))
         menu.exec(QCursor.pos())
@@ -375,13 +380,8 @@ class MainWindow(QMainWindow):
             self.download_manager.update_config(self.config)
             self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
 
-    def set_always_on_top(self, on: bool):
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on); self.show()
-        self.ui.on_top_btn.setChecked(on); self.ui.on_top_btn.setText("●" if on else "")
-        self.config["always_on_top"] = on; save_config(self.config)
-
     def _on_tray_icon_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick: self.showNormal()
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick: self.bring_to_front()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -406,37 +406,23 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     sys.excepthook = handle_exception
-    
     app = QApplication(sys.argv)
-    
-    # --- 단일 인스턴스 확인 로직 ---
     socket = QLocalSocket()
     socket.connectToServer(SOCKET_NAME)
     
-    # 서버에 연결되면 이미 실행 중인 것으로 판단
     if socket.waitForConnected(500):
-        # 간단한 메시지를 보내 기존 창을 활성화하도록 요청
         socket.writeData(b'show')
-        socket.flush()
-        socket.waitForBytesWritten(1000)
-        socket.close()
-        sys.exit(0) # 현재 인스턴스 종료
+        socket.flush(); socket.waitForBytesWritten(1000); socket.close()
+        sys.exit(0)
     else:
-        # 연결 실패 시, 기존에 비정상 종료된 서버가 있을 수 있으므로 정리
         QLocalServer.removeServer(SOCKET_NAME)
-        
         server = QLocalServer()
         server.listen(SOCKET_NAME)
-        
         app.setApplicationName("티버 다운로더")
         app.setApplicationVersion(APP_VERSION)
         app.setStyle("Fusion")
         app.setStyleSheet(build_qss())
-        
         window = MainWindow()
-        
-        # 서버의 newConnection 시그널을 MainWindow의 슬롯과 연결
         server.newConnection.connect(window._handle_new_instance)
-        
         window.show()
         sys.exit(app.exec())
