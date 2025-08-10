@@ -1,5 +1,6 @@
 ![TVer Application](./main.png)
-![TVer Downloader Logo](./logo.png) # 티버 다운로더 (TVer Downloader)
+![TVer Downloader Logo](./logo.png) 
+# 티버 다운로더 (TVer Downloader)
 
 [![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
