@@ -1,11 +1,12 @@
-# 파일명: src/about_dialog.py
+# src/about_dialog.py
+# 수정: v2.3.1의 기능에 맞춰 '주요 기능' 설명 텍스트 업데이트
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialogButtonBox, QTextBrowser, QWidget
 )
 from PyQt6.QtCore import Qt
 from src.icon import get_app_icon
-    # utils의 함수 시그니처/동작은 기존 그대로 사용
 from src.utils import open_developer_link, open_feedback_link
 
 class AboutDialog(QDialog):
@@ -34,7 +35,7 @@ class AboutDialog(QDialog):
         # 본문
         self.viewer = QTextBrowser(objectName="AboutViewer")
         self.viewer.setOpenExternalLinks(True)
-        self.viewer.setHtml(self._build_html(version))
+        self.viewer.setHtml(self._build_html())
         root.addWidget(self.viewer, 1)
 
         # 하단 버튼
@@ -50,16 +51,17 @@ class AboutDialog(QDialog):
 
         root.addLayout(btn_row)
 
-    def _build_html(self, version: str) -> str:
-        return f"""
+    def _build_html(self) -> str:
+        # v2.3.1 기준 핵심 기능 목록으로 업데이트
+        return """
         <html>
         <head>
             <meta charset="utf-8">
             <style>
-                body {{ font-family: -apple-system, Segoe UI, Arial, sans-serif; font-size: 14px; }}
-                h3 {{ margin: 12px 0 6px 0; }}
-                ul {{ margin: 6px 0 12px 24px; }}
-                li {{ margin: 4px 0; }}
+                body { font-family: -apple-system, Segoe UI, Arial, sans-serif; font-size: 14px; }
+                h3 { margin: 12px 0 6px 0; }
+                ul { margin: 6px 0 12px 24px; list-style-type: disc; }
+                li { margin: 6px 0; }
             </style>
         </head>
         <body>
@@ -69,16 +71,19 @@ class AboutDialog(QDialog):
             <h3>주요 기능</h3>
             <ul>
                 <li>에피소드/시리즈 URL 분석 및 일괄 다운로드</li>
-                <li>진행률/속도/ETA, 자막 임베드(가능 시)</li>
-                <li>파일명 커스터마이즈, 동시 다운로드 수 조절</li>
-                <li>기록 탭: 재다운로드/제거</li>
-                <li>GitHub 최신 버전 확인 알림</li>
+                <li>다운로드 큐 및 동시 다운로드 수 제어</li>
+                <li>즐겨찾기 시리즈 등록 및 신규 영상 자동 확인</li>
+                <li>영상/오디오 품질 선택 및 자막 자동 병합</li>
+                <li>사용자 정의 파일명 형식 지원</li>
+                <li>다운로드 완료 후 자동 작업 (폴더 열기, 시스템 종료)</li>
+                <li>썸네일 미리보기 (확대/저장) 및 다운로드 기록 관리</li>
+                <li>단일 인스턴스 실행 (프로그램 중복 실행 방지)</li>
             </ul>
 
             <h3>오픈소스/레퍼런스</h3>
             <ul>
-                <li><a href="https://github.com/yt-dlp/yt-dlp-nightly-builds">yt-dlp nightly builds</a></li>
-                <li><a href="https://github.com/GyanD/codexffmpeg">FFmpeg for Windows (GyanD)</a></li>
+                <li><a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a></li>
+                <li><a href="https://ffmpeg.org/">FFmpeg</a></li>
                 <li><a href="https://pypi.org/project/PyQt6/">PyQt6</a></li>
                 <li><a href="https://pypi.org/project/requests/">requests</a></li>
                 <li><a href="https://github.com/deuxdoom/TVerDownloader">TVerDownloader (GitHub)</a></li>
