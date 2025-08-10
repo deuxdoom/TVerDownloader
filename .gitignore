@@ -25,4 +25,3 @@ Thumbs.db
 dist/
 build/
 *.spec
-# (릴리스에 exe를 올릴 땐 GitHub Release 자산으로 올리고, 저장소엔 넣지 않는 게 일반적)

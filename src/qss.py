@@ -1,7 +1,6 @@
 # src/qss.py
-# 수정:
-# - QTabBar::tab: 활성/비활성 탭의 구분을 명확하게 하기 위한 스타일 추가
-# - QListWidget#HistoryList::item, QListWidget#FavoritesList::item: 각 항목에 하단 구분선 추가
+# 수정: QListWidget#FavoritesList::item 스타일을 제거하고,
+#       대신 #FavoriteItem 위젯 자체에 구분선을 적용하는 규칙 추가
 
 def build_qss() -> str:
     return """
@@ -55,7 +54,6 @@ def build_qss() -> str:
         border: none;
         font-size: 16px;
         padding: 2px;
-        color: #9CA3AF;
     }
     QToolButton#OnTopButton:hover {
         background: #374151;
@@ -108,8 +106,8 @@ def build_qss() -> str:
         border-radius: 8px;
         padding: 6px;
     }
-    /* 기록, 즐겨찾기 탭 아이템 구분선 추가 */
-    QListWidget#HistoryList::item, QListWidget#FavoritesList::item {
+    /* 기록 탭 아이템 구분선 추가 */
+    QListWidget#HistoryList::item {
         padding: 8px;
         border-bottom: 1px solid #1F2937;
     }
@@ -117,6 +115,12 @@ def build_qss() -> str:
     /* 다운로드 아이템 */
     #DownloadItem { background: #111214; border: 1px solid #1F2937; border-radius: 10px; }
     #DownloadItem:hover { border-color: #334155; }
+    
+    /* 즐겨찾기 아이템 (위젯 자체에 스타일 적용) */
+    #FavoriteItem {
+        border-bottom: 1px solid #1F2937;
+    }
+    
     QLabel#Title { font-weight: 600; color: #F3F4F6; }
     QLabel#Status { color: #9CA3AF; }
     QLabel#Thumb { background: #0B0B0C; border: 1px solid #22262E; border-radius: 6px; }

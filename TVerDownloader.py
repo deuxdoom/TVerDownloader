@@ -1,7 +1,5 @@
 # TVerDownloader.py
-# 수정:
-# - check_all_favorites: '신규 영상 확인' 버튼 클릭 시 다운로드 탭(인덱스 0)으로 전환
-# - show_fav_menu: 컨텍스트 메뉴의 '이 시리즈 확인' 클릭 시 다운로드 탭(인덱스 0)으로 전환
+# 수정: refresh_fav_list에서 FavoriteItemWidget을 사용하도록 변경
 
 import sys
 import os
@@ -24,7 +22,7 @@ from src.bulk_dialog import BulkAddDialog
 from src.dialogs import SettingsDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
-from src.widgets import DownloadItemWidget
+from src.widgets import DownloadItemWidget, FavoriteItemWidget # FavoriteItemWidget import 추가
 from src.updater import maybe_show_update
 
 from src.threads.setup_thread import SetupThread
@@ -33,7 +31,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.3.3"
+APP_VERSION = "2.3.4"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):
@@ -232,18 +230,18 @@ class MainWindow(QMainWindow):
         for i in range(self.ui.download_list.count()):
             item = self.ui.download_list.item(i)
             widget = self.ui.download_list.itemWidget(item)
-            if isinstance(widget, DownloadItemWidget) and widget.url == url:
+            if isinstance(widget, (DownloadItemWidget, FavoriteItemWidget)) and widget.url == url:
                 return widget
         return None
 
     def _update_item_widget(self, url: str, payload: Dict):
         widget = self._find_item_widget(url)
-        if widget:
+        if isinstance(widget, DownloadItemWidget):
             widget.update_progress(payload)
 
     def _on_task_finished(self, url: str, success: bool):
         widget = self._find_item_widget(url)
-        if not widget: return
+        if not widget or not isinstance(widget, DownloadItemWidget): return
         if success:
             title = widget.title_label.text()
             self.history_store.add(url, title, widget.final_filepath)
@@ -315,11 +313,18 @@ class MainWindow(QMainWindow):
         self.append_log(f"[알림] 기록에서 제거됨: {url}")
         
     def refresh_fav_list(self):
+        """즐겨찾기 목록을 FavoriteItemWidget을 사용하여 새로 고칩니다."""
         self.ui.fav_list.clear()
         for url, meta in self.fav_store.sorted_entries():
-            last_check = meta.get("last_check", "-")
-            item = QListWidgetItem(f"{url}\n마지막 확인: {last_check}"); item.setData(Qt.ItemDataRole.UserRole, url)
+            item = QListWidgetItem()
+            # 사용자 정의 위젯 생성
+            widget = FavoriteItemWidget(url, meta)
+            item.setSizeHint(widget.sizeHint())
+            # QListWidgetItem에 URL 데이터를 저장하여 컨텍스트 메뉴 등에서 사용
+            item.setData(Qt.ItemDataRole.UserRole, url)
+            
             self.ui.fav_list.addItem(item)
+            self.ui.fav_list.setItemWidget(item, widget)
 
     def add_favorite(self):
         url = self.ui.fav_input.text().strip()
@@ -352,19 +357,15 @@ class MainWindow(QMainWindow):
             if self.sender() == self.ui.fav_chk_btn: QMessageBox.information(self, "알림", "등록된 즐겨찾기가 없습니다.")
             return
         self.append_log(f"[즐겨찾기] 전체 확인 시작 ({len(urls)}개 시리즈)"); self.series_parser.parse('fav-check', urls)
-        # 확인 작업 시작 후 다운로드 탭으로 전환
         self.ui.tabs.setCurrentIndex(0)
         
     def show_fav_menu(self, pos):
         item = self.ui.fav_list.itemAt(pos);
         if not item: return
         url = item.data(Qt.ItemDataRole.UserRole); menu = QMenu()
-        
-        # '이 시리즈 확인' 액션을 лямбда 함수로 만들어 여러 동작을 연결
         def check_this_series():
             self.series_parser.parse('fav-check', [url])
-            self.ui.tabs.setCurrentIndex(0) # 다운로드 탭으로 전환
-        
+            self.ui.tabs.setCurrentIndex(0)
         menu.addAction("이 시리즈 확인", check_this_series)
         menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url))
         menu.addAction("삭제", lambda: self.remove_favorite(url))
