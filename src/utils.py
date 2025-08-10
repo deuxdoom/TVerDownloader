@@ -1,7 +1,7 @@
 # src/utils.py
 # 수정:
-# - FILENAME_TITLE_MAX_LENGTH: 파일명에 사용될 제목의 최대 길이를 80자로 정의
-# - construct_filename_template: 생성되는 파일명 템플릿에서 제목 부분에 길이 제한 구문을 적용
+# - construct_filename_template: yt-dlp 템플릿에서 제목 길이 제한 구문을 제거.
+#   길이 제한은 download_thread.py에서 Python 코드로 직접 처리하도록 로직 변경.
 
 import json
 import os
@@ -18,8 +18,7 @@ CONFIG_FILE = "downloader_config.json"
 DEFAULT_PARALLEL = 3
 PARALLEL_MIN = 1
 PARALLEL_MAX = 5
-# 파일명으로 사용될 동영상 제목의 최대 길이 (OS 경로 길이 제한 오류 방지)
-FILENAME_TITLE_MAX_LENGTH = 80
+FILENAME_TITLE_MAX_LENGTH = 120
 
 
 def load_config() -> Dict[str, Any]:
@@ -73,29 +72,24 @@ def construct_filename_template(config: Dict[str, Any]) -> str:
     parts_cfg = config.get("filename_parts", {})
     order = config.get("filename_order", [])
 
-    # yt-dlp가 인식하는 형식으로 변환
+    # yt-dlp가 인식하는 형식으로 변환 (길이 제한 구문 제거)
     key_map = {
         "series": "%(series)s",
         "upload_date": "%(upload_date>%Y-%m-%d)s",
         "episode_number": "%(episode_number)s",
-        "episode": f"%(title:.{FILENAME_TITLE_MAX_LENGTH})s", # 제목(episode)에 길이 제한 적용
+        "episode": "%(title)s", # 길이 제한 제거
         "id": "[%(id)s]"
     }
     
     selected_parts = [key_map[key] for key in order if parts_cfg.get(key, False) and key in key_map]
     
-    # 시리즈명이 있으면 하위 폴더로, 없으면 현재 폴더로
     if parts_cfg.get("series"):
-        # TVer는 series 메타가 없을 때 playlist_title을 대신 사용하기도 함
         return f"%(series,playlist_title)s/{' '.join(selected_parts)}.%(ext)s"
     else:
         return f"{' '.join(selected_parts)}.%(ext)s"
 
 
 def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
-    """
-    다양한 키 이름으로 저장될 수 있는 동시 다운로드 설정값을 정규화하여 단일 키로 통합합니다.
-    """
     def clamp(n: Any) -> int:
         try:
             val = int(float(n))
@@ -124,7 +118,6 @@ def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
     return DEFAULT_PARALLEL
 
 def get_startupinfo():
-    """Windows에서 서브프로세스 콘솔 숨김."""
     if os.name == "nt":
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -133,7 +126,6 @@ def get_startupinfo():
 
 
 def open_file_location(filepath: str):
-    """파일 탐색기에서 파일 위치 열기(플랫폼별)."""
     try:
         if sys.platform == "win32":
             subprocess.run(["explorer", "/select,", os.path.normpath(filepath)])
@@ -146,7 +138,6 @@ def open_file_location(filepath: str):
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
-    """글로벌 예외 핸들러: 로그 파일로 저장하고 메시지 박스 알림."""
     error_message = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     log_file = "TVerDownloader_crash.log"
     with open(log_file, "w", encoding="utf-8") as f:

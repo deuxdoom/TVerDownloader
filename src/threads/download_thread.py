@@ -1,7 +1,9 @@
 # src/threads/download_thread.py
 # 수정:
-# - _parse_line: 로그 필터링 기능 추가. 'Destination', 'Merging', 'Embedding', 'ERROR' 등
-#                핵심 키워드가 포함된 로그만 UI에 표시하여 불필요한 frag 로그를 제거.
+# - _execute_download:
+#   1. yt-dlp로 메타데이터(-J 옵션)를 먼저 가져옴
+#   2. 가져온 메타데이터와 파일명 설정값을 조합하여 Python 코드 내에서 직접 최종 파일 경로를 생성 (제목 길이 제한 포함)
+#   3. 생성된 최종 파일 경로를 -o 옵션으로 yt-dlp 다운로드 명령어에 전달
 
 import os
 import re
@@ -13,10 +15,9 @@ from typing import List, Optional, Dict, Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from src.utils import get_startupinfo
+from src.utils import get_startupinfo, FILENAME_TITLE_MAX_LENGTH
 
 class DownloadThread(QThread):
-    """yt-dlp를 사용하여 단일 URL을 다운로드하고 진행률을 보고하는 스레드."""
     progress = pyqtSignal(str, dict)
     finished = pyqtSignal(str, bool)
 
@@ -27,6 +28,7 @@ class DownloadThread(QThread):
         self.download_folder = download_folder
         self.ytdlp_exe_path = ytdlp_exe_path
         self.ffmpeg_exe_path = os.path.dirname(ffmpeg_exe_path)
+        # output_template은 이제 메타데이터와 조합하기 위한 '형식'으로만 사용됨
         self.output_template = output_template
         self.quality_format = quality_format
         self.process: Optional[subprocess.Popen] = None
@@ -46,11 +48,9 @@ class DownloadThread(QThread):
         if not p or p.poll() is not None: return
         try:
             if os.name == "nt":
-                p.send_signal(signal.CTRL_BREAK_EVENT)
-                p.wait(timeout=2)
+                p.send_signal(signal.CTRL_BREAK_EVENT); p.wait(timeout=2)
             else:
-                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-                p.wait(timeout=2)
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM); p.wait(timeout=2)
         except (ProcessLookupError, subprocess.TimeoutExpired, OSError): pass
 
         if p.poll() is None:
@@ -78,8 +78,23 @@ class DownloadThread(QThread):
         self.finished.emit(self.url, is_successful)
 
     def _execute_download(self) -> bool:
-        self._emit_quick_metadata()
-        command = self._build_command()
+        # 1. 메타데이터 먼저 가져오기
+        metadata = self._get_metadata()
+        if not metadata:
+            self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."})
+            return False
+        
+        # UI에 제목/썸네일 즉시 표시
+        self.progress.emit(self.url, {
+            "title": metadata.get("title", "제목 없음"),
+            "thumbnail": metadata.get("thumbnail")
+        })
+
+        # 2. Python에서 최종 파일 경로 생성 (제목 길이 제한 포함)
+        final_filepath = self._build_final_filepath(metadata)
+
+        # 3. 생성된 경로로 다운로드 명령어 재구성
+        command = self._build_command(final_filepath)
         
         popen_kwargs: Dict[str, Any] = {}
         if os.name == 'nt':
@@ -98,23 +113,59 @@ class DownloadThread(QThread):
                 if self._stop_flag:
                     self.progress.emit(self.url, {"status": "취소됨"})
                     return False
-                self._parse_line(line)
+                self._parse_line(line, final_filepath)
 
-        if self._stop_flag:
-            return False
-
+        if self._stop_flag: return False
         rc = self.process.wait(timeout=5) if self.process else 1
         success = (rc == 0)
         final_status = "완료" if success else "오류"
-        self.progress.emit(self.url, {"status": final_status, "percent": 100})
+        self.progress.emit(self.url, {"status": final_status, "percent": 100, "final_filepath": final_filepath})
         return success
 
-    def _build_command(self) -> List[str]:
-        output_path_template = os.path.join(self.download_folder, self.output_template)
+    def _get_metadata(self) -> Optional[Dict[str, Any]]:
+        """-J 옵션으로 JSON 메타데이터를 가져옵니다."""
+        try:
+            cmd = [self.ytdlp_exe_path, "-J", "--no-warnings", self.url]
+            startupinfo = get_startupinfo()
+            p = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8",
+                errors="ignore", startupinfo=startupinfo, timeout=20,
+            )
+            return json.loads(p.stdout) if p.returncode == 0 else None
+        except Exception:
+            return None
+    
+    def _build_final_filepath(self, metadata: Dict[str, Any]) -> str:
+        """메타데이터와 템플릿을 조합하여 최종 파일 경로를 생성합니다."""
+        # 템플릿에서 확장자(.%(ext)s) 부분은 제외하고 처리
+        template = self.output_template.rsplit('.', 1)[0]
+        
+        # 제목(title)에 길이 제한 적용
+        title = metadata.get('title', 'NA')
+        if len(title) > FILENAME_TITLE_MAX_LENGTH:
+            title = title[:FILENAME_TITLE_MAX_LENGTH]
+
+        # 템플릿의 각 부분을 실제 메타데이터로 교체
+        path = template.replace("%(series,playlist_title)s", metadata.get('series') or metadata.get('playlist_title') or '')\
+                       .replace("%(series)s", metadata.get('series') or '')\
+                       .replace("%(upload_date>%Y-%m-%d)s", metadata.get('upload_date', '')[:8])\
+                       .replace("%(episode_number)s", str(metadata.get('episode_number', '')))\
+                       .replace("%(title)s", title)\
+                       .replace("%(id)s", metadata.get('id', ''))
+        
+        # 확장자 추가
+        ext = metadata.get('ext', 'mp4')
+        
+        # 최종 경로 조합
+        return os.path.join(self.download_folder, f"{path}.{ext}")
+
+    def _build_command(self, final_filepath: str) -> List[str]:
+        """yt-dlp 실행 명령어를 생성합니다."""
+        # -o 옵션에 템플릿 대신 완성된 파일 경로를 전달
         command: List[str] = [
             self.ytdlp_exe_path, self.url,
             "--ffmpeg-location", self.ffmpeg_exe_path,
-            "-o", output_path_template,
+            "-o", final_filepath,
             "--retries", "10", "--fragment-retries", "10",
             "--force-overwrites", "--no-keep-fragments", "--no-check-certificate",
             "--windows-filenames", "--no-cache-dir", "--abort-on-error",
@@ -128,23 +179,14 @@ class DownloadThread(QThread):
             command += ["-f", self.quality_format, "--merge-output-format", "mp4"]
         return command
 
-    def _parse_line(self, line: str):
+    def _parse_line(self, line: str, final_filepath: str):
         line = (line or "").strip()
         if not line: return
 
-        # payload를 미리 만들지 않고, 필요한 정보가 있을 때만 생성
         payload: Dict[str, Any] = {}
-
-        # --- 로그 필터링 로직 ---
-        # 로그로 표시할 키워드 목록
-        log_keywords = [
-            "[download] Destination:", # 각 컴포넌트(비디오/오디오) 다운로드 완료
-            "Merging formats into",   # 포맷 병합 시작
-            "Embedding subtitles",    # 자막 병합 시작
-            "[error]",                # 오류 메시지
-            "ERROR:",                 # 오류 메시지
-        ]
-        # 키워드 중 하나라도 포함된 경우에만 로그를 payload에 추가
+        log_keywords = ["Merging formats into", "Embedding subtitles", "[error]", "ERROR:"]
+        
+        # Destination 로그는 이제 사용하지 않으므로, 완료 로그는 Merging/Embedding으로 판단
         if any(keyword in line for keyword in log_keywords):
             payload["log"] = line
 
@@ -154,45 +196,21 @@ class DownloadThread(QThread):
                 self._current_component = "오디오"
             else:
                 self._current_component = "비디오"
-            # 파일 경로 추출 로직도 여기에 포함
-            payload["final_filepath"] = line.split("Destination:", 1)[1].strip()
 
-        # 진행률 표시줄(%)이 포함된 라인은 항상 처리
         m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
         if m_progress:
             payload.update({
                 "status": "다운로드 중",
-                "percent": float(m_progress.group(1)),
-                "speed": m_progress.group(2),
-                "eta": m_progress.group(3),
-                "component": self._current_component
+                "percent": float(m_progress.group(1)), "speed": m_progress.group(2),
+                "eta": m_progress.group(3), "component": self._current_component
             })
         
-        # 후처리 상태 업데이트
         if "Merging formats" in line:
             payload["status"] = "후처리 중 (병합)"
-            # 병합 시 최종 파일 경로 갱신
-            m_path = re.search(r'Merging formats into "(.*?)"', line)
-            if m_path: payload["final_filepath"] = m_path.group(1).strip()
+            # 병합 시 최종 파일 경로는 이미 알고 있으므로, payload에 담아 확실히 전달
+            payload["final_filepath"] = final_filepath
         elif "Embedding subtitles" in line:
             payload["status"] = "후처리 중 (자막)"
                 
-        # 처리할 내용이 payload에 담긴 경우에만 시그널을 보냄
         if payload:
             self.progress.emit(self.url, payload)
-
-    def _emit_quick_metadata(self):
-        try:
-            cmd = [self.ytdlp_exe_path, "-J", "--no-warnings", self.url]
-            startupinfo = get_startupinfo()
-            p = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="ignore", startupinfo=startupinfo, timeout=20,
-            )
-            if p.returncode == 0:
-                data = json.loads(p.stdout)
-                payload = {"title": data.get("title"), "thumbnail": data.get("thumbnail") or (data.get("thumbnails")[0] if data.get("thumbnails") else None)}
-                if any(v for v in payload.values()):
-                    self.progress.emit(self.url, payload)
-        except Exception:
-            pass
