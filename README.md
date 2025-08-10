@@ -3,6 +3,7 @@
   <img src="./logo.png" alt="TVer Downloader Logo" width="60" style="vertical-align: middle;">
   티버 다운로더 (TVer Downloader)
 </h1>
+
 [![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases)
