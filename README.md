@@ -1,7 +1,5 @@
 ![TVer Application](./main.png)
-# 티버 다운로더 (TVer Downloader)
-
-![TVer Downloader Logo](./logo.png)
+![TVer Downloader Logo](./logo.png) # 티버 다운로더 (TVer Downloader)
 
 [![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
@@ -13,92 +11,61 @@
 [![Made with yt-dlp](https://img.shields.io/badge/made%20with-yt--dlp-orange?style=for-the-badge)](https://github.com/yt-dlp/yt-dlp)
 [![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=for-the-badge&logo=ffmpeg)](https://ffmpeg.org/)
 
-📌 [**Repository**](https://github.com/deuxdoom/TVerDownloader)  
-🐞 [**Issues**](https://github.com/deuxdoom/TVerDownloader/issues)  
+---
 
---- 
+## 📜 간단 소개
 
-**TVer Downloader**는 일본 TVer 플랫폼의 동영상을 다운로드하기 위한 오픈소스 도구입니다.  
-PyQt6와 yt-dlp를 활용해 직관적인 GUI와 다양한 사용자 설정 기능을 제공합니다.
+**TVer Downloader**는 일본 TVer 플랫폼의 지역 제한을 우회해 동영상을 다운로드하고 관리할 수 있도록 도와주는 GUI 도구입니다.  
+PyQt6 기반의 직관적인 인터페이스와 yt-dlp/FFmpeg 자동 업데이트 등의 기능을 갖추고 있습니다.
 
 ---
 
-## 📦 시스템 요구 사항
+## 💻 시스템 요구 사항
 
 - Windows 10 / 11 (x64)
-- 인터넷 연결 (첫 실행 시 구성 요소 자동 준비), 일본 VPN 필수
-- ⚠ [Microsoft Visual C++ 재배포 가능 패키지 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) 를 반드시 설치해야 합니다.
+- Python 3.8 이상 (실행용 EXE 포함)
+- 인터넷 연결 및 일본 VPN 필요
+- 설치 전 필수: [Microsoft Visual C++ 재배포 가능 패키지 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 
 ---
 
-## 📝 개요
+## ✨ 주요 기능 (v2.3.2 기준)
 
-- **목적**: 티버(TVer)의 스트리밍 영상들을 일본VPN을 통해 다운로드하는 툴
-- **릴리스**: [v2.3.2](https://github.com/deuxdoom/TVerDownloader/releases/tag/v2.3.2)
-- **라이선스**: MIT
-- **언어**: Python 3.8+
+- 최신 **yt-dlp** 및 **FFmpeg** 자동 업데이트
+- **단일 및 다중 다운로드** (시리즈 URL 자동 분해 지원)
+- **파일명 자유 커스터마이징** 및 순서 설정 지원
+- **화질 선택** (최상 / 1080p / 720p / 오디오 전용)
+- **썸네일 클릭 확대**, **완료 목록 더블클릭 재생**
+- **트레이 알림**, **항상 위**, **진행률 표시 및 로그 강화**
+- **히스토리 및 즐겨찾기 자동 백업**
+- **다운로드 후 폴더 열기 / 시스템 종료 등 후속 작업 지원**
+- **가볍고 직관적인 UI** — 불필요한 기능 최소화, UX 중심 설계
 
 ---
 
-## ✨ 주요 기능
+## 🚀 설치 및 사용 방법
 
-- 최신 버전 업데이트 지원
-- 단일 및 다중 다운로드 지원
-- 다운로드 엔진 yt-dlp + ffmpeg 자동 최신화
-- 시리즈 즐겨찾기 등록을 통한 자동 다운로드
-- 화질 선택 기능 (최상, 1080p, 720p, 오디오 전용)
-- 파일명 커스터마이징 (시리즈명, 날짜 등)
-- 후속 작업 지원 (폴더 열기, 시스템 종료 등)
-- 썸네일 클릭 확대 및 완료 목록 더블 클릭시 재생 기능
-- 로그 표시 강화 및 히스토리와 즐겨찾기 목록 상시 백업 
-- 메인창 항상 위 가능 
-- 최소화시 트레이로 감춤
- 
----
-
-## 🛠 사용 방법
-
-1. **URL 추가** 하는 빈칸에 TVer 영상 링크 붙여넣기
-2. **설정** 탭에서 저장 폴더 설정, 동시 다운 갯수, 파일명, 화질등을 조정
+1. TVer 영상 *URL*을 입력 창에 붙여넣기
+2. **설정** 메뉴에서 저장 폴더, 화질, 동시 다운로드 수, 파일명 규칙 등 조정
 3. **다운로드 시작** 버튼 클릭
-4. 진행바로 다운로드 상태 확인
-5. 즐겁게 영상 감상!
+4. 진행률·로그·썸네일로 실시간 상태 확인
+5. **완료된 목록** 더블 클릭으로 영상재생
 
 ---
 
 ## 🔧 개발 정보
 
-- **GUI 프레임워크**: PyQt6
-- **다운로드 엔진**: yt-dlp
-- **설정 방식**: JSON 기반
-- **제약 사항**: VPN 네트워크 의존
+- **GUI**: PyQt6  
+- **다운로드 엔진**: yt-dlp + FFmpeg (자동 최신화 포함)  
+- **설정 저장**: JSON 기반(config/history)  
+- **안정성**: 예외 발생 시 크래시 로그(`TVerDownloader_crash.log`) 저장
 
 ---
 
-## 🤝 응원
+## 🤝 기여 및 응원
 
-- 유투브 구독으로 개발자를 응원해 주세요! [YouTube](https://www.youtube.com/@LE_SSERAFIM?sub_confirmation=1)
-
----
-
-## 🗺️ 추가 기능 로드맵
-
-- 여러분의 참신한 아이디어를 기다립니다!
-- 기타 등등 생각만 많음 o_o;
+- 버그 제보 및 코드 기여: [Issues](https://github.com/deuxdoom/TVerDownloader/issues)  
+- 개발자 응원: [YouTube 구독](https://www.youtube.com/@LE_SSERAFIM?sub_confirmation=1)  
+- 별 ⭐을 눌러주시면 큰 힘이 됩니다!
 
 ---
-
-## ❓ 자주 묻는 질문 (FAQ)
-
-- **0%에서 멈춤/403** → 일본 **VPN**이 꺼져 있거나 연결 상태가 불안정할 때 발생합니다.
-- **병합 실패 / 오디오 추출 실패** → FFmpeg 준비 완료 여부를 로그에서 확인 후 재시도하세요.
-- **보안 경고** → 일부 보안/백신 프로그램이 악성코드 또는 트로이목마로 오진 할 수 있습니다.  
-- **Windows의 PC보호** → 윈도우 서명하지 않은 파일이라는 스크린 차단 경고의 경우
-  파이썬 소스코드를 빌드 exe파일이기에 뜨는 단순 화이트리스트 관련 경고이며 악성코드는 절대 없으니 안심하셔도 됩니다.
-- **PyQt6 관련 오류** → 업데이트시 EXE 파일만 복붙한 경우로, EXE를 비롯한 _internal 폴더까지 같이 덮어 씌우시면 해결 됩니다.
-
----
-
-## 📜 라이선스
-
-- 오픈소스 사용 고지 및 링크는 앱 **정보(About)** 창에서 확인할 수 있습니다.
