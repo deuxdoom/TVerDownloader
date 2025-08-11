@@ -4,6 +4,10 @@
   티버 다운로더 (TVer Downloader)
 </h1>
 
+<a href="https://github.com/sponsors/deuxdoom">
+  <img src="https://img.shields.io/badge/후원하기-GitHub%20Sponsors-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
+</a>
+
 [![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
 [![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=for-the-badge)](https://github.com/deuxdoom/TVerDownloader/releases)
@@ -40,7 +44,7 @@ PyQt6 기반의 직관적인 인터페이스와 yt-dlp/FFmpeg 자동 업데이�
 - **화질 선택** (최상 / 1080p / 720p / 오디오 전용)
 - **썸네일 클릭 확대**, **완료 목록 더블클릭 재생**
 - **트레이 알림**, **항상 위**, **진행률 표시 및 로그 강화**
-- **라이크 / 다크 테마 전환 기능** (기본값 라이트)
+- **라이트 / 다크 테마 전환 기능** (기본값 라이트)
 - **다운로드 한 영상 및 즐겨찾기 시리즈 목록 자동 백업**
 - **다운로드 후 폴더 열기 / 시스템 종료 등 후속 작업 지원**
 - **가볍고 직관적인 UI** — 불필요한 기능 최소화, UX 중심 설계
