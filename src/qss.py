@@ -1,6 +1,7 @@
 # src/qss.py
-# 수정: QListWidget#FavoritesList::item 스타일을 제거하고,
-#       대신 #FavoriteItem 위젯 자체에 구분선을 적용하는 규칙 추가
+# 수정: 
+# - #HistoryItem 위젯에 하단 구분선 스타일 추가
+# - 위젯을 사용하는 리스트(HistoryList, FavoritesList)의 내부 패딩 제거
 
 def build_qss() -> str:
     return """
@@ -60,7 +61,8 @@ def build_qss() -> str:
         border-radius: 4px;
     }
     QToolButton#OnTopButton:checked {
-        background: #3B82F6;
+        background: #FFFFFF;
+        color: #0F0F10;
         border-radius: 4px;
     }
 
@@ -92,7 +94,7 @@ def build_qss() -> str:
     QTabBar::tab:selected {
         background: #1F2937;
         color: #FFFFFF;
-        border-top: 2px solid #3B82F6;
+        border-top: 2px solid #FACC15;
     }
 
     #LeftPane, #RightPane, #DownloadTab, #HistoryTab, #FavoritesTab { background: #0F0F10; }
@@ -104,20 +106,27 @@ def build_qss() -> str:
         background: #0F0F10;
         border: 1px solid #1F2937;
         border-radius: 8px;
-        padding: 6px;
+        /* 내부 아이템 위젯이 자체 패딩을 가지므로 리스트 자체의 패딩은 제거 */
+        padding: 0px; 
     }
-    /* 기록 탭 아이템 구분선 추가 */
+    /* 하위 호환성을 위한 텍스트 기반 기록 아이템 스타일 */
     QListWidget#HistoryList::item {
         padding: 8px;
         border-bottom: 1px solid #1F2937;
     }
 
     /* 다운로드 아이템 */
-    #DownloadItem { background: #111214; border: 1px solid #1F2937; border-radius: 10px; }
-    #DownloadItem:hover { border-color: #334155; }
+    #DownloadItem { 
+        background: #111214; 
+        border: 1px solid #1F2937; 
+        border-radius: 10px; 
+    }
+    #DownloadItem:hover { 
+        border-color: #334155; 
+    }
     
-    /* 즐겨찾기 아이템 (위젯 자체에 스타일 적용) */
-    #FavoriteItem {
+    /* 즐겨찾기 및 기록 위젯 아이템 */
+    #FavoriteItem, #HistoryItem {
         border-bottom: 1px solid #1F2937;
     }
     

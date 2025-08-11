@@ -1,9 +1,12 @@
 # src/ui/main_window_ui.py
-# 수정: _create_header에서 on_top_btn.setText("📌") 라인 제거
+# 수정:
+# - QAbstractItemView import 추가
+# - _create_download_tab: download_list의 SelectionMode를 ExtendedSelection으로 설정하여 다중 선택 허용
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTextEdit,
-    QLabel, QListWidget, QFrame, QSplitter, QTabWidget, QToolButton, QMenu
+    QLabel, QListWidget, QFrame, QSplitter, QTabWidget, QToolButton, QMenu,
+    QComboBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
@@ -33,7 +36,6 @@ class MainWindowUI:
         self.on_top_btn = QToolButton(objectName="OnTopButton", toolTip="항상 위")
         self.on_top_btn.setCheckable(True)
         self.on_top_btn.setFixedSize(28, 28)
-        # self.on_top_btn.setText("📌") # 이 라인을 제거
         layout.addWidget(self.app_title); layout.addStretch(1)
         layout.addWidget(self.settings_button)
         layout.addWidget(self.about_button)
@@ -69,7 +71,10 @@ class MainWindowUI:
         row.addWidget(self.clear_completed_button)
         row.addWidget(self.queue_count_label)
         left_layout.addLayout(row)
-        self.download_list = QListWidget(objectName="DownloadList"); self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.download_list = QListWidget(objectName="DownloadList")
+        self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        # --- 다중 선택 모드 설정 ---
+        self.download_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         left_layout.addWidget(self.download_list, 1)
         right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(8, 8, 8, 8); row_log = QHBoxLayout()
@@ -82,11 +87,27 @@ class MainWindowUI:
         layout.addWidget(splitter, 1); self.tabs.addTab(tab, "다운로드")
 
     def _create_history_tab(self):
-        tab = QWidget(objectName="HistoryTab"); layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12); row = QHBoxLayout()
-        row.addWidget(QLabel("다운로드 기록", objectName="PaneTitle")); row.addStretch(1)
-        self.history_list = QListWidget(objectName="HistoryList"); self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        layout.addLayout(row); layout.addWidget(self.history_list, 1); self.tabs.addTab(tab, "기록")
+        tab = QWidget(objectName="HistoryTab")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        top_controls = QHBoxLayout()
+        self.history_title = QLabel("다운로드 기록", objectName="PaneTitle")
+        self.history_sort_combo = QComboBox()
+        self.history_sort_combo.addItem("다운로드 최신순")
+        self.history_sort_combo.addItem("제목 오름차순")
+        self.history_search_input = QLineEdit(placeholderText="검색...")
+        self.history_search_input.setClearButtonEnabled(True)
+        self.history_search_input.setFixedWidth(200)
+        top_controls.addWidget(self.history_title)
+        top_controls.addStretch(1)
+        top_controls.addWidget(self.history_sort_combo)
+        top_controls.addWidget(self.history_search_input)
+        layout.addLayout(top_controls)
+        self.history_list = QListWidget(objectName="HistoryList")
+        self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        layout.addWidget(self.history_list, 1)
+        self.tabs.addTab(tab, "기록")
 
     def _create_favorites_tab(self):
         tab = QWidget(objectName="FavoritesTab")
