@@ -1,10 +1,19 @@
 # TVerDownloader.py
-# 수정: _on_task_finished 슬롯이 metadata를 직접 받도록 변경하고, 불필요한 get_metadata_for_url 호출 제거
+# 수정:
+# - __init__에서 클립보드 감지 타이머 관련 코드 제거
+# - _check_clipboard 메서드 제거
 
-import sys, os, re, webbrowser, subprocess
-from typing import List, Dict, Optional
+import sys
+import os
+import re
+import webbrowser
+import subprocess
+from typing import List, Dict, Optional, Tuple
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QMenu, QWidget)
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon,
+    QFileDialog, QMenu, QWidget
+)
 from PyQt6.QtCore import Qt, QEvent, QTimer
 from PyQt6.QtGui import QCursor, QAction, QGuiApplication
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
@@ -14,6 +23,7 @@ from src.qss import build_qss
 from src.about_dialog import AboutDialog
 from src.bulk_dialog import BulkAddDialog
 from src.dialogs import SettingsDialog
+from src.series_dialog import SeriesSelectionDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
 from src.widgets import DownloadItemWidget, FavoriteItemWidget, HistoryItemWidget
@@ -25,30 +35,50 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.3.4"
+APP_VERSION = "2.3.5" # 버전 업데이트
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME_EN} v{APP_VERSION}")
-        self.force_quit = False; self.config = load_config(); self.history_store = HistoryStore(); self.history_store.load()
-        self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
-        self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
-        self.series_parser = SeriesParser(ytdlp_path=""); self.download_manager = DownloadManager(self.config, self.history_store)
-        self._connect_signals(); self._set_input_enabled(False)
+        self.force_quit = False
+        self.env_ready = False
+
+        self.config = load_config()
+        self.history_store = HistoryStore()
+        self.history_store.load()
+        self.fav_store = FavoritesStore("favorites.json")
+        self.fav_store.load()
+
+        self.ui = MainWindowUI(self)
+        self.ui.setup_ui()
+        self.tray_icon = QSystemTrayIcon(self)
+        self.ui.setup_tray(APP_VERSION)
+        
+        self.series_parser = SeriesParser(ytdlp_path="")
+        self.download_manager = DownloadManager(self.config, self.history_store)
+        
+        self._connect_signals()
+        
+        self._set_input_enabled(False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
-        self.refresh_history_list(); self.refresh_fav_list()
-        self._last_clipboard_text = ""; self.clipboard_timer = QTimer(self)
-        self.clipboard_timer.setInterval(1500); self.clipboard_timer.timeout.connect(self._check_clipboard); self.clipboard_timer.start()
+        self.refresh_history_list()
+        self.refresh_fav_list()
+        
         self.ui.download_list.installEventFilter(self)
+        
         self.append_log("프로그램 시작. 환경 설정을 시작합니다...")
-        self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
-        self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
+        self.setup_thread = SetupThread(self)
+        self.setup_thread.log.connect(self.append_log)
+        self.setup_thread.finished.connect(self._on_setup_finished)
+        self.setup_thread.start()
 
     def eventFilter(self, source, event):
         if source is self.ui.download_list and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Delete: self._delete_selected_download_items(); return True
+            if event.key() == Qt.Key.Key_Delete:
+                self._delete_selected_download_items()
+                return True
         return super().eventFilter(source, event)
 
     def _delete_selected_download_items(self):
@@ -56,7 +86,8 @@ class MainWindow(QMainWindow):
         if not selected_items: return
         rows_to_delete = sorted([self.ui.download_list.row(item) for item in selected_items], reverse=True)
         for row in rows_to_delete:
-            item = self.ui.download_list.item(row); widget = self.ui.download_list.itemWidget(item)
+            item = self.ui.download_list.item(row)
+            widget = self.ui.download_list.itemWidget(item)
             if not isinstance(widget, DownloadItemWidget): continue
             url = widget.url
             if url in self.download_manager._active_threads: continue
@@ -64,138 +95,209 @@ class MainWindow(QMainWindow):
             self.ui.download_list.takeItem(row)
 
     def _connect_signals(self):
-        self.ui.add_button.clicked.connect(self.process_input_url); self.ui.url_input.returnPressed.connect(self.process_input_url)
-        self.ui.bulk_button.clicked.connect(self.open_bulk_add); self.ui.settings_button.clicked.connect(self.open_settings)
+        self.ui.add_button.clicked.connect(self.process_input_url)
+        self.ui.url_input.returnPressed.connect(self.process_input_url)
+        self.ui.bulk_button.clicked.connect(self.open_bulk_add)
+        self.ui.settings_button.clicked.connect(self.open_settings)
         self.ui.about_button.clicked.connect(lambda: AboutDialog(APP_VERSION, self).exec())
-        self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
+        self.ui.clear_log_button.clicked.connect(self.clear_log)
+        self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
         self.ui.clear_completed_button.clicked.connect(self._clear_completed_downloads)
         self.ui.download_list.customContextMenuRequested.connect(self.show_download_context_menu)
         self.ui.history_list.customContextMenuRequested.connect(self.show_history_menu)
         self.ui.history_search_input.textChanged.connect(self.refresh_history_list)
         self.ui.history_sort_combo.currentIndexChanged.connect(self.refresh_history_list)
-        self.ui.fav_add_btn.clicked.connect(self.add_favorite); self.ui.fav_del_btn.clicked.connect(self.remove_selected_favorite)
-        self.ui.fav_chk_btn.clicked.connect(self.check_all_favorites); self.ui.fav_list.customContextMenuRequested.connect(self.show_fav_menu)
-        self.download_manager.log.connect(self.append_log); self.download_manager.item_added.connect(self._add_item_widget)
-        self.download_manager.progress_updated.connect(self._update_item_widget); self.download_manager.task_finished.connect(self._on_task_finished)
+        self.ui.fav_add_btn.clicked.connect(self.add_favorite)
+        self.ui.fav_del_btn.clicked.connect(self.remove_selected_favorite)
+        self.ui.fav_chk_btn.clicked.connect(self.check_all_favorites)
+        self.ui.fav_list.customContextMenuRequested.connect(self.show_fav_menu)
+        self.download_manager.log.connect(self.append_log)
+        self.download_manager.item_added.connect(self._add_item_widget)
+        self.download_manager.progress_updated.connect(self._update_item_widget)
+        self.download_manager.task_finished.connect(self._on_task_finished)
         self.download_manager.queue_changed.connect(lambda q, a: self.ui.queue_count_label.setText(f"{q} 대기 / {a} 진행"))
         self.download_manager.all_tasks_completed.connect(self._on_all_downloads_finished)
-        self.series_parser.log.connect(lambda ctx, msg: self.append_log(msg)); self.series_parser.finished.connect(self._on_series_parsed)
+        self.series_parser.log.connect(lambda ctx, msg: self.append_log(msg))
+        self.series_parser.finished.connect(self._on_series_parsed)
         self.tray_icon.activated.connect(self._on_tray_icon_activated)
 
     def refresh_history_list(self):
-        search_term = self.ui.history_search_input.text().lower(); sort_index = self.ui.history_sort_combo.currentIndex()
+        search_term = self.ui.history_search_input.text().lower()
+        sort_index = self.ui.history_sort_combo.currentIndex()
         all_entries = self.history_store.sorted_entries()
         if search_term: entries_to_show = [(url, meta) for url, meta in all_entries if search_term in meta.get('title', '').lower() or search_term in url.lower()]
         else: entries_to_show = all_entries
         if sort_index == 1: entries_to_show.sort(key=lambda item: item[1].get('title', ''))
         self.ui.history_list.clear()
         for url, meta in entries_to_show:
-            item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, url)
             if meta.get("series_id") or meta.get("thumbnail_url"):
-                widget = HistoryItemWidget(url, meta); item.setSizeHint(widget.sizeHint())
-                self.ui.history_list.addItem(item); self.ui.history_list.setItemWidget(item, widget)
+                widget = HistoryItemWidget(url, meta)
+                item.setSizeHint(widget.sizeHint())
+                self.ui.history_list.addItem(item)
+                self.ui.history_list.setItemWidget(item, widget)
             else:
-                title = meta.get("title", "(제목 없음)"); date = meta.get("date", "")
-                item.setText(f"{title}  •  {date}\n{url}"); self.ui.history_list.addItem(item)
+                title = meta.get("title", "(제목 없음)")
+                date = meta.get("date", "")
+                item.setText(f"{title}  •  {date}\n{url}")
+                self.ui.history_list.addItem(item)
             
-    def _check_clipboard(self):
-        if not self.isActiveWindow(): return
-        try:
-            clipboard_text = QApplication.clipboard().text().strip()
-            if not clipboard_text or clipboard_text == self._last_clipboard_text: return
-            self._last_clipboard_text = clipboard_text
-            if re.search(r"https://tver\.jp/(episodes|series)/[a-z0-9]+", clipboard_text):
-                reply = QMessageBox.question(self, '클립보드 URL 감지', f"클립보드에서 TVer URL이 감지되었습니다.\n\n{clipboard_text}\n\n이 URL을 다운로드 목록에 추가할까요?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
-                if reply == QMessageBox.StandardButton.Yes: self._process_url(clipboard_text)
-        except Exception: self.clipboard_timer.stop(); QTimer.singleShot(5000, self.clipboard_timer.start)
-
     def _process_url(self, url: str):
-        if not self._ensure_download_folder(): self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다."); return
-        if "/series/" in url: self._set_input_enabled(False); self.series_parser.parse('single', [url])
-        else: self._request_add_task(url)
+        if not self.env_ready:
+            self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            return
+        if not self._ensure_download_folder():
+            self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
+            return
+        if "/series/" in url:
+            self._set_input_enabled(False)
+            self.series_parser.parse('single', [url])
+        else:
+            self._request_add_task(url)
 
     def set_always_on_top(self, on: bool, init: bool = False):
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on); self.show()
-        if not init: self.config["always_on_top"] = on; save_config(self.config)
-        self.ui.on_top_btn.setChecked(on); self.ui.on_top_btn.setText("📍" if on else "📌")
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        self.show()
+        if not init:
+            self.config["always_on_top"] = on
+            save_config(self.config)
+        self.ui.on_top_btn.setChecked(on)
+        self.ui.on_top_btn.setText("📍" if on else "📌")
 
     def _clear_completed_downloads(self):
         for i in range(self.ui.download_list.count() - 1, -1, -1):
-            item = self.ui.download_list.item(i); widget = self.ui.download_list.itemWidget(item)
+            item = self.ui.download_list.item(i)
+            widget = self.ui.download_list.itemWidget(item)
             if not isinstance(widget, DownloadItemWidget): continue
-            url = widget.url; is_active = url in self.download_manager._active_threads; is_queued = url in self.download_manager._task_queue
-            if not is_active and not is_queued: self.ui.download_list.takeItem(i)
+            url = widget.url
+            is_active = url in self.download_manager._active_threads
+            is_queued = url in self.download_manager._task_queue
+            if not is_active and not is_queued:
+                self.ui.download_list.takeItem(i)
 
     def _handle_new_instance(self):
-        server = self.sender();
-        if isinstance(server, QLocalServer): server.nextPendingConnection().close()
+        server = self.sender()
+        if isinstance(server, QLocalServer):
+            server.nextPendingConnection().close()
         self.bring_to_front()
 
     def bring_to_front(self):
         if self.isMinimized(): self.showNormal()
         elif not self.isVisible(): self.show()
-        self.raise_(); self.activateWindow()
+        self.raise_()
+        self.activateWindow()
 
     def _set_input_enabled(self, enabled: bool):
-        self.ui.url_input.setEnabled(enabled); self.ui.add_button.setEnabled(enabled)
-        self.ui.bulk_button.setEnabled(enabled); self.ui.fav_chk_btn.setEnabled(enabled)
+        self.ui.url_input.setEnabled(enabled)
+        self.ui.add_button.setEnabled(enabled)
+        self.ui.bulk_button.setEnabled(enabled)
+        self.ui.fav_chk_btn.setEnabled(enabled)
         
     def _ensure_download_folder(self) -> bool:
         folder = self.config.get("download_folder")
         if folder and os.path.isdir(folder): return True
         new_folder = QFileDialog.getExistingDirectory(self, "다운로드 폴더 선택")
-        if new_folder: self.config["download_folder"] = new_folder; save_config(self.config); self.download_manager.update_config(self.config); self.append_log(f"다운로드 폴더가 '{new_folder}'(으)로 설정되었습니다."); return True
+        if new_folder:
+            self.config["download_folder"] = new_folder
+            save_config(self.config)
+            self.download_manager.update_config(self.config)
+            self.append_log(f"다운로드 폴더가 '{new_folder}'(으)로 설정되었습니다.")
+            return True
         return False
 
     def process_input_url(self):
         url = self.ui.url_input.text().strip()
         if not url: return
-        self._process_url(url); self.ui.url_input.clear()
+        self._process_url(url)
+        self.ui.url_input.clear()
 
-    def _request_add_task(self, url: str):
+    def _request_add_task(self, url: str) -> bool:
         if self.history_store.exists(url):
             title = self.history_store.get_title(url)
             reply = QMessageBox.question(self, '중복 다운로드', f"이미 다운로드한 항목입니다:\n\n{title}\n\n다시 다운로드할까요?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No: self.append_log(f"[알림] 중복 다운로드 취소: {url}"); return
-        self.download_manager.add_task(url)
+            if reply == QMessageBox.StandardButton.No:
+                self.append_log(f"[알림] 중복 다운로드 취소: {url}")
+                return False
+        return self.download_manager.add_task(url)
 
     def open_bulk_add(self):
-        if not self._ensure_download_folder(): self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다."); return
+        if not self.env_ready:
+            self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            return
+        if not self._ensure_download_folder():
+            self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
+            return
         dialog = BulkAddDialog(self)
         if dialog.exec():
             urls = dialog.get_urls()
             if not urls: return
-            normal_urls = [u for u in urls if "/series/" not in u]; series_urls = [u for u in urls if "/series/" in u]
-            for url in normal_urls: self._request_add_task(url)
-            if series_urls: self.series_parser.parse('bulk', series_urls)
+            normal_urls = [u for u in urls if "/series/" not in u]
+            series_urls = [u for u in urls if "/series/" in u]
+            for url in normal_urls:
+                self._request_add_task(url)
+            if series_urls:
+                self.series_parser.parse('bulk', series_urls)
 
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
-        if not ok: self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다."); QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요."); return
-        self.download_manager.set_paths(ytdlp_path, ffmpeg_path); self.series_parser.set_ytdlp_path(ytdlp_path)
+        if not ok:
+            self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다.")
+            QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요.")
+            return
+        self.download_manager.set_paths(ytdlp_path, ffmpeg_path)
+        self.series_parser.set_ytdlp_path(ytdlp_path)
+        self.env_ready = True
         self._set_input_enabled(True)
         self.append_log(f"{'=' * 44}\n📢 [안내] TVer는 일본 지역 제한이 있습니다.\n📢 원활한 다운로드를 위해 반드시 일본 VPN을 켜고 사용해주세요.\n{'=' * 44}")
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
         QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
-        if self.config.get("auto_check_favorites_on_start", True): self.check_all_favorites()
+        if self.config.get("auto_check_favorites_on_start", True):
+            self.check_all_favorites()
 
-    def _on_series_parsed(self, context: str, series_url: str, episode_urls: List[str]):
-        if context == 'single': self._set_input_enabled(True); self.append_log(f"[시리즈] 분석 완료. {len(episode_urls)}개 에피소드를 추가합니다.")
-        added_count = 0
-        for url in episode_urls:
-            if context == 'fav-check' and self.history_store.exists(url): continue
-            self._request_add_task(url); added_count += 1
-        if context == 'fav-check':
-            self.fav_store.touch_last_check(series_url); self.refresh_fav_list()
-            self.append_log(f"[즐겨찾기] '{series_url}' 확인 -> 신규 {added_count}개 추가 요청")
+    def _on_series_parsed(self, context: str, series_url: str, episode_info: List[Dict[str, str]]):
+        if context == 'single' or context == 'bulk':
+            if context == 'single': self._set_input_enabled(True)
+            if not episode_info:
+                self.append_log(f"[{context}] '{series_url}' 시리즈에서 에피소드를 찾지 못했습니다.")
+                return
+            dialog = SeriesSelectionDialog(episode_info, self)
+            if dialog.exec():
+                selected_urls = dialog.get_selected_urls()
+                if not selected_urls:
+                    self.append_log(f"[{context}] 선택된 에피소드가 없어 추가하지 않았습니다.")
+                    return
+                added_count = 0
+                for url in selected_urls:
+                    if self._request_add_task(url):
+                        added_count += 1
+                self.append_log(f"[{context}] 시리즈에서 선택한 {added_count}개 에피소드를 추가했습니다.")
+            else:
+                self.append_log(f"[{context}] 시리즈 에피소드 추가를 취소했습니다.")
+        elif context == 'fav-check':
+            added_count = 0
+            for episode in episode_info:
+                url = episode['url']
+                if self.history_store.exists(url):
+                    continue
+                if self._request_add_task(url):
+                    added_count += 1
+            if added_count > 0:
+                self.append_log(f"'{series_url}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
+            self.fav_store.touch_last_check(series_url)
+            self.refresh_fav_list()
 
     def _add_item_widget(self, url: str):
-        item = QListWidgetItem(); widget = DownloadItemWidget(url)
-        widget.play_requested.connect(self.play_file); item.setSizeHint(widget.sizeHint())
-        self.ui.download_list.insertItem(0, item); self.ui.download_list.setItemWidget(item, widget)
+        item = QListWidgetItem()
+        widget = DownloadItemWidget(url)
+        widget.play_requested.connect(self.play_file)
+        item.setSizeHint(widget.sizeHint())
+        self.ui.download_list.insertItem(0, item)
+        self.ui.download_list.setItemWidget(item, widget)
 
     def _find_item_widget(self, url: str) -> Optional[QWidget]:
         for i in range(self.ui.download_list.count()):
-            item = self.ui.download_list.item(i); widget = self.ui.download_list.itemWidget(item)
+            item = self.ui.download_list.item(i)
+            widget = self.ui.download_list.itemWidget(item)
             if hasattr(widget, 'url') and widget.url == url: return widget
         return None
 
@@ -207,7 +309,7 @@ class MainWindow(QMainWindow):
         widget = self._find_item_widget(url)
         if not widget or not isinstance(widget, DownloadItemWidget): return
         if success and final_filepath:
-            title = widget.title_label.text()
+            title = meta.get('title', widget.title_label.text())
             series_id = meta.get('series_id')
             thumbnail_url = meta.get('thumbnail')
             self.history_store.add(url, title, final_filepath, series_id=series_id, thumbnail_url=thumbnail_url)
@@ -251,6 +353,7 @@ class MainWindow(QMainWindow):
         self.ui.log_output.verticalScrollBar().setValue(self.ui.log_output.verticalScrollBar().maximum())
 
     def clear_log(self): self.ui.log_output.clear()
+        
     def play_file(self, filepath: str):
         try: os.startfile(filepath); self.append_log(f"영상 재생: {filepath}")
         except Exception as e: self.append_log(f"[오류] 재생 실패: {e}")
@@ -263,8 +366,7 @@ class MainWindow(QMainWindow):
         menu.addAction("기록에서 제거", lambda: self.remove_from_history(url)); menu.exec(QCursor.pos())
 
     def remove_from_history(self, url: str):
-        self.history_store.remove(url); self.history_store.save(); self.refresh_history_list()
-        self.append_log(f"[알림] 기록에서 제거됨: {url}")
+        self.history_store.remove(url); self.history_store.save(); self.refresh_history_list(); self.append_log(f"[알림] 기록에서 제거됨: {url}")
         
     def refresh_fav_list(self):
         self.ui.fav_list.clear()
@@ -309,10 +411,15 @@ class MainWindow(QMainWindow):
         self.fav_store.remove(url); self.refresh_fav_list(); self.append_log(f"[즐겨찾기] 삭제: {url}")
 
     def open_settings(self):
+        current_theme = self.config.get("theme", "light")
         dialog = SettingsDialog(self.config, self)
         if dialog.exec():
             self.config = load_config()
             self.download_manager.update_config(self.config)
+            new_theme = self.config.get("theme", "light")
+            if new_theme != current_theme:
+                QApplication.instance().setStyleSheet(build_qss(new_theme))
+                self.append_log(f"테마가 '{new_theme}' (으)로 변경되었습니다.")
             self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
 
     def _on_tray_icon_activated(self, reason):
@@ -338,6 +445,11 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
+    
+    config = load_config()
+    theme = config.get("theme", "light")
+    app.setStyleSheet(build_qss(theme))
+    
     socket = QLocalSocket()
     socket.connectToServer(SOCKET_NAME)
     
@@ -349,7 +461,7 @@ if __name__ == "__main__":
         server = QLocalServer()
         server.listen(SOCKET_NAME)
         app.setApplicationName("티버 다운로더"); app.setApplicationVersion(APP_VERSION)
-        app.setStyle("Fusion"); app.setStyleSheet(build_qss())
+        app.setStyle("Fusion")
         window = MainWindow()
         server.newConnection.connect(window._handle_new_instance)
         window.show()

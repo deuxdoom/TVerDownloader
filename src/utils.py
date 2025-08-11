@@ -1,5 +1,5 @@
 # src/utils.py
-# 수정: load_config에 '변환 후 원본 삭제' 옵션(delete_on_conversion) 기본값 추가
+# 수정: load_config에서 theme의 기본값을 'light'로 변경
 
 import json
 import os
@@ -22,7 +22,7 @@ FILENAME_TITLE_MAX_LENGTH = 120
 def load_config() -> Dict[str, Any]:
     """설정 파일 로드(없으면 기본값). dict 병합으로 부분 업데이트 허용."""
     config = {
-        "theme": "dark",
+        "theme": "light", # 기본 테마를 light로 변경
         "download_folder": "",
         "max_concurrent_downloads": DEFAULT_PARALLEL,
         "filename_parts": {
@@ -36,7 +36,7 @@ def load_config() -> Dict[str, Any]:
         "always_on_top": False,
         "bandwidth_limit": "0",
         "conversion_format": "none",
-        "delete_on_conversion": False  # 변환 후 원본 삭제 여부
+        "delete_on_conversion": False
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -76,8 +76,7 @@ def construct_filename_template(config: Dict[str, Any]) -> str:
 
 def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
     def clamp(n: Any) -> int:
-        try:
-            val = int(float(n)); return max(PARALLEL_MIN, min(PARALLEL_MAX, val))
+        try: val = int(float(n)); return max(PARALLEL_MIN, min(PARALLEL_MAX, val))
         except (ValueError, TypeError): return DEFAULT_PARALLEL
     if "max_concurrent_downloads" in config: return clamp(config["max_concurrent_downloads"])
     legacy_keys = ["max_parallel", "max_parallel_downloads", "parallel_downloads",

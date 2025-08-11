@@ -1,5 +1,5 @@
 # src/dialogs.py
-# 수정: _create_advanced_tab의 대역폭 제한(limits) 옵션 목록 변경
+# 수정: '일반' 탭의 테마 선택 라디오 버튼 순서를 '라이트 (기본값)', '다크' 순으로 변경
 
 from __future__ import annotations
 from PyQt6.QtCore import Qt, QSize
@@ -35,16 +35,31 @@ class SettingsDialog(QDialog):
         exit_btn.clicked.connect(self.reject)
 
     def _create_general_tab(self):
-        tab = QWidget(); layout = QVBoxLayout(tab)
-        row = QHBoxLayout(); row.addWidget(QLabel("다운로드 폴더:"))
+        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
+        folder_group = QWidget(); folder_layout = QVBoxLayout(folder_group); folder_layout.setContentsMargins(0,0,0,0)
+        folder_layout.addWidget(QLabel("다운로드 폴더:"))
+        row = QHBoxLayout()
         self.folder_path_edit = QLineEdit(self.config.get("download_folder", "")); self.folder_path_edit.setReadOnly(True)
+        self.folder_path_edit.setObjectName("PathDisplayEdit")
         row.addWidget(self.folder_path_edit, 1)
         browse = QPushButton("찾아보기..."); browse.clicked.connect(self._browse_folder); row.addWidget(browse)
-        layout.addLayout(row)
-        row2 = QHBoxLayout(); row2.addWidget(QLabel("최대 동시 다운로드 개수:"))
+        folder_layout.addLayout(row); layout.addWidget(folder_group)
+        dl_count_group = QWidget(); dl_count_layout = QHBoxLayout(dl_count_group); dl_count_layout.setContentsMargins(0,0,0,0)
+        dl_count_layout.addWidget(QLabel("최대 동시 다운로드 개수:"))
         self.concurrent_spinbox = QSpinBox(); self.concurrent_spinbox.setRange(1, 5)
         self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 3))
-        row2.addWidget(self.concurrent_spinbox); row2.addStretch(1); layout.addLayout(row2)
+        dl_count_layout.addWidget(self.concurrent_spinbox); dl_count_layout.addStretch(1); layout.addWidget(dl_count_group)
+        theme_group = QWidget(); theme_layout = QVBoxLayout(theme_group); theme_layout.setContentsMargins(0,0,0,0)
+        theme_layout.addWidget(QLabel("테마:"))
+        self.theme_button_group = QButtonGroup(self)
+        theme_radio_layout = QHBoxLayout()
+        themes = {"라이트 (기본값)": "light", "다크": "dark"} # 순서 변경
+        current_theme = self.config.get("theme", "light")
+        for text, key in themes.items():
+            radio = QRadioButton(text); radio.setProperty("config_value", key)
+            self.theme_button_group.addButton(radio); theme_radio_layout.addWidget(radio)
+            if key == current_theme: radio.setChecked(True)
+        theme_radio_layout.addStretch(1); theme_layout.addLayout(theme_radio_layout); layout.addWidget(theme_group)
         layout.addStretch(1); self.tabs.addTab(tab, "일반")
 
     def _create_filename_tab(self):
@@ -113,42 +128,29 @@ class SettingsDialog(QDialog):
 
     def _create_advanced_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
-        
-        # --- 대역폭 제한 ---
         bw_groupbox = QWidget(); bw_v_layout = QVBoxLayout(bw_groupbox); bw_v_layout.setContentsMargins(0,0,0,0)
         bw_v_layout.addWidget(QLabel("대역폭 제한:"))
         self.bw_limit_button_group = QButtonGroup(self); bw_radio_layout = QVBoxLayout(); bw_radio_layout.setSpacing(10)
-        
-        # 대역폭 제한 옵션 수정
         limits = {"제한 없음": "0", "1 MB/s": "1M", "5 MB/s": "5M", "10 MB/s": "10M", "50 MB/s": "50M"}
         current_limit = self.config.get("bandwidth_limit", "0")
-
         for text, key in limits.items():
             radio = QRadioButton(text); radio.setProperty("config_value", key); self.bw_limit_button_group.addButton(radio); bw_radio_layout.addWidget(radio)
             if key == current_limit: radio.setChecked(True)
-        
         bw_v_layout.addLayout(bw_radio_layout); layout.addWidget(bw_groupbox)
-        
-        # --- 포맷 변환 ---
         conv_groupbox = QWidget(); conv_v_layout = QVBoxLayout(conv_groupbox); conv_v_layout.setContentsMargins(0,0,0,0)
         conv_v_layout.addWidget(QLabel("다운로드 후 변환:"))
         self.conversion_button_group = QButtonGroup(self); conv_radio_layout = QVBoxLayout(); conv_radio_layout.setSpacing(10)
         formats = {"변환 안 함 (MP4)": "none", "AVI로 변환": "avi", "MOV로 변환": "mov", "오디오만 추출 (MP3)": "mp3"}
         current_format = self.config.get("conversion_format", "none")
-        
         for text, key in formats.items():
             radio = QRadioButton(text); radio.setProperty("config_value", key); self.conversion_button_group.addButton(radio); conv_radio_layout.addWidget(radio)
             if key == current_format: radio.setChecked(True)
-        
         conv_v_layout.addLayout(conv_radio_layout)
         self.delete_original_checkbox = QCheckBox("변환 후 원본 파일 삭제")
         self.delete_original_checkbox.setChecked(self.config.get("delete_on_conversion", False))
         self.conversion_button_group.buttonToggled.connect(self._toggle_delete_checkbox)
         self._toggle_delete_checkbox()
-        
-        conv_v_layout.addWidget(self.delete_original_checkbox)
-        layout.addWidget(conv_groupbox)
-        
+        conv_v_layout.addWidget(self.delete_original_checkbox); layout.addWidget(conv_groupbox)
         layout.addStretch(1); self.tabs.addTab(tab, "고급")
 
     def _toggle_delete_checkbox(self):
@@ -163,18 +165,16 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         self.config["download_folder"] = self.folder_path_edit.text()
         self.config["max_concurrent_downloads"] = self.concurrent_spinbox.value()
+        if self.theme_button_group.checkedButton(): self.config["theme"] = self.theme_button_group.checkedButton().property("config_value")
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
-        
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
         if self.post_action_button_group.checkedButton(): self.config["post_action"] = self.post_action_button_group.checkedButton().property("config_value")
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
-        
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
-            
         save_config(self.config)
         self.accept()
