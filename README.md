@@ -11,15 +11,18 @@
   <img src="https://img.shields.io/badge/후원하기-GitHub%20Sponsors-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
 </a>
 
-[![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=plastic)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=plastic)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=plastic)](https://github.com/deuxdoom/TVerDownloader/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=plastic)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=plastic&logo=windows)](https://github.com/deuxdoom/TVerDownloader)
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue?style=plastic&logo=python)](https://www.python.org/)
-[![PyQt6](https://img.shields.io/badge/PyQt-6-green?style=plastic)](https://pypi.org/project/PyQt6/)
+[![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=flat)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=flat)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=flat)](https://github.com/deuxdoom/TVerDownloader/releases)
+
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square&logo=windows)](https://github.com/deuxdoom/TVerDownloader)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![PyQt6](https://img.shields.io/badge/PyQt-6-green?style=flat-square)](https://pypi.org/project/PyQt6/)
+
 [![Made with yt-dlp](https://img.shields.io/badge/made%20with-yt--dlp-orange?style=plastic)](https://github.com/yt-dlp/yt-dlp)
 [![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=plastic&logo=ffmpeg)](https://ffmpeg.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=plastic)](https://opensource.org/licenses/MIT)
+
 
 ---
 
