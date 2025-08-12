@@ -7,8 +7,8 @@
 <a href="https://refer-nordvpn.com/RRXwGuSQXTe">
   <img src="https://img.shields.io/badge/NORDVPN-3개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white" alt="NordVPN 3개월 무료">
 </a>
-<a href="https://github.com/sponsors/deuxdoom">
-  <img src="https://img.shields.io/badge/후원하기-GITHUB%20SPONSORS-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
+<a href="https://toon.at/donate/deuxdoom">
+  <img src="https://img.shields.io/badge/후원하기-투네이션-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
 </a>
 
 [![Release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=flat&label=RELEASE)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
