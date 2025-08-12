@@ -1,8 +1,6 @@
 # src/widgets.py
 # 수정:
-# - HistoryItemWidget._load_or_download_thumbnail:
-#   - 시리즈 ID 확인 로직을 제거하고, 에피소드 고유의 thumbnail_url만 사용하도록 로직 단순화
-#   - 에피소드 썸네일은 에피소드 ID를 기준으로 캐싱
+# - HistoryItemWidget: 항목 간 세로 간격을 줄이기 위해 내부 상하 여백(margin)을 8px에서 4px로 조정
 
 from __future__ import annotations
 import os
@@ -131,7 +129,6 @@ class FavoriteItemWidget(QWidget):
         self.last_check_label = QLabel(f"마지막 확인: {self.meta.get('last_check', '-')}"); self.last_check_label.setObjectName("PaneSubtitle")
         info_layout.addWidget(self.url_label); info_layout.addWidget(self.last_check_label); info_layout.addStretch(1); root.addWidget(info_widget, 1)
         self._load_or_download_thumbnail()
-
     def _load_or_download_thumbnail(self):
         try:
             series_id = self.url.strip('/').split('/')[-1]
@@ -161,7 +158,9 @@ class HistoryItemWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("HistoryItem"); self.url = url; self.meta = meta
         THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        root = QHBoxLayout(self); root.setContentsMargins(8, 8, 8, 8); root.setSpacing(12)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(8, 4, 8, 4) # 상하 여백을 4px로 수정
+        root.setSpacing(12)
         self.thumb_label = QLabel(objectName="Thumb", alignment=Qt.AlignmentFlag.AlignCenter); self.thumb_label.setFixedSize(128, 72); root.addWidget(self.thumb_label)
         info_widget = QWidget(); info_layout = QVBoxLayout(info_widget)
         info_layout.setContentsMargins(0, 0, 0, 0); info_layout.setSpacing(4)
@@ -173,16 +172,11 @@ class HistoryItemWidget(QWidget):
         self._load_or_download_thumbnail()
 
     def _load_or_download_thumbnail(self):
-        # 시리즈 ID 대신 에피소드 고유 썸네일 URL을 직접 사용
         episode_thumb_url = self.meta.get("thumbnail_url")
-        if not episode_thumb_url:
-            return
-            
+        if not episode_thumb_url: return
         try:
-            # 캐시 파일명은 에피소드 ID를 기준으로 생성
             episode_id = self.url.strip('/').split('/')[-1]
             cache_path = THUMBNAIL_CACHE_DIR / f"{episode_id}.jpg"
-            
             if cache_path.exists():
                 self._set_thumbnail_pixmap(QPixmap(str(cache_path)))
             else:

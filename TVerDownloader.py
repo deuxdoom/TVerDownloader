@@ -1,7 +1,4 @@
 # TVerDownloader.py
-# 수정:
-# - __init__에서 클립보드 감지 타이머 관련 코드 제거
-# - _check_clipboard 메서드 제거
 
 import sys
 import os
@@ -9,13 +6,14 @@ import re
 import webbrowser
 import subprocess
 from typing import List, Dict, Optional, Tuple
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon,
     QFileDialog, QMenu, QWidget
 )
 from PyQt6.QtCore import Qt, QEvent, QTimer
-from PyQt6.QtGui import QCursor, QAction, QGuiApplication
+from PyQt6.QtGui import QCursor, QAction, QGuiApplication, QFontDatabase, QFont
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from src.utils import load_config, save_config, handle_exception, open_file_location
@@ -35,7 +33,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.3.5" # 버전 업데이트
+APP_VERSION = "2.3.6"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):
@@ -215,8 +213,16 @@ class MainWindow(QMainWindow):
     def _request_add_task(self, url: str) -> bool:
         if self.history_store.exists(url):
             title = self.history_store.get_title(url)
-            reply = QMessageBox.question(self, '중복 다운로드', f"이미 다운로드한 항목입니다:\n\n{title}\n\n다시 다운로드할까요?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No:
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle('중복 다운로드')
+            msg_box.setText(f"이미 다운로드한 항목입니다:\n\n{title}\n\n다시 다운로드할까요?")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+            msg_box.button(QMessageBox.StandardButton.Yes).setText('예')
+            msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
+            
+            if msg_box.exec() == QMessageBox.StandardButton.No:
                 self.append_log(f"[알림] 중복 다운로드 취소: {url}")
                 return False
         return self.download_manager.add_task(url)
@@ -432,15 +438,33 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self.force_quit: event.accept(); return
-        reply = QMessageBox.question(self, '종료 확인', '종료하시겠습니까?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes: self.quit_application(); event.accept()
-        else: event.ignore()
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle('종료 확인')
+        msg_box.setText('종료하시겠습니까?')
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.button(QMessageBox.StandardButton.Yes).setText('예')
+        msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
+
+        if msg_box.exec() == QMessageBox.StandardButton.Yes:
+            self.quit_application()
+            event.accept()
+        else:
+            event.ignore()
 
     def quit_application(self):
         self.append_log("프로그램을 종료합니다...")
         for url in list(self.download_manager._active_threads.keys()): self.download_manager.stop_task(url)
         self.force_quit = True; self.tray_icon.hide(); QApplication.instance().quit()
 
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = Path(sys._MEIPASS)
+    except Exception:
+        base_path = Path(".").resolve()
+    return base_path / relative_path
 
 if __name__ == "__main__":
     sys.excepthook = handle_exception
@@ -448,6 +472,18 @@ if __name__ == "__main__":
     
     config = load_config()
     theme = config.get("theme", "light")
+    
+    font_path = get_resource_path(Path("fonts/NotoSansCJKkr-Regular.otf"))
+    if font_path.exists():
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id != -1:
+            family = QFontDatabase.applicationFontFamilies(font_id)[0]
+            app.setFont(QFont(family))
+        else:
+            print("WARNING: Font file could not be loaded.")
+    else:
+        print(f"INFO: Custom font not found at '{font_path}', using system default.")
+
     app.setStyleSheet(build_qss(theme))
     
     socket = QLocalSocket()
