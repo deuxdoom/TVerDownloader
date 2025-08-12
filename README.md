@@ -5,21 +5,25 @@
 </h1>
 
 <a href="https://refer-nordvpn.com/RRXwGuSQXTe">
-  <img src="https://img.shields.io/badge/NordVPN-3개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=white" alt="NordVPN 3개월 무료">
+  <img src="https://img.shields.io/badge/NORDVPN-3개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=white" alt="NordVPN 3개월 무료">
 </a>
 <a href="https://github.com/sponsors/deuxdoom">
-  <img src="https://img.shields.io/badge/후원하기-GitHub%20Sponsors-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
+  <img src="https://img.shields.io/badge/후원하기-GITHUB%20SPONSORS-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
 </a>
 
-[![GitHub release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=flat&label=RELEASE)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![GitHub downloads latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=flat&label=DOWNLOADS%40LATEST)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![GitHub downloads total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=flat&label=DOWNLOADS)](https://github.com/deuxdoom/TVerDownloader/releases)<br>
-[![Platform](https://img.shields.io/badge/platform-WINDOWS%20X64-blue?style=flat-square&logo=windows&label=PLATFORM)](https://github.com/deuxdoom/TVerDownloader)
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square&logo=python&label=PYTHON)](https://www.python.org/)
-[![PyQt6](https://img.shields.io/badge/PyQt-6-green?style=flat-square&label=PYQT)](https://pypi.org/project/PyQt6/)<br>
-[![Made with yt-dlp](https://img.shields.io/badge/made%20with-YT--DLP-orange?style=plastic&label=MADE%20WITH%20YT-DLP)](https://github.com/yt-dlp/yt-dlp)
-[![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=plastic&logo=ffmpeg&label=MADE%20WITH%20FFmpeg)](https://ffmpeg.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=plastic&label=LICENSE)](https://opensource.org/licenses/MIT)
+<br>
+
+[![Release](https://img.shields.io/github/release/deuxdoom/TVerDownloader?logo=github&style=flat&label=RELEASE)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![Downloads Latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=flat&label=DOWNLOADS@LATEST)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
+[![Downloads Total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=flat&label=DOWNLOADS)](https://github.com/deuxdoom/TVerDownloader/releases)
+[![License](https://img.shields.io/badge/LICENSE-MIT-yellow?style=flat)](https://opensource.org/licenses/MIT)<br>
+
+[![Platform](https://img.shields.io/badge/PLATFORM-WINDOWS%20X64-blue?style=flat&logo=windows)](https://github.com/deuxdoom/TVerDownloader)
+[![Python](https://img.shields.io/badge/PYTHON-3.8%2B-blue?style=flat&logo=python)](https://www.python.org/)
+[![PyQt](https://img.shields.io/badge/PYQT-6-green?style=flat)](https://pypi.org/project/PyQt6/)<br>
+
+[![Made with yt-dlp](https://img.shields.io/badge/MADE%20WITH-YT--DLP-orange?style=flat)](https://github.com/yt-dlp/yt-dlp)
+[![Made with FFmpeg](https://img.shields.io/badge/MADE%20WITH-FFmpeg-black?style=flat&logo=ffmpeg)](https://ffmpeg.org/)
 
 
 ---
