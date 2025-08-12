@@ -4,6 +4,9 @@
   티버 다운로더 (TVer Downloader)
 </h1>
 
+<a href="https://refer-nordvpn.com/RRXwGuSQXTe">
+  <img src="https://img.shields.io/badge/NordVPN-3개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=white" alt="NordVPN 3개월 무료">
+</a>
 <a href="https://github.com/sponsors/deuxdoom">
   <img src="https://img.shields.io/badge/후원하기-GitHub%20Sponsors-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
 </a>
