@@ -1,5 +1,5 @@
 # src/utils.py
-# 수정: load_config에서 theme의 기본값을 'light'로 변경
+# 수정: load_config에 'preferred_codec' 설정 추가
 
 import json
 import os
@@ -22,7 +22,7 @@ FILENAME_TITLE_MAX_LENGTH = 120
 def load_config() -> Dict[str, Any]:
     """설정 파일 로드(없으면 기본값). dict 병합으로 부분 업데이트 허용."""
     config = {
-        "theme": "light", # 기본 테마를 light로 변경
+        "theme": "dark",
         "download_folder": "",
         "max_concurrent_downloads": DEFAULT_PARALLEL,
         "filename_parts": {
@@ -32,6 +32,7 @@ def load_config() -> Dict[str, Any]:
         "filename_order": ["series", "upload_date", "episode_number", "episode", "id"],
         "post_action": "None",
         "quality": "bv*+ba/b",
+        "preferred_codec": "avc",  # 선호 코덱 설정 (avc, hevc, vp9)
         "auto_check_favorites_on_start": True,
         "always_on_top": False,
         "bandwidth_limit": "0",

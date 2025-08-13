@@ -26,7 +26,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.3.7"
+APP_VERSION = "2.3.8"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):

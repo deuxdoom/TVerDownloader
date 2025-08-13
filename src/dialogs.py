@@ -1,7 +1,5 @@
 # src/dialogs.py
-# 수정:
-# - '캐시' 탭(_create_cache_tab) 신설
-# - 캐시 관리 로직(계산, 삭제)을 MainWindow에서 SettingsDialog 내부로 이동하여 오류 해결
+# 수정: '화질' 탭에 선호 코덱 선택 라디오 버튼 그룹 추가
 
 from __future__ import annotations
 from pathlib import Path
@@ -10,10 +8,10 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QTabWidget, QWidget, QFileDialog, QDialogButtonBox, 
     QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QStyle,
-    QRadioButton, QButtonGroup, QCheckBox, QMessageBox
+    QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame
 )
 from src.utils import save_config
-from src.widgets import THUMBNAIL_CACHE_DIR # 캐시 경로 import
+from src.widgets import THUMBNAIL_CACHE_DIR
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
@@ -31,7 +29,7 @@ class SettingsDialog(QDialog):
         self._create_quality_tab()
         self._create_post_action_tab()
         self._create_advanced_tab()
-        self._create_cache_tab() # 캐시 탭 추가
+        self._create_cache_tab()
         self.buttons = QDialogButtonBox()
         save_btn = self.buttons.addButton("설정 저장", QDialogButtonBox.ButtonRole.AcceptRole)
         exit_btn = self.buttons.addButton("나가기", QDialogButtonBox.ButtonRole.RejectRole)
@@ -40,7 +38,6 @@ class SettingsDialog(QDialog):
         exit_btn.clicked.connect(self.reject)
 
     def showEvent(self, event):
-        """다이얼로그가 표시될 때 캐시 크기를 계산합니다."""
         super().showEvent(event)
         self._update_cache_label()
 
@@ -56,22 +53,16 @@ class SettingsDialog(QDialog):
         self.cache_size_label.setText(self._calculate_cache_size())
 
     def _clear_thumbnail_cache(self):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle('캐시 삭제')
+        msg_box = QMessageBox(self); msg_box.setWindowTitle('캐시 삭제')
         msg_box.setText("정말로 모든 썸네일 캐시를 삭제하시겠습니까?")
         msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-        msg_box.button(QMessageBox.StandardButton.Yes).setText('예')
-        msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
-        if msg_box.exec() == QMessageBox.StandardButton.No:
-            return
-        
+        msg_box.button(QMessageBox.StandardButton.Yes).setText('예'); msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
+        if msg_box.exec() == QMessageBox.StandardButton.No: return
         count = 0
         try:
             for f in THUMBNAIL_CACHE_DIR.glob('**/*'):
-                if f.is_file():
-                    f.unlink()
-                    count += 1
+                if f.is_file(): f.unlink(); count += 1
             QMessageBox.information(self, "완료", f"썸네일 캐시 {count}개를 삭제했습니다.")
         except Exception as e:
             QMessageBox.critical(self, "오류", f"캐시 삭제 중 오류 발생:\n{e}")
@@ -151,14 +142,31 @@ class SettingsDialog(QDialog):
         self.preview_label.setText(" ".join(parts) + ".mp4")
 
     def _create_quality_tab(self):
-        tab = QWidget(); layout = QVBoxLayout(tab); layout.addWidget(QLabel("다운로드 화질 선택:"))
-        radio_layout = QVBoxLayout(); radio_layout.setSpacing(10); self.quality_button_group = QButtonGroup(self)
+        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
+        
+        # 화질 선택
+        q_groupbox = QWidget(); q_layout = QVBoxLayout(q_groupbox); q_layout.setContentsMargins(0,0,0,0)
+        q_layout.addWidget(QLabel("다운로드 화질 선택:"))
+        q_radio_layout = QVBoxLayout(); q_radio_layout.setSpacing(10); self.quality_button_group = QButtonGroup(self)
         qualities = {"최상 화질 (기본값)": "bv*+ba/b", "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]", "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]"}
         current_quality = self.config.get("quality", "bv*+ba/b")
         for text, key in qualities.items():
-            radio = QRadioButton(text); radio.setProperty("config_value", key); self.quality_button_group.addButton(radio); radio_layout.addWidget(radio)
+            radio = QRadioButton(text); radio.setProperty("config_value", key); self.quality_button_group.addButton(radio); q_radio_layout.addWidget(radio)
             if key == current_quality: radio.setChecked(True)
-        layout.addLayout(radio_layout); layout.addStretch(1); self.tabs.addTab(tab, "화질")
+        q_layout.addLayout(q_radio_layout); layout.addWidget(q_groupbox)
+
+        # 코덱 선택
+        c_groupbox = QWidget(); c_layout = QVBoxLayout(c_groupbox); c_layout.setContentsMargins(0,0,0,0)
+        c_layout.addWidget(QLabel("선호 코덱 (재생 호환성):"))
+        c_radio_layout = QVBoxLayout(); c_radio_layout.setSpacing(10); self.codec_button_group = QButtonGroup(self)
+        codecs = {"AVC/H.264 (최고 호환성)": "avc", "HEVC/H.265 (고효율)": "hevc", "VP9 (웹 표준)": "vp9"}
+        current_codec = self.config.get("preferred_codec", "avc")
+        for text, key in codecs.items():
+            radio = QRadioButton(text); radio.setProperty("config_value", key); self.codec_button_group.addButton(radio); c_radio_layout.addWidget(radio)
+            if key == current_codec: radio.setChecked(True)
+        c_layout.addLayout(c_radio_layout); layout.addWidget(c_groupbox)
+
+        layout.addStretch(1); self.tabs.addTab(tab, "화질")
 
     def _create_post_action_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.addWidget(QLabel("모든 다운로드 완료 후 작업:"))
@@ -228,6 +236,7 @@ class SettingsDialog(QDialog):
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
+        if self.codec_button_group.checkedButton(): self.config["preferred_codec"] = self.codec_button_group.checkedButton().property("config_value")
         if self.post_action_button_group.checkedButton(): self.config["post_action"] = self.post_action_button_group.checkedButton().property("config_value")
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")

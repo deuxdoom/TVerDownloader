@@ -1,7 +1,5 @@
 # src/download_manager.py
-# 수정:
-# - 메타데이터 캐시(_metadata_cache) 및 관련 로직 전체 제거
-# - _on_download_finished: DownloadThread로부터 받은 metadata를 그대로 상위로 전달
+# 수정: _start_download에서 'preferred_codec' 설정값을 읽어 DownloadThread에 전달
 
 from typing import List, Dict, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -25,7 +23,7 @@ class DownloadManager(QObject):
         self._task_queue: List[str] = []; self._active_threads: Dict[str, DownloadThread] = {}
         self._active_conversions: Dict[str, ConversionThread] = {}
         self._active_urls: set[str] = set(); self._logged_start: set[str] = set()
-        self._conversion_meta_cache: Dict[str, Dict] = {} # 변환 중인 항목의 메타데이터만 임시 저장
+        self._conversion_meta_cache: Dict[str, Dict] = {}
 
     def set_paths(self, ytdlp_path: str, ffmpeg_path: str):
         self.ytdlp_path = ytdlp_path; self.ffmpeg_path = ffmpeg_path
@@ -63,13 +61,18 @@ class DownloadManager(QObject):
 
     def _start_download(self, url: str):
         download_folder = self.config.get("download_folder", "")
-        if not download_folder: self.log.emit(f"[오류] 다운로드 폴더가 설정되지 않아 '{url}' 다운로드를 시작할 수 없습니다."); self._on_download_finished(url, False, "", {}); return
+        if not download_folder: self._on_download_finished(url, False, "", {}); return
         from src.utils import construct_filename_template
         output_template = construct_filename_template(self.config)
         quality_format = self.config.get("quality", "bv*+ba/b")
         bandwidth_limit = self.config.get("bandwidth_limit", "0")
-        thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path, ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template, quality_format=quality_format, bandwidth_limit=bandwidth_limit)
-        thread.progress.connect(self.progress_updated); thread.finished.connect(self._on_download_finished)
+        preferred_codec = self.config.get("preferred_codec", "avc") # 코덱 설정값 읽기
+        
+        thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
+                                ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
+                                quality_format=quality_format, bandwidth_limit=bandwidth_limit,
+                                preferred_codec=preferred_codec) # 코덱 인자 전달
+        thread.progress.connect(self._on_progress); thread.finished.connect(self._on_download_finished)
         self._active_threads[url] = thread; self._logged_start.discard(url); thread.start()
         self._update_queue_counter()
     
@@ -82,16 +85,14 @@ class DownloadManager(QObject):
     def _on_download_finished(self, url: str, success: bool, final_filepath: str, metadata: dict):
         thread = self._active_threads.pop(url, None)
         if thread: thread.deleteLater()
-        
         if not success:
             self.log.emit(f"[실패] 다운로드 실패 또는 취소: {url}")
             self.task_finished.emit(url, False, "", metadata)
             self._check_completion(); return
-        
         self.log.emit(f"[성공] 다운로드 완료: {final_filepath}")
         target_format = self.config.get("conversion_format", "none")
         if target_format != "none":
-            self._conversion_meta_cache[url] = metadata # 변환 전 메타데이터 임시 저장
+            self._conversion_meta_cache[url] = metadata
             self._start_conversion(url, final_filepath, target_format)
         else:
             self.task_finished.emit(url, True, final_filepath, metadata)
@@ -107,7 +108,6 @@ class DownloadManager(QObject):
     def _on_conversion_finished(self, success: bool, url: str, new_filepath: str):
         thread = self._active_conversions.pop(url, None)
         if thread: thread.deleteLater()
-        
         meta = self._conversion_meta_cache.pop(url, {})
         final_status = "완료" if success else "변환 오류"
         payload = {"status": final_status}

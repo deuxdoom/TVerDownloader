@@ -1,36 +1,25 @@
 # src/threads/download_thread.py
-# 수정:
-# - finished 시그널: 메타데이터(dict)를 함께 전달하도록 인자 추가
-# - run 메서드: 작업 완료 후 finished 시그널을 보낼 때, 초기에 획득했던 메타데이터를 함께 전달
+# 수정: 선호 코덱 설정에 맞춰 yt-dlp의 포맷(-f) 옵션을 동적으로 생성
 
-import os
-import re
-import json
-import time
-import signal
-import subprocess
+import os, re, json, time, signal, subprocess
 from typing import List, Optional, Dict, Any
-
 from PyQt6.QtCore import QThread, pyqtSignal
-
 from src.utils import get_startupinfo, FILENAME_TITLE_MAX_LENGTH
 
 class DownloadThread(QThread):
     progress = pyqtSignal(str, dict)
-    finished = pyqtSignal(str, bool, str, dict) # (url, success, final_filepath, metadata)
+    finished = pyqtSignal(str, bool, str, dict)
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str, 
-                 output_template: str, quality_format: str, bandwidth_limit: str, parent=None):
+                 output_template: str, quality_format: str, bandwidth_limit: str, preferred_codec: str, parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
         self.ytdlp_exe_path = ytdlp_exe_path; self.ffmpeg_exe_path = os.path.dirname(ffmpeg_exe_path)
         self.output_template = output_template; self.quality_format = quality_format
-        self.bandwidth_limit = bandwidth_limit
+        self.bandwidth_limit = bandwidth_limit; self.preferred_codec = preferred_codec
         self.process: Optional[subprocess.Popen] = None
-        self._stop_flag = False
-        self._current_component: str = "비디오"
-        self._final_filepath: str = ""
-        self._metadata: Dict = {} # 메타데이터를 저장할 인스턴스 변수
+        self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
+        self._metadata: Dict = {}
 
     def stop(self):
         if self._stop_flag: return
@@ -57,24 +46,19 @@ class DownloadThread(QThread):
 
     def run(self):
         is_successful = False
-        try:
-            is_successful = self._execute_download()
+        try: is_successful = self._execute_download()
         except Exception as e:
             is_successful = False
             log_msg = f"다운로드 스레드 예외 발생: {e}"
             self.progress.emit(self.url, {"status": "오류", "log": log_msg})
-        # 작업 완료 시 저장해둔 메타데이터를 함께 전달
         self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
 
     def _execute_download(self) -> bool:
         self._metadata = self._get_metadata() or {}
         if not self._metadata:
-            self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."})
-            return False
+            self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."}); return False
         
-        # UI에 빠른 피드백을 위해 초기 정보만 먼저 보냄
         self.progress.emit(self.url, {"title": self._metadata.get("title", "제목 없음"), "thumbnail": self._metadata.get("thumbnail")})
-        
         self._final_filepath = self._build_final_filepath(self._metadata)
         command = self._build_command(self._final_filepath)
         popen_kwargs: Dict[str, Any] = {}
@@ -127,7 +111,14 @@ class DownloadThread(QThread):
             "--add-header", "Accept-Language:ja-JP", "--progress", "--encoding", "utf-8", "--newline",
             "--write-subs", "--sub-format", "vtt", "--embed-subs",
         ]
-        if self.quality_format != 'audio_only': command.extend(["-f", self.quality_format, "--merge-output-format", "mp4"])
+
+        # --- 화질 및 코덱 옵션 동적 생성 ---
+        quality_part = self.quality_format
+        if 'bestvideo' in quality_part: # 화질 선택 옵션에만 코덱 필터 적용
+            quality_part = quality_part.replace("bestvideo", f"bestvideo[vcodec^={self.preferred_codec}]")
+        
+        command.extend(["-f", quality_part, "--merge-output-format", "mp4"])
+
         if self.bandwidth_limit and self.bandwidth_limit != "0": command.extend(["-r", self.bandwidth_limit])
         return command
 
@@ -145,8 +136,6 @@ class DownloadThread(QThread):
         if m_progress:
             payload.update({"status": "다운로드 중", "percent": float(m_progress.group(1)), "speed": m_progress.group(2),
                             "eta": m_progress.group(3), "component": self._current_component})
-        if "Merging formats" in line:
-            payload["status"] = "후처리 중 (병합)"; payload["final_filepath"] = final_filepath
-        elif "Embedding subtitles" in line:
-            payload["status"] = "후처리 중 (자막)"
+        if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"; payload["final_filepath"] = final_filepath
+        elif "Embedding subtitles" in line: payload["status"] = "후처리 중 (자막)"
         if payload: self.progress.emit(self.url, payload)
