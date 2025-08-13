@@ -1,15 +1,19 @@
 # src/dialogs.py
-# 수정: '일반' 탭의 테마 선택 라디오 버튼 순서를 '라이트 (기본값)', '다크' 순으로 변경
+# 수정:
+# - '캐시' 탭(_create_cache_tab) 신설
+# - 캐시 관리 로직(계산, 삭제)을 MainWindow에서 SettingsDialog 내부로 이동하여 오류 해결
 
 from __future__ import annotations
+from pathlib import Path
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QTabWidget, QWidget, QFileDialog, QDialogButtonBox, 
     QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QStyle,
-    QRadioButton, QButtonGroup, QCheckBox
+    QRadioButton, QButtonGroup, QCheckBox, QMessageBox
 )
 from src.utils import save_config
+from src.widgets import THUMBNAIL_CACHE_DIR # 캐시 경로 import
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
@@ -27,12 +31,52 @@ class SettingsDialog(QDialog):
         self._create_quality_tab()
         self._create_post_action_tab()
         self._create_advanced_tab()
+        self._create_cache_tab() # 캐시 탭 추가
         self.buttons = QDialogButtonBox()
         save_btn = self.buttons.addButton("설정 저장", QDialogButtonBox.ButtonRole.AcceptRole)
         exit_btn = self.buttons.addButton("나가기", QDialogButtonBox.ButtonRole.RejectRole)
         root.addWidget(self.buttons)
         save_btn.clicked.connect(self._save_settings)
         exit_btn.clicked.connect(self.reject)
+
+    def showEvent(self, event):
+        """다이얼로그가 표시될 때 캐시 크기를 계산합니다."""
+        super().showEvent(event)
+        self._update_cache_label()
+
+    def _calculate_cache_size(self) -> str:
+        try:
+            total_size = sum(f.stat().st_size for f in THUMBNAIL_CACHE_DIR.glob('**/*') if f.is_file())
+            if total_size < 1024: return f"{total_size} Bytes"
+            elif total_size < 1024**2: return f"{total_size/1024:.2f} KB"
+            else: return f"{total_size/1024**2:.2f} MB"
+        except FileNotFoundError: return "0 Bytes"
+
+    def _update_cache_label(self):
+        self.cache_size_label.setText(self._calculate_cache_size())
+
+    def _clear_thumbnail_cache(self):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle('캐시 삭제')
+        msg_box.setText("정말로 모든 썸네일 캐시를 삭제하시겠습니까?")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.button(QMessageBox.StandardButton.Yes).setText('예')
+        msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
+        if msg_box.exec() == QMessageBox.StandardButton.No:
+            return
+        
+        count = 0
+        try:
+            for f in THUMBNAIL_CACHE_DIR.glob('**/*'):
+                if f.is_file():
+                    f.unlink()
+                    count += 1
+            QMessageBox.information(self, "완료", f"썸네일 캐시 {count}개를 삭제했습니다.")
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"캐시 삭제 중 오류 발생:\n{e}")
+        finally:
+            self._update_cache_label()
 
     def _create_general_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
@@ -53,7 +97,7 @@ class SettingsDialog(QDialog):
         theme_layout.addWidget(QLabel("테마:"))
         self.theme_button_group = QButtonGroup(self)
         theme_radio_layout = QHBoxLayout()
-        themes = {"라이트 (기본값)": "light", "다크": "dark"} # 순서 변경
+        themes = {"라이트 (기본값)": "light", "다크": "dark"}
         current_theme = self.config.get("theme", "light")
         for text, key in themes.items():
             radio = QRadioButton(text); radio.setProperty("config_value", key)
@@ -152,6 +196,18 @@ class SettingsDialog(QDialog):
         self._toggle_delete_checkbox()
         conv_v_layout.addWidget(self.delete_original_checkbox); layout.addWidget(conv_groupbox)
         layout.addStretch(1); self.tabs.addTab(tab, "고급")
+
+    def _create_cache_tab(self):
+        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
+        info_layout = QHBoxLayout()
+        info_layout.addWidget(QLabel("현재 썸네일 캐시 크기:"))
+        self.cache_size_label = QLabel("계산 중..."); self.cache_size_label.setObjectName("PaneSubtitle")
+        info_layout.addWidget(self.cache_size_label); info_layout.addStretch(1)
+        layout.addLayout(info_layout)
+        self.clear_cache_button = QPushButton("썸네일 캐시 지우기"); self.clear_cache_button.setObjectName("DangerButton")
+        self.clear_cache_button.clicked.connect(self._clear_thumbnail_cache)
+        layout.addWidget(self.clear_cache_button)
+        layout.addStretch(1); self.tabs.addTab(tab, "캐시")
 
     def _toggle_delete_checkbox(self):
         selected_button = self.conversion_button_group.checkedButton()
