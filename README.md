@@ -34,7 +34,7 @@ PyQt6 기반의 직관적인 인터페이스와 yt-dlp/FFmpeg 자동 업데이�
 ## 💻 시스템 요구 사항
 
 - Windows 10 / 11 (x64)
-- Python 3.8 이상 (실행용 EXE 포함)
+- Python 3.10 이상
 - 인터넷 연결 및 일본 VPN 필요
 - 설치 전 필수: [Microsoft Visual C++ 재배포 가능 패키지 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 
