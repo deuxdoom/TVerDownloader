@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="main.png" alt="TVerDownloader 메인 UI" width="760">
+  <img src="main.png" alt="TVerDownloader 메인 UI" width="820">
 </p>
 
 <h1>
