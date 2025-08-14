@@ -1,4 +1,7 @@
-![TVer Application](./main.png)
+<p align="center">
+  <img src="main.png" alt="TVerDownloader 메인 UI" width="720">
+</p>
+
 <h1>
   <img src="./logo.png" alt="TVer Downloader Logo" width="60" style="vertical-align: middle;">
   티버 다운로더 (TVer Downloader)
