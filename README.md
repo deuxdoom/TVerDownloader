@@ -91,7 +91,7 @@
 ---
 
 ## 📂 프로젝트 트리구조
-
+```
 📦 TVerDownloader
 ├─ 🐍 TVerDownloader.py                                        — Entry point / main window bootstrap
 ├─ 📁 src
@@ -131,7 +131,7 @@
 └─ ⚙️ External tools (auto-setup)
    ├─ 📄 yt-dlp(.exe)
    └─ 📄 ffmpeg(.exe)
-
+```
 ---
 
 ## 🤝 기여 및 응원
