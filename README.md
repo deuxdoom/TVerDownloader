@@ -8,7 +8,7 @@
 </h1>
 
 <a href="https://refer-nordvpn.com/RRXwGuSQXTe">
-  <img src="https://img.shields.io/badge/NORDVPN-3개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white" alt="NordVPN 3개월 무료">
+  <img src="https://img.shields.io/badge/NORDVPN-72%25%ED%95%A0%EC%9D%B8%203개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white" alt="NordVPN 72%할인 + 3개월 무료">
 </a>
 <a href="https://toon.at/donate/deuxdoom">
   <img src="https://img.shields.io/badge/후원하기-투네이션-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기">
