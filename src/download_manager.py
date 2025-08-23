@@ -1,5 +1,5 @@
 # src/download_manager.py
-# 수정: _start_download에서 'preferred_codec' 설정값을 읽어 DownloadThread에 전달
+# 수정: 재다운로드 지원을 위한 reset_for_redownload() 추가
 
 from typing import List, Dict, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -66,12 +66,12 @@ class DownloadManager(QObject):
         output_template = construct_filename_template(self.config)
         quality_format = self.config.get("quality", "bv*+ba/b")
         bandwidth_limit = self.config.get("bandwidth_limit", "0")
-        preferred_codec = self.config.get("preferred_codec", "avc") # 코덱 설정값 읽기
+        preferred_codec = self.config.get("preferred_codec", "avc")  # 코덱 설정값 읽기
         
         thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
                                 ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
                                 quality_format=quality_format, bandwidth_limit=bandwidth_limit,
-                                preferred_codec=preferred_codec) # 코덱 인자 전달
+                                preferred_codec=preferred_codec)
         thread.progress.connect(self._on_progress); thread.finished.connect(self._on_download_finished)
         self._active_threads[url] = thread; self._logged_start.discard(url); thread.start()
         self._update_queue_counter()
@@ -127,3 +127,20 @@ class DownloadManager(QObject):
         queued = len(self._task_queue)
         active = len(self._active_threads) + len(self._active_conversions)
         self.queue_changed.emit(queued, active)
+
+    # --- 재다운로드 지원: 특정 URL 상태만 안전하게 초기화 ---
+    def reset_for_redownload(self, url: str):
+        """해당 URL을 즉시 재다운로드할 수 있도록 내부 상태를 정리한다.
+        - active/queue에 없다는 전제에서 호출(메뉴 가드)되며,
+        - _active_urls / _logged_start / 변환 캐시에서만 제거한다.
+        """
+        if not url:
+            return
+        try:
+            if url in self._task_queue:
+                self._task_queue.remove(url)
+        except ValueError:
+            pass
+        self._active_urls.discard(url)
+        self._logged_start.discard(url)
+        self._conversion_meta_cache.pop(url, None)
