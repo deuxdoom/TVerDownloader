@@ -90,6 +90,50 @@
 
 ---
 
+## 📂 프로젝트 트리구조
+
+📦 TVerDownloader
+├─ 🐍 TVerDownloader.py                                        — Entry point / main window bootstrap
+├─ 📁 src
+│  ├─ 🗂️ ui
+│  │  └─ 🐍 main_window_ui.py                                   — Build main UI (header, input bar, tabs, tray)
+│  ├─ 🧰 core
+│  │  ├─ 🐍 download_manager.py                                 — Queue & concurrency orchestrator
+│  │  ├─ 🐍 series_parser.py                                    — Series URL parse coordinator (queues → thread)
+│  │  ├─ 🐍 utils.py                                            — Config, filename template, helpers (open file, crash log)
+│  │  └─ 🐍 updater.py                                          — GitHub releases/latest checker
+│  ├─ 💬 dialogs
+│  │  ├─ 🐍 dialogs.py                                          — SettingsDialog (일반/파일명/화질/후작업/고급/캐시)
+│  │  ├─ 🐍 about_dialog.py                                     — About window (HTML features list)
+│  │  ├─ 🐍 bulk_dialog.py                                      — Multi-URL add dialog
+│  │  └─ 🐍 series_dialog.py                                    — Episode selection for series (thumb preview)
+│  ├─ 🖼️ widgets
+│  │  └─ 🐍 widgets.py                                          — Download/History/Favorite item widgets + thumb cache
+│  ├─ 🎞️ threads
+│  │  ├─ 🐍 setup_thread.py                                     — Auto-setup yt-dlp & FFmpeg
+│  │  ├─ 🐍 series_parse_thread.py                               — Parse series → episode list (skip “予告”)
+│  │  ├─ 🐍 download_thread.py                                   — Download + mux + subtitles + progress parsing
+│  │  └─ 🐍 conversion_thread.py                                 — Optional format conversion
+│  ├─ 🗃️ stores
+│  │  ├─ 🐍 history_store.py                                    — urlhistory.json + rolling backups
+│  │  └─ 🐍 favorites_store.py                                  — favorites.json + backups
+│  ├─ 🎨 theme
+│  │  ├─ 🐍 qss.py                                              — Light/Dark QSS builder
+│  │  └─ 🐍 icon.py                                             — App icon (Base64 → QIcon)
+│  └─ (optional) 📄 __init__.py                                  — If packaging as a module
+├─ 🧾 Generated at runtime
+│  ├─ 📄 downloader_config.json                                  — User settings
+│  ├─ 📄 urlhistory.json                                         — Download history
+│  ├─ 📁 thumbnails/                                             — Cached thumbnails
+│  ├─ 📁 historybak/                                             — History backups
+│  ├─ 📁 favoritbak/                                             — Favorites backups
+│  └─ 📄 TVerDownloader_crash.log                                — Crash logs
+└─ ⚙️ External tools (auto-setup)
+   ├─ 📄 yt-dlp(.exe)
+   └─ 📄 ffmpeg(.exe)
+
+---
+
 ## 🤝 기여 및 응원
 
 - 버그 제보 및 코드 기여: [Issues](https://github.com/deuxdoom/TVerDownloader/issues)  
