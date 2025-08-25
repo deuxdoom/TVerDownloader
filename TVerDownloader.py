@@ -1,6 +1,7 @@
 # TVerDownloader.py
 # 수정: 다운로드 탭 컨텍스트 메뉴에 '재다운로드' 추가(오류 상태에서만 표시), 기존 행 재사용 로직
-#      _retry_download() 구현, _add_item_widget() 수정
+#      _retry_download() 구현, _add_item_widget() 수정 (v2.4.0)
+#      시작 시 즐겨찾기 자동 확인을 2.5초 지연시켜 UI 안정화 시간을 확보하고 크래시 방지 (v2.4.1)
 
 import sys, os, re, webbrowser, subprocess
 from typing import List, Dict, Optional, Tuple
@@ -27,7 +28,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.1"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
@@ -186,7 +187,10 @@ class MainWindow(QMainWindow):
         self.append_log(f"{'=' * 44}\n📢 [안내] TVer는 일본 지역 제한이 있습니다.\n📢 원활한 다운로드를 위해 반드시 일본 VPN을 켜고 사용해주세요.\n{'=' * 44}")
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
         QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
-        if self.config.get("auto_check_favorites_on_start", True): self.check_all_favorites()
+
+        # [수정] 프로그램 시작 시 즐겨찾기 자동 확인을 2.5초 지연시켜 UI 안정화 시간을 확보합니다.
+        if self.config.get("auto_check_favorites_on_start", True):
+            QTimer.singleShot(2500, self.check_all_favorites)
 
     def _on_series_parsed(self, context: str, series_url: str, episode_info: List[Dict[str, str]]):
         if context == 'single' or context == 'bulk':
@@ -368,7 +372,7 @@ class MainWindow(QMainWindow):
             self.append_log("[알림] 다운로드 폴더가 설정되지 않아 재다운로드를 취소했습니다.")
             return
         # 내부 상태 정리
-        self.download_manager.reset_for_redownload(url)
+        # self.download_manager.reset_for_redownload(url) # download_manager에 해당 메서드가 없으므로 주석 처리
         # 위젯 시각 상태 초기화
         widget = self._find_item_widget(url)
         if isinstance(widget, DownloadItemWidget):
