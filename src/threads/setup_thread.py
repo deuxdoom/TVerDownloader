@@ -1,5 +1,5 @@
 # src/threads/setup_thread.py
-# 목적: 프로그램 시작 시 yt-dlp와 ffmpeg의 경로를 탐색하고 준비하는 스레드
+# 수정: FFmpeg 업데이트 시 ffmpeg.exe와 함께 ffprobe.exe도 bin 폴더로 복사하도록 수정
 
 import os
 import shutil
@@ -101,16 +101,17 @@ class SetupThread(QThread):
     def _update_ffmpeg(self) -> Optional[Path]:
         self.log.emit("[2] FFmpeg 최신 버전 확인 중...")
         ffmpeg_exe_path = self.BIN_DIR / "ffmpeg.exe"
+        ffprobe_exe_path = self.BIN_DIR / "ffprobe.exe" # ffprobe 경로 정의
         version_file = self.BIN_DIR / "ffmpeg_version.txt"
 
         info = self._get_api_info(self.FFMPEG_API_URL)
         if not info:
-            return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
+            return ffmpeg_exe_path if ffmpeg_exe_path.exists() and ffprobe_exe_path.exists() else None
 
         latest = info.get("tag_name")
         current = version_file.read_text().strip() if version_file.exists() else None
 
-        if latest == current and ffmpeg_exe_path.exists():
+        if latest == current and ffmpeg_exe_path.exists() and ffprobe_exe_path.exists():
             self.log.emit(f" ... FFmpeg가 이미 최신 버전입니다 ({latest}).")
             return ffmpeg_exe_path
 
@@ -132,22 +133,39 @@ class SetupThread(QThread):
             return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
 
         extracted_root = next((p for p in temp_dir.iterdir() if p.is_dir()), None)
-        source_ffmpeg = extracted_root / "bin" / "ffmpeg.exe" if extracted_root else None
+        
+        # --- [수정된 부분 시작] ---
+        if not extracted_root:
+            self.log.emit("[오류] FFmpeg 압축 해제 후 폴더를 찾을 수 없습니다.")
+            return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
+            
+        source_ffmpeg = extracted_root / "bin" / "ffmpeg.exe"
+        source_ffprobe = extracted_root / "bin" / "ffprobe.exe"
 
-        if source_ffmpeg and source_ffmpeg.exists():
-            ffmpeg_exe_path.parent.mkdir(parents=True, exist_ok=True)
-            if ffmpeg_exe_path.exists():
-                try: os.remove(ffmpeg_exe_path)
-                except Exception: pass
+        if source_ffmpeg.exists() and source_ffprobe.exists():
+            self.BIN_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # 기존 파일 삭제
+            if ffmpeg_exe_path.exists(): ffmpeg_exe_path.unlink()
+            if ffprobe_exe_path.exists(): ffprobe_exe_path.unlink()
+
+            # 새 파일 이동
             shutil.move(str(source_ffmpeg), str(ffmpeg_exe_path))
-            self.log.emit(f" -> {ffmpeg_exe_path}로 이동 완료.")
-            try: shutil.rmtree(temp_dir)
-            except Exception: pass
+            shutil.move(str(source_ffprobe), str(ffprobe_exe_path))
+
+            self.log.emit(f" -> {ffmpeg_exe_path.name} 및 {ffprobe_exe_path.name} 이동 완료.")
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception:
+                pass
             version_file.write_text(latest or "")
             self.log.emit(" ... FFmpeg 업데이트 완료.")
             return ffmpeg_exe_path
-
-        self.log.emit("[오류] 압축 해제된 파일에서 ffmpeg.exe를 찾을 수 없습니다.")
-        try: shutil.rmtree(temp_dir)
-        except Exception: pass
-        return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
+        # --- [수정된 부분 끝] ---
+        else:
+            self.log.emit("[오류] 압축 해제된 파일에서 ffmpeg.exe 또는 ffprobe.exe를 찾을 수 없습니다.")
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception:
+                pass
+            return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None

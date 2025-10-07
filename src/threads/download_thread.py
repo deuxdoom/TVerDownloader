@@ -1,5 +1,5 @@
 # src/threads/download_thread.py
-# 수정: 선호 코덱 설정에 맞춰 yt-dlp의 포맷(-f) 옵션을 동적으로 생성
+# 수정: 모든 변환 관련 로직을 제거하고, 순수 다운로드 기능만 수행하도록 복원
 
 import os, re, json, time, signal, subprocess
 from typing import List, Optional, Dict, Any
@@ -10,13 +10,13 @@ class DownloadThread(QThread):
     progress = pyqtSignal(str, dict)
     finished = pyqtSignal(str, bool, str, dict)
 
-    def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str, 
-                 output_template: str, quality_format: str, bandwidth_limit: str, preferred_codec: str, parent=None):
+    def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
+                 output_template: str, quality_format: str, bandwidth_limit: str, parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
         self.ytdlp_exe_path = ytdlp_exe_path; self.ffmpeg_exe_path = os.path.dirname(ffmpeg_exe_path)
         self.output_template = output_template; self.quality_format = quality_format
-        self.bandwidth_limit = bandwidth_limit; self.preferred_codec = preferred_codec
+        self.bandwidth_limit = bandwidth_limit
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
         self._metadata: Dict = {}
@@ -57,24 +57,29 @@ class DownloadThread(QThread):
         self._metadata = self._get_metadata() or {}
         if not self._metadata:
             self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."}); return False
-        
+
         self.progress.emit(self.url, {"title": self._metadata.get("title", "제목 없음"), "thumbnail": self._metadata.get("thumbnail")})
         self._final_filepath = self._build_final_filepath(self._metadata)
         command = self._build_command(self._final_filepath)
         popen_kwargs: Dict[str, Any] = {}
         if os.name == 'nt': popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         else: popen_kwargs['start_new_session'] = True
-        
+
         self.progress.emit(self.url, {"status": "다운로드 중", "log": "yt-dlp 프로세스 시작..."})
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="ignore", **popen_kwargs)
 
         if self.process and self.process.stdout:
             for line in iter(self.process.stdout.readline, ""):
                 if self._stop_flag: self.progress.emit(self.url, {"status": "취소됨"}); return False
-                self._parse_line(line, self._final_filepath)
+                self._parse_line(line)
         if self._stop_flag: return False
         rc = self.process.wait(timeout=5) if self.process else 1
-        success = (rc == 0)
+        
+        # 최종 파일 경로가 존재하는지 다시 한번 확인
+        if not os.path.exists(self._final_filepath):
+             self.log.emit(f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}")
+
+        success = (rc == 0) and os.path.exists(self._final_filepath)
         final_status = "완료" if success else "오류"
         self.progress.emit(self.url, {"status": final_status, "percent": 100, "final_filepath": self._final_filepath})
         return success
@@ -85,7 +90,7 @@ class DownloadThread(QThread):
             p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", startupinfo=get_startupinfo(), timeout=20)
             return json.loads(p.stdout) if p.returncode == 0 else None
         except Exception: return None
-    
+
     def _build_final_filepath(self, metadata: Dict[str, Any]) -> str:
         template, ext = self.output_template.rsplit('.', 1)
         def replacer(match):
@@ -110,32 +115,41 @@ class DownloadThread(QThread):
             "--no-check-certificate", "--windows-filenames", "--no-cache-dir", "--abort-on-error",
             "--add-header", "Accept-Language:ja-JP", "--progress", "--encoding", "utf-8", "--newline",
             "--write-subs", "--sub-format", "vtt", "--embed-subs",
+            "-f", self.quality_format,
+            "--merge-output-format", "mp4",
         ]
-
-        # --- 화질 및 코덱 옵션 동적 생성 ---
-        quality_part = self.quality_format
-        if 'bestvideo' in quality_part: # 화질 선택 옵션에만 코덱 필터 적용
-            quality_part = quality_part.replace("bestvideo", f"bestvideo[vcodec^={self.preferred_codec}]")
-        
-        command.extend(["-f", quality_part, "--merge-output-format", "mp4"])
 
         if self.bandwidth_limit and self.bandwidth_limit != "0": command.extend(["-r", self.bandwidth_limit])
         return command
 
-    def _parse_line(self, line: str, final_filepath: str):
+    def _parse_line(self, line: str):
         line = (line or "").strip()
         if not line: return
         payload: Dict[str, Any] = {}
         log_keywords = ["Merging formats into", "Embedding subtitles", "[error]", "ERROR:"]
         if any(keyword in line for keyword in log_keywords): payload["log"] = line
+        
+        # yt-dlp가 최종 파일 경로를 알리는 로그 파싱
+        # 예: [Merger] Merging formats into "C:\...\video.mp4"
+        m_merger = re.search(r"\[Merger\] Merging formats into \"(.+)\"", line)
+        if m_merger:
+            self._final_filepath = m_merger.group(1)
+
         if "[download] Destination:" in line:
+            # 최종 파일 경로가 아직 설정되지 않았을 경우, 임시로 설정
+            if not self._final_filepath:
+                self._final_filepath = line.split("Destination:", 1)[1].strip()
+            
             destination_path = line.split("Destination:", 1)[1].lower()
             if ".m4a" in destination_path or "audio" in destination_path: self._current_component = "오디오"
             else: self._current_component = "비디오"
+        
         m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
         if m_progress:
             payload.update({"status": "다운로드 중", "percent": float(m_progress.group(1)), "speed": m_progress.group(2),
                             "eta": m_progress.group(3), "component": self._current_component})
-        if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"; payload["final_filepath"] = final_filepath
+        
+        if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"
         elif "Embedding subtitles" in line: payload["status"] = "후처리 중 (자막)"
+        
         if payload: self.progress.emit(self.url, payload)
