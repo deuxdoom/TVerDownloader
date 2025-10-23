@@ -1,5 +1,5 @@
 # src/utils.py
-# 기본 테마 기본값을 'light'로 수정
+# 수정: series_exclude_keywords 기본값 추가
 
 import json
 import os
@@ -22,7 +22,6 @@ FILENAME_TITLE_MAX_LENGTH = 120
 def load_config() -> Dict[str, Any]:
     """설정 파일 로드(없으면 기본값). dict 병합으로 부분 업데이트 허용."""
     config = {
-        # ✅ 기본 테마를 라이트로 변경
         "theme": "light",
         "download_folder": "",
         "max_concurrent_downloads": DEFAULT_PARALLEL,
@@ -33,12 +32,14 @@ def load_config() -> Dict[str, Any]:
         "filename_order": ["series", "upload_date", "episode_number", "episode", "id"],
         "post_action": "None",
         "quality": "bv*+ba/b",
-        "preferred_codec": "avc",  # 선호 코덱 설정 (avc, hevc, vp9)
+        "preferred_codec": "avc",
         "auto_check_favorites_on_start": True,
         "always_on_top": False,
         "bandwidth_limit": "0",
         "conversion_format": "none",
-        "delete_on_conversion": False
+        "delete_on_conversion": False,
+        # ✅ 시리즈 분석 시 제외할 키워드 목록 추가
+        "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"]
     }
     if os.path.exists(CONFIG_FILE):
         try:

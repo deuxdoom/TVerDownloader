@@ -1,7 +1,8 @@
 # TVerDownloader.py
-# 수정: 다운로드 탭 컨텍스트 메뉴에 '재다운로드' 추가(오류 상태에서만 표시), 기존 행 재사용 로직
-#      _retry_download() 구현, _add_item_widget() 수정 (v2.4.0)
-#      시작 시 즐겨찾기 자동 확인을 2.5초 지연시켜 UI 안정화 시간을 확보하고 크래시 방지 (v2.4.1)
+# 수정:
+# - (v2.4.3) 즐겨찾기 20개 제한 로직 추가
+# - (v2.4.3) 설정 변경 시(open_settings) series_parser에도 config 업데이트
+# - (v2.4.3) __init__에서 series_parser 생성 시 config 객체 전달
 
 import sys, os, re, webbrowser, subprocess
 from typing import List, Dict, Optional, Tuple
@@ -28,7 +29,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.4.2"
+APP_VERSION = "2.4.3" # ✅ 버전 2.4.3으로 변경
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
@@ -40,7 +41,11 @@ class MainWindow(QMainWindow):
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
-        self.series_parser = SeriesParser(ytdlp_path=""); self.download_manager = DownloadManager(self.config, self.history_store)
+        
+        # ✅ SeriesParser 생성 시 config 전달
+        self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
+        self.download_manager = DownloadManager(self.config, self.history_store)
+        
         self._connect_signals(); self._set_input_enabled(False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
         self.refresh_history_list(); self.refresh_fav_list()
@@ -56,6 +61,9 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.config = load_config()
             self.download_manager.update_config(self.config)
+            # ✅ SeriesParser에도 변경된 config 전달
+            self.series_parser.update_config(self.config)
+            
             new_theme = self.config.get("theme", "light")
             if new_theme != current_theme:
                 QApplication.instance().setStyleSheet(build_qss(new_theme))
@@ -187,8 +195,6 @@ class MainWindow(QMainWindow):
         self.append_log(f"{'=' * 44}\n📢 [안내] TVer는 일본 지역 제한이 있습니다.\n📢 원활한 다운로드를 위해 반드시 일본 VPN을 켜고 사용해주세요.\n{'=' * 44}")
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
         QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
-
-        # [수정] 프로그램 시작 시 즐겨찾기 자동 확인을 2.5초 지연시켜 UI 안정화 시간을 확보합니다.
         if self.config.get("auto_check_favorites_on_start", True):
             QTimer.singleShot(2500, self.check_all_favorites)
 
@@ -215,7 +221,6 @@ class MainWindow(QMainWindow):
             self.fav_store.touch_last_check(series_url); self.refresh_fav_list()
 
     def _add_item_widget(self, url: str):
-        # 재다운로드 시 기존 행 재사용
         existing = self._find_item_widget(url)
         if isinstance(existing, DownloadItemWidget):
             existing.reset_for_retry()
@@ -262,16 +267,13 @@ class MainWindow(QMainWindow):
         widget = self.ui.download_list.itemWidget(item)
         if not isinstance(widget, DownloadItemWidget): return
         url = widget.url; menu = QMenu()
-        # 활성/변환 진행 중
         if url in self.download_manager._active_threads or url in self.download_manager._active_conversions:
             menu.addAction("중지", lambda: self.download_manager.stop_task(url))
-        # 대기열에 있음
         elif url in self.download_manager._task_queue:
             def remove_from_queue():
                 if self.download_manager.remove_task_from_queue(url): self.ui.download_list.takeItem(self.ui.download_list.row(item))
             menu.addAction("대기열에서 제거", remove_from_queue)
         else:
-            # 오류 상태에서만 '재다운로드' 제공, 완료(녹색)는 표기 안 함
             if widget.status in ERROR_STATUSES:
                 menu.addAction("재다운로드", lambda: self._retry_download(url))
             menu.addAction("목록에서 삭제", lambda: self.ui.download_list.takeItem(self.ui.download_list.row(item)))
@@ -309,10 +311,27 @@ class MainWindow(QMainWindow):
             self.ui.fav_list.addItem(item); self.ui.fav_list.setItemWidget(item, widget)
 
     def add_favorite(self):
+        """즐겨찾기를 추가합니다. 최대 20개까지만 허용됩니다."""
+        MAX_FAVORITES = 20 # ✅ 즐겨찾기 최대 개수 제한
+        if len(self.fav_store.list_series()) >= MAX_FAVORITES:
+            QMessageBox.information(self, "즐겨찾기 개수 초과",
+                                      f"즐겨찾기는 최대 {MAX_FAVORITES}개까지 추가할 수 있습니다.\n\n"
+                                      "새로운 시리즈를 추가하려면, 시청이 종료되었거나\n"
+                                      "자주 확인하지 않는 시리즈를 목록에서 먼저 삭제해주세요.")
+            return
+
         url = self.ui.fav_input.text().strip()
-        if not url or "/series/" not in url: QMessageBox.information(self, "알림", "유효한 TVer 시리즈 URL을 입력하세요."); return
-        if self.fav_store.exists(url): QMessageBox.information(self, "알림", "이미 즐겨찾기에 있습니다."); return
-        self.fav_store.add(url); self.ui.fav_input.clear(); self.refresh_fav_list(); self.append_log(f"[즐겨찾기] 추가: {url}")
+        if not url or "/series/" not in url:
+            QMessageBox.information(self, "알림", "유효한 TVer 시리즈 URL을 입력하세요.")
+            return
+        if self.fav_store.exists(url):
+            QMessageBox.information(self, "알림", "이미 즐겨찾기에 등록된 시리즈입니다.")
+            return
+
+        self.fav_store.add(url)
+        self.ui.fav_input.clear()
+        self.refresh_fav_list()
+        self.append_log(f"[즐겨찾기] 추가: {url}")
 
     def remove_selected_favorite(self):
         selected_items = self.ui.fav_list.selectedItems()
@@ -364,20 +383,16 @@ class MainWindow(QMainWindow):
         for url in list(self.download_manager._active_threads.keys()): self.download_manager.stop_task(url)
         self.force_quit = True; self.tray_icon.hide(); QApplication.instance().quit()
 
-    # 기존 행에서 즉시 재다운로드
     def _retry_download(self, url: str):
         if url in self.download_manager._active_threads or url in self.download_manager._active_conversions or url in self.download_manager._task_queue:
             return
         if not self._ensure_download_folder():
             self.append_log("[알림] 다운로드 폴더가 설정되지 않아 재다운로드를 취소했습니다.")
             return
-        # 내부 상태 정리
-        # self.download_manager.reset_for_redownload(url) # download_manager에 해당 메서드가 없으므로 주석 처리
-        # 위젯 시각 상태 초기화
+        self.download_manager.reset_for_redownload(url)
         widget = self._find_item_widget(url)
         if isinstance(widget, DownloadItemWidget):
             widget.reset_for_retry()
-        # 기존 행 재사용하여 같은 URL 재등록
         self.download_manager.add_task(url)
 
 def get_resource_path(relative_path):

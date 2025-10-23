@@ -1,5 +1,5 @@
 # src/dialogs.py
-# 수정: '화질' 탭에 선호 코덱 선택 라디오 버튼 그룹 추가
+# 수정: '고급' 탭에 시리즈 제외 키워드 입력 필드 추가
 
 from __future__ import annotations
 from pathlib import Path
@@ -144,7 +144,6 @@ class SettingsDialog(QDialog):
     def _create_quality_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
         
-        # 화질 선택
         q_groupbox = QWidget(); q_layout = QVBoxLayout(q_groupbox); q_layout.setContentsMargins(0,0,0,0)
         q_layout.addWidget(QLabel("다운로드 화질 선택:"))
         q_radio_layout = QVBoxLayout(); q_radio_layout.setSpacing(10); self.quality_button_group = QButtonGroup(self)
@@ -155,7 +154,6 @@ class SettingsDialog(QDialog):
             if key == current_quality: radio.setChecked(True)
         q_layout.addLayout(q_radio_layout); layout.addWidget(q_groupbox)
 
-        # 코덱 선택
         c_groupbox = QWidget(); c_layout = QVBoxLayout(c_groupbox); c_layout.setContentsMargins(0,0,0,0)
         c_layout.addWidget(QLabel("선호 코덱 (재생 호환성):"))
         c_radio_layout = QVBoxLayout(); c_radio_layout.setSpacing(10); self.codec_button_group = QButtonGroup(self)
@@ -180,6 +178,7 @@ class SettingsDialog(QDialog):
 
     def _create_advanced_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
+        
         bw_groupbox = QWidget(); bw_v_layout = QVBoxLayout(bw_groupbox); bw_v_layout.setContentsMargins(0,0,0,0)
         bw_v_layout.addWidget(QLabel("대역폭 제한:"))
         self.bw_limit_button_group = QButtonGroup(self); bw_radio_layout = QVBoxLayout(); bw_radio_layout.setSpacing(10)
@@ -189,6 +188,7 @@ class SettingsDialog(QDialog):
             radio = QRadioButton(text); radio.setProperty("config_value", key); self.bw_limit_button_group.addButton(radio); bw_radio_layout.addWidget(radio)
             if key == current_limit: radio.setChecked(True)
         bw_v_layout.addLayout(bw_radio_layout); layout.addWidget(bw_groupbox)
+        
         conv_groupbox = QWidget(); conv_v_layout = QVBoxLayout(conv_groupbox); conv_v_layout.setContentsMargins(0,0,0,0)
         conv_v_layout.addWidget(QLabel("다운로드 후 변환:"))
         self.conversion_button_group = QButtonGroup(self); conv_radio_layout = QVBoxLayout(); conv_radio_layout.setSpacing(10)
@@ -203,6 +203,18 @@ class SettingsDialog(QDialog):
         self.conversion_button_group.buttonToggled.connect(self._toggle_delete_checkbox)
         self._toggle_delete_checkbox()
         conv_v_layout.addWidget(self.delete_original_checkbox); layout.addWidget(conv_groupbox)
+
+        # ✅ 시리즈 제외 키워드 입력 필드 추가
+        exclude_groupbox = QWidget()
+        exclude_v_layout = QVBoxLayout(exclude_groupbox)
+        exclude_v_layout.setContentsMargins(0,0,0,0)
+        exclude_v_layout.addWidget(QLabel("시리즈 분석 시 제외할 키워드 (쉼표,로 구분):"))
+        current_keywords = self.config.get("series_exclude_keywords", [])
+        self.exclude_keywords_edit = QLineEdit(", ".join(current_keywords))
+        self.exclude_keywords_edit.setPlaceholderText("예: 予告, SP, ダイジェスト")
+        exclude_v_layout.addWidget(self.exclude_keywords_edit)
+        layout.addWidget(exclude_groupbox)
+
         layout.addStretch(1); self.tabs.addTab(tab, "고급")
 
     def _create_cache_tab(self):
@@ -241,5 +253,10 @@ class SettingsDialog(QDialog):
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
+        
+        # ✅ 시리즈 제외 키워드 저장 로직 추가
+        keywords_str = self.exclude_keywords_edit.text()
+        self.config["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
+        
         save_config(self.config)
         self.accept()

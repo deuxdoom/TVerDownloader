@@ -1,7 +1,8 @@
 # src/threads/series_parse_thread.py
 # 수정:
-# - finished 시그널이 반환하는 데이터 구조를 (URL, 제목) 튜플에서
-#   {'url': ..., 'title': ..., 'thumbnail_url': ...} 딕셔너리로 변경
+# - 생성자에서 exclude_keywords 리스트를 받음
+# - _is_excluded 헬퍼 메서드 추가 (대소문자 무시)
+# - _parse_entries, _parse_flat_output에서 하드코딩된 "予告" 대신 _is_excluded 사용
 
 import subprocess
 import json
@@ -14,12 +15,24 @@ from src.utils import get_startupinfo
 class SeriesParseThread(QThread):
     """시리즈 URL을 받아 하위 에피소드 정보(딕셔너리) 리스트를 반환하는 스레드."""
     log = pyqtSignal(str)
-    finished = pyqtSignal(list)  # List[Dict[str, str]]
+    finished = pyqtSignal(list)
 
-    def __init__(self, series_url: str, ytdlp_exe_path: str, parent=None):
+    def __init__(self, series_url: str, ytdlp_exe_path: str, exclude_keywords: List[str], parent=None): # ✅ exclude_keywords 추가
         super().__init__(parent)
         self.series_url = series_url
         self.ytdlp_exe_path = ytdlp_exe_path
+        # ✅ 제외 키워드를 소문자로 정규화하여 저장 (대소문자 무시 비교용)
+        self.exclude_keywords = [k.lower() for k in exclude_keywords if k.strip()]
+
+    def _is_excluded(self, title: str) -> bool:
+        """ ✅ 제목이 제외 키워드를 포함하는지 확인 (대소문자 무시)"""
+        if not self.exclude_keywords:
+            return False
+        title_lower = title.lower()
+        for keyword in self.exclude_keywords:
+            if keyword in title_lower:
+                return True
+        return False
 
     def _parse_entries(self, entries: list) -> List[Dict[str, str]]:
         """메타데이터 목록에서 필요한 정보를 추출합니다."""
@@ -30,7 +43,8 @@ class SeriesParseThread(QThread):
             title = meta.get("title", "제목 없음")
             thumbnail_url = meta.get("thumbnail")
 
-            if url and title and "予告" not in title:
+            # ✅ 하드코딩된 "予告" 대신 _is_excluded 헬퍼 메서드 사용
+            if url and title and not self._is_excluded(title):
                 results.append({
                     "url": url.strip(),
                     "title": title.strip(),
@@ -45,10 +59,8 @@ class SeriesParseThread(QThread):
             if isinstance(data, dict) and "entries" in data:
                 return self._parse_entries(data.get("entries") or [])
             else:
-                # 단일 JSON 객체이지만 'entries'가 없는 경우, 해당 객체를 리스트에 담아 처리
                 return self._parse_entries([data])
         except json.JSONDecodeError:
-            # 줄 단위 JSON 파싱
             entries = []
             for line in (out or "").splitlines():
                 try:
@@ -63,7 +75,8 @@ class SeriesParseThread(QThread):
         for line in lines:
             try:
                 url, title = line.split("\t", 1)
-                if "予告" not in (title or ""):
+                 # ✅ 하드코딩된 "予告" 대신 _is_excluded 헬퍼 메서드 사용
+                if not self._is_excluded(title or ""):
                     results.append({"url": url.strip(), "title": title.strip(), "thumbnail_url": ""})
             except ValueError: continue
         return results
