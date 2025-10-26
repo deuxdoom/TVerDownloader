@@ -1,7 +1,7 @@
 # src/download_manager.py
-# 수정: 다운로드 완료 후 ffprobe로 코덱을 직접 확인하여
-#      선호 코덱과 다를 경우에만 변환 스레드를 실행하는 로직 추가
+# (변경 없음, 이전 답변과 동일)
 
+import os
 import subprocess
 from typing import List, Dict, Optional, Any
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -84,13 +84,13 @@ class DownloadManager(QObject):
         self.progress_updated.emit(url, payload)
         
     def _get_video_codec(self, filepath: str) -> Optional[str]:
-        """ffprobe를 사용해 비디오 파일의 코덱을 확인합니다."""
         if not self.ffmpeg_path: return None
         ffprobe_path = self.ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe')
+        if not os.path.exists(ffprobe_path):
+             ffprobe_path = self.ffmpeg_path.replace('ffmpeg', 'ffprobe')
+        
         command = [
-            ffprobe_path,
-            '-v', 'error',
-            '-select_streams', 'v:0',
+            ffprobe_path, '-v', 'error', '-select_streams', 'v:0',
             '-show_entries', 'stream=codec_name',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             filepath
@@ -111,31 +111,28 @@ class DownloadManager(QObject):
     def _on_download_finished(self, url: str, success: bool, final_filepath: str, metadata: dict):
         thread = self._active_threads.pop(url, None)
         if thread: thread.deleteLater()
-        if not success:
-            self.log.emit(f"[실패] 다운로드 실패 또는 취소: {url}")
+        
+        if not success or not final_filepath or not os.path.exists(final_filepath):
+            self.log.emit(f"[실패] 다운로드 실패 또는 파일 없음: {url}")
             self.task_finished.emit(url, False, "", metadata)
             self._check_completion(); return
         
         self.log.emit(f"[성공] 다운로드 완료: {final_filepath}")
         self._conversion_meta_cache[url] = metadata
 
-        # 1. 컨테이너 포맷 변환 (AVI, MOV, MP3) 확인
         target_container_format = self.config.get("conversion_format", "none")
         if target_container_format != "none":
             self._start_conversion(url, final_filepath, target_format=target_container_format)
             return
 
-        # 2. 컨테이너 변환이 없으면, 코덱 변환 확인
         preferred_codec_key = self.config.get("preferred_codec", "avc")
         current_codec = self._get_video_codec(final_filepath)
         
-        codec_map = {'avc': 'h264', 'hevc': 'hevc', 'vp9': 'vp9'}
+        codec_map = {'avc': 'h264', 'hevc': 'hevc', 'vp9': 'vp9', 'av1': 'av1'}
         target_codec = codec_map.get(preferred_codec_key)
         
-        # 코덱이 다르거나 AV01일 경우 변환
         if current_codec and target_codec and current_codec != target_codec:
             self.log.emit(f"코덱 불일치. 변환 시작: (원본) '{current_codec}' -> (목표) '{target_codec}'")
-            # 변환 후 원본은 항상 삭제하도록 설정
             self._start_conversion(url, final_filepath, target_codec=target_codec, delete_original=True)
         else:
             if current_codec: self.log.emit(f"코덱 일치 ('{current_codec}'). 변환이 불필요합니다.")
@@ -148,15 +145,26 @@ class DownloadManager(QObject):
         elif target_codec: status_msg = f"{target_codec.upper()} 변환 중..."
         self.progress_updated.emit(url, {"status": status_msg})
         
-        # 설정에서 delete_original 값을 읽어오되, 코덱 변환 시에는 True로 강제
         delete_on_conv = self.config.get("delete_on_conversion", False)
         if delete_original is not None:
             delete_on_conv = delete_original
 
+        hw_encoder_setting = self.config.get("hardware_encoder", "cpu")
+        
+        quality_cfg = {
+            "cpu_h264_crf": self.config.get("quality_cpu_h264_crf", 26),
+            "cpu_h265_crf": self.config.get("quality_cpu_h265_crf", 31),
+            "cpu_vp9_crf": self.config.get("quality_cpu_vp9_crf", 36),
+            "cpu_av1_crf": self.config.get("quality_cpu_av1_crf", 41),
+            "gpu_cq": self.config.get("quality_gpu_cq", 30),
+        }
+
         thread = ConversionThread(url, input_path, self.ffmpeg_path, 
                                   target_format=target_format, 
                                   target_codec=target_codec, 
-                                  delete_original=delete_on_conv)
+                                  delete_original=delete_on_conv,
+                                  hw_encoder_setting=hw_encoder_setting,
+                                  quality_cfg=quality_cfg)
         thread.log.connect(self.log); thread.finished.connect(self._on_conversion_finished)
         self._active_conversions[url] = thread; thread.start()
         
@@ -173,8 +181,9 @@ class DownloadManager(QObject):
 
     def _check_completion(self):
         self._update_queue_counter()
-        if len(self._active_threads) + len(self._active_conversions) == 0:
-            self.check_queue_and_start()
+        
+        self.check_queue_and_start()
+
         if not self._task_queue and not self._active_threads and not self._active_conversions:
             self._active_urls.clear(); self._logged_start.clear(); self.all_tasks_completed.emit()
 

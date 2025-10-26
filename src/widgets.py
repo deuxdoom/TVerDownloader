@@ -1,5 +1,6 @@
 # src/widgets.py
-# 수정: DownloadItemWidget에 reset_for_retry() 추가(기존 행 재사용 시 시각 상태 초기화)
+# FIX: Add checks in _set_thumbnail_pixmap for FavoriteItemWidget
+#      and HistoryItemWidget to prevent RuntimeError when label is deleted.
 
 from __future__ import annotations
 import os
@@ -23,8 +24,11 @@ class ThumbnailDownloader(QThread):
         self.url = url
     def run(self):
         try:
-            with urllib.request.urlopen(self.url, timeout=10) as r: data = r.read()
-        except Exception: data = None
+            # Use a context manager for urlopen
+            with urllib.request.urlopen(self.url, timeout=10) as r:
+                data = r.read()
+        except Exception:
+            data = None
         self.finished.emit((self.url, data))
 
 class ImagePreviewDialog(QDialog):
@@ -82,17 +86,14 @@ class DownloadItemWidget(QWidget):
         if self._orig_thumb_pm and not self._orig_thumb_pm.isNull(): ImagePreviewDialog(self._orig_thumb_pm, self).exec()
 
     def reset_for_retry(self):
-        """기존 위젯을 새 다운로드에 재사용하기 위해 시각 상태 초기화."""
         self.status = "대기"
         self.final_filepath = None
         self.progress.setValue(0)
-        # 진행바 state를 'active'로 되돌리고 스타일 강제 갱신
         if self.progress.property("state") != "active":
             self.progress.setProperty("state", "active")
             self.progress.style().unpolish(self.progress)
             self.progress.style().polish(self.progress)
         self.status_label.setText("대기")
-        # 제목/썸네일은 그대로 유지(사용자 인지에 유리)
 
     def update_progress(self, payload: dict):
         if "thumbnail" in payload and payload["thumbnail"] != self._thumb_url:
@@ -126,11 +127,15 @@ class DownloadItemWidget(QWidget):
     def _on_thumb_finished(self, result: tuple):
         try: url, data = result
         except (TypeError, ValueError): return
+        # Check if widget still exists before processing
+        if self is None: return
         if url != self._thumb_url or not data: return
         pm = QPixmap();
         if pm.loadFromData(data):
             self._orig_thumb_pm = pm; scaled_pm = pm.scaled(self.thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self.thumb_label.setPixmap(scaled_pm)
+            # Another check before setting pixmap
+            if self.thumb_label:
+                self.thumb_label.setPixmap(scaled_pm)
 
 class FavoriteItemWidget(QWidget):
     def __init__(self, url: str, meta: Dict[str, str], parent=None):
@@ -139,11 +144,24 @@ class FavoriteItemWidget(QWidget):
         THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         root = QHBoxLayout(self); root.setContentsMargins(8, 8, 8, 8); root.setSpacing(12)
         self.thumb_label = QLabel(objectName="Thumb", alignment=Qt.AlignmentFlag.AlignCenter); self.thumb_label.setFixedSize(128, 72); root.addWidget(self.thumb_label)
+
         info_widget = QWidget(); info_layout = QVBoxLayout(info_widget)
         info_layout.setContentsMargins(0, 0, 0, 0); info_layout.setSpacing(4)
-        self.url_label = QLabel(self.url); self.url_label.setWordWrap(True)
+
+        title_text = self.meta.get("title") or "(제목 확인 중...)"
+        self.title_label = QLabel(title_text); self.title_label.setObjectName("Title")
+        self.title_label.setWordWrap(True)
+
+        self.url_label = QLabel(self.url); self.url_label.setObjectName("PaneSubtitle")
+        self.url_label.setWordWrap(True)
+
         self.last_check_label = QLabel(f"마지막 확인: {self.meta.get('last_check', '-')}"); self.last_check_label.setObjectName("PaneSubtitle")
-        info_layout.addWidget(self.url_label); info_layout.addWidget(self.last_check_label); info_layout.addStretch(1); root.addWidget(info_widget, 1)
+
+        info_layout.addWidget(self.title_label)
+        info_layout.addWidget(self.url_label)
+        info_layout.addWidget(self.last_check_label)
+        info_layout.addStretch(1); root.addWidget(info_widget, 1)
+
         self._load_or_download_thumbnail()
 
     def _load_or_download_thumbnail(self):
@@ -161,16 +179,26 @@ class FavoriteItemWidget(QWidget):
     def _on_thumb_finished(self, result: tuple, cache_path: Path):
         try: url, data = result
         except (TypeError, ValueError): return
+        # ✅ Check if widget still exists before processing
+        if self is None: return
         if data:
             try: cache_path.write_bytes(data)
             except OSError: pass
             pixmap = QPixmap();
             if pixmap.loadFromData(data): self._set_thumbnail_pixmap(pixmap)
 
+    # --- [수정된 부분 시작] ---
     def _set_thumbnail_pixmap(self, pixmap: QPixmap):
-        if pixmap and not pixmap.isNull():
-            scaled_pm = pixmap.scaled(self.thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self.thumb_label.setPixmap(scaled_pm)
+        """Safely sets the thumbnail pixmap, checking if the label exists."""
+        # ✅ Check if the thumb_label exists before using it
+        try:
+            if self.thumb_label and pixmap and not pixmap.isNull():
+                scaled_pm = pixmap.scaled(self.thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.thumb_label.setPixmap(scaled_pm)
+        except RuntimeError:
+            # Catch the specific error if the label was deleted between the check and use
+            pass
+    # --- [수정된 부분 끝] ---
 
 class HistoryItemWidget(QWidget):
     def __init__(self, url: str, meta: Dict[str, str], parent=None):
@@ -178,7 +206,7 @@ class HistoryItemWidget(QWidget):
         self.setObjectName("HistoryItem"); self.url = url; self.meta = meta
         THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         root = QHBoxLayout(self)
-        root.setContentsMargins(8, 4, 8, 4)  # 상하 여백을 4px로 수정
+        root.setContentsMargins(8, 4, 8, 4)
         root.setSpacing(12)
         self.thumb_label = QLabel(objectName="Thumb", alignment=Qt.AlignmentFlag.AlignCenter); self.thumb_label.setFixedSize(128, 72); root.addWidget(self.thumb_label)
         info_widget = QWidget(); info_layout = QVBoxLayout(info_widget)
@@ -203,10 +231,12 @@ class HistoryItemWidget(QWidget):
                 self.downloader.finished.connect(lambda r: self._on_thumb_finished(r, cache_path))
                 self.downloader.start()
         except Exception: pass
-            
+
     def _on_thumb_finished(self, result: tuple, cache_path: Path):
         try: url, data = result
         except (TypeError, ValueError): return
+        # ✅ Check if widget still exists before processing
+        if self is None: return
         if data:
             try: cache_path.write_bytes(data)
             except OSError: pass
@@ -214,6 +244,12 @@ class HistoryItemWidget(QWidget):
             if pixmap.loadFromData(data): self._set_thumbnail_pixmap(pixmap)
 
     def _set_thumbnail_pixmap(self, pixmap: QPixmap):
-        if pixmap and not pixmap.isNull():
-            scaled_pm = pixmap.scaled(self.thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            self.thumb_label.setPixmap(scaled_pm)
+        """Safely sets the thumbnail pixmap, checking if the label exists."""
+        # ✅ Check if the thumb_label exists before using it
+        try:
+            if self.thumb_label and pixmap and not pixmap.isNull():
+                scaled_pm = pixmap.scaled(self.thumb_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.thumb_label.setPixmap(scaled_pm)
+        except RuntimeError:
+            # Catch the specific error if the label was deleted between the check and use
+            pass

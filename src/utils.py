@@ -1,5 +1,6 @@
 # src/utils.py
-# 수정: series_exclude_keywords 기본값 추가
+# 수정:
+# - FILENAME_TITLE_MAX_LENGTH 값을 120에서 100으로 변경하여 파일명의 최대 제목 길이 축소
 
 import json
 import os
@@ -13,10 +14,10 @@ from typing import Dict, Any, List, Optional
 from PyQt6.QtWidgets import QMessageBox
 
 CONFIG_FILE = "downloader_config.json"
-DEFAULT_PARALLEL = 3
+DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
-PARALLEL_MAX = 5
-FILENAME_TITLE_MAX_LENGTH = 120
+PARALLEL_MAX = 10
+FILENAME_TITLE_MAX_LENGTH = 100
 
 
 def load_config() -> Dict[str, Any]:
@@ -38,8 +39,13 @@ def load_config() -> Dict[str, Any]:
         "bandwidth_limit": "0",
         "conversion_format": "none",
         "delete_on_conversion": False,
-        # ✅ 시리즈 분석 시 제외할 키워드 목록 추가
-        "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"]
+        "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"],
+        "hardware_encoder": "cpu",
+        "quality_cpu_h264_crf": 26,
+        "quality_cpu_h265_crf": 31,
+        "quality_cpu_vp9_crf": 36,
+        "quality_cpu_av1_crf": 41,
+        "quality_gpu_cq": 30
     }
     if os.path.exists(CONFIG_FILE):
         try:

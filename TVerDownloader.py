@@ -1,8 +1,7 @@
 # TVerDownloader.py
 # 수정:
-# - (v2.4.3) 즐겨찾기 20개 제한 로직 추가
-# - (v2.4.3) 설정 변경 시(open_settings) series_parser에도 config 업데이트
-# - (v2.4.3) __init__에서 series_parser 생성 시 config 객체 전달
+# - add_favorite: 즐겨찾기 추가 후, 즉시 해당 시리즈 제목을 가져오기 위한 파싱 작업('fav-add-check') 트리거
+# - _on_series_parsed: 'fav-add-check' 컨텍스트 처리 로직 추가 (제목만 업데이트, 다운로드 추가 안 함)
 
 import sys, os, re, webbrowser, subprocess
 from typing import List, Dict, Optional, Tuple
@@ -29,7 +28,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.4.3" # ✅ 버전 2.4.3으로 변경
+APP_VERSION = "2.5.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
@@ -41,11 +40,8 @@ class MainWindow(QMainWindow):
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
-        
-        # ✅ SeriesParser 생성 시 config 전달
         self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
         self.download_manager = DownloadManager(self.config, self.history_store)
-        
         self._connect_signals(); self._set_input_enabled(False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
         self.refresh_history_list(); self.refresh_fav_list()
@@ -57,13 +53,11 @@ class MainWindow(QMainWindow):
     def open_settings(self):
         current_theme = self.config.get("theme", "light")
         dialog = SettingsDialog(self.config, self)
-        
+
         if dialog.exec():
             self.config = load_config()
             self.download_manager.update_config(self.config)
-            # ✅ SeriesParser에도 변경된 config 전달
             self.series_parser.update_config(self.config)
-            
             new_theme = self.config.get("theme", "light")
             if new_theme != current_theme:
                 QApplication.instance().setStyleSheet(build_qss(new_theme))
@@ -71,7 +65,7 @@ class MainWindow(QMainWindow):
             self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
             self.refresh_history_list()
             self.refresh_fav_list()
-            
+
     def eventFilter(self, source, event):
         if source is self.ui.download_list and event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Delete: self._delete_selected_download_items(); return True
@@ -198,8 +192,10 @@ class MainWindow(QMainWindow):
         if self.config.get("auto_check_favorites_on_start", True):
             QTimer.singleShot(2500, self.check_all_favorites)
 
-    def _on_series_parsed(self, context: str, series_url: str, episode_info: List[Dict[str, str]]):
+    # --- [수정된 부분 시작] ---
+    def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
         if context == 'single' or context == 'bulk':
+            # 시리즈 URL 직접 입력 or 다중 추가 시
             if context == 'single': self._set_input_enabled(True)
             if not episode_info: self.append_log(f"[{context}] '{series_url}' 시리즈에서 에피소드를 찾지 못했습니다."); return
             dialog = SeriesSelectionDialog(episode_info, self)
@@ -211,14 +207,27 @@ class MainWindow(QMainWindow):
                     if self._request_add_task(url): added_count += 1
                 self.append_log(f"[{context}] 시리즈에서 선택한 {added_count}개 에피소드를 추가했습니다.")
             else: self.append_log(f"[{context}] 시리즈 에피소드 추가를 취소했습니다.")
+        
         elif context == 'fav-check':
+            # '신규 영상 확인' 실행 시 (기존 로직)
             added_count = 0
             for episode in episode_info:
                 url = episode['url']
                 if self.history_store.exists(url): continue
                 if self._request_add_task(url): added_count += 1
             if added_count > 0: self.append_log(f"'{series_url}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
-            self.fav_store.touch_last_check(series_url); self.refresh_fav_list()
+            self.fav_store.touch_last_check(series_url, series_title)
+            self.refresh_fav_list()
+        
+        elif context == 'fav-add-check':
+            # ✅ 즐겨찾기 '추가' 시 제목 업데이트만을 위한 로직
+            if series_title:
+                self.fav_store.touch_last_check(series_url, series_title)
+                self.refresh_fav_list()
+                self.append_log(f"[즐겨찾기] 시리즈 제목 업데이트: {series_title}")
+            else:
+                self.append_log(f"[알림] 즐겨찾기 추가 시 '{series_url}'의 제목을 가져오지 못했습니다.")
+    # --- [수정된 부분 끝] ---
 
     def _add_item_widget(self, url: str):
         existing = self._find_item_widget(url)
@@ -310,9 +319,10 @@ class MainWindow(QMainWindow):
             item.setSizeHint(widget.sizeHint()); item.setData(Qt.ItemDataRole.UserRole, url)
             self.ui.fav_list.addItem(item); self.ui.fav_list.setItemWidget(item, widget)
 
+    # --- [수정된 부분 시작] ---
     def add_favorite(self):
-        """즐겨찾기를 추가합니다. 최대 20개까지만 허용됩니다."""
-        MAX_FAVORITES = 20 # ✅ 즐겨찾기 최대 개수 제한
+        """즐겨찾기를 추가하고, 즉시 제목을 가져오는 파싱을 시작합니다."""
+        MAX_FAVORITES = 20
         if len(self.fav_store.list_series()) >= MAX_FAVORITES:
             QMessageBox.information(self, "즐겨찾기 개수 초과",
                                       f"즐겨찾기는 최대 {MAX_FAVORITES}개까지 추가할 수 있습니다.\n\n"
@@ -328,10 +338,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "알림", "이미 즐겨찾기에 등록된 시리즈입니다.")
             return
 
+        # 1. 먼저 스토어에 추가 (제목은 비어있음)
         self.fav_store.add(url)
         self.ui.fav_input.clear()
-        self.refresh_fav_list()
-        self.append_log(f"[즐겨찾기] 추가: {url}")
+        self.refresh_fav_list() # "(제목 확인 중...)"으로 먼저 표시
+        self.append_log(f"[즐겨찾기] 추가됨: {url}. 시리즈 제목 확인 중...")
+
+        # 2. ✅ 추가된 URL의 제목을 가져오기 위한 파싱 작업 시작
+        self.series_parser.parse('fav-add-check', [url])
+    # --- [수정된 부분 끝] ---
 
     def remove_selected_favorite(self):
         selected_items = self.ui.fav_list.selectedItems()

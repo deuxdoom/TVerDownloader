@@ -1,14 +1,16 @@
 # src/dialogs.py
-# 수정: '고급' 탭에 시리즈 제외 키워드 입력 필드 추가
+# 수정:
+# - '화질' 탭 상세 품질 설정의 SpinBox 기본값 및 라벨 권장값 변경
 
 from __future__ import annotations
 from pathlib import Path
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QSpinBox, QTabWidget, QWidget, QFileDialog, QDialogButtonBox, 
+    QSpinBox, QTabWidget, QWidget, QFileDialog, QDialogButtonBox,
     QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QStyle,
-    QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame
+    QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame, QComboBox,
+    QFormLayout
 )
 from src.utils import save_config
 from src.widgets import THUMBNAIL_CACHE_DIR
@@ -20,7 +22,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("설정")
-        self.setMinimumSize(560, 520)
+        self.setMinimumSize(560, 640)
         root = QVBoxLayout(self)
         self.tabs = QTabWidget(self)
         root.addWidget(self.tabs)
@@ -142,7 +144,7 @@ class SettingsDialog(QDialog):
         self.preview_label.setText(" ".join(parts) + ".mp4")
 
     def _create_quality_tab(self):
-        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
+        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
         
         q_groupbox = QWidget(); q_layout = QVBoxLayout(q_groupbox); q_layout.setContentsMargins(0,0,0,0)
         q_layout.addWidget(QLabel("다운로드 화질 선택:"))
@@ -155,14 +157,74 @@ class SettingsDialog(QDialog):
         q_layout.addLayout(q_radio_layout); layout.addWidget(q_groupbox)
 
         c_groupbox = QWidget(); c_layout = QVBoxLayout(c_groupbox); c_layout.setContentsMargins(0,0,0,0)
-        c_layout.addWidget(QLabel("선호 코덱 (재생 호환성):"))
+        c_layout.addWidget(QLabel("선호 코덱 (재인코딩):"))
         c_radio_layout = QVBoxLayout(); c_radio_layout.setSpacing(10); self.codec_button_group = QButtonGroup(self)
-        codecs = {"AVC/H.264 (최고 호환성)": "avc", "HEVC/H.265 (고효율)": "hevc", "VP9 (웹 표준)": "vp9"}
+        codecs = {"AVC/H.264 (최고 호환성)": "avc", "HEVC/H.265 (고효율)": "hevc", "VP9 (웹 표준)": "vp9", "AV1 (차세대)": "av1"}
         current_codec = self.config.get("preferred_codec", "avc")
         for text, key in codecs.items():
             radio = QRadioButton(text); radio.setProperty("config_value", key); self.codec_button_group.addButton(radio); c_radio_layout.addWidget(radio)
             if key == current_codec: radio.setChecked(True)
         c_layout.addLayout(c_radio_layout); layout.addWidget(c_groupbox)
+
+        hw_groupbox = QWidget()
+        hw_v_layout = QVBoxLayout(hw_groupbox)
+        hw_v_layout.setContentsMargins(0,0,0,0)
+        hw_v_layout.addWidget(QLabel("코덱 변환 가속 (GPU 인코딩):"))
+        self.hw_encoder_combo = QComboBox()
+        self.hw_encoder_map = {
+            "CPU (기본값, 호환성)": "cpu",
+            "NVIDIA (NVENC)": "nvidia",
+            "Intel (QSV)": "intel",
+            "AMD (AMF)": "amd"
+        }
+        current_hw = self.config.get("hardware_encoder", "cpu")
+        for text, key in self.hw_encoder_map.items():
+            self.hw_encoder_combo.addItem(text, userData=key)
+            if key == current_hw:
+                self.hw_encoder_combo.setCurrentText(text)
+        hw_v_layout.addWidget(self.hw_encoder_combo)
+        layout.addWidget(hw_groupbox)
+
+        # --- [수정된 부분 시작] ---
+        # 4. 상세 품질 설정
+        quality_group = QWidget()
+        quality_layout = QFormLayout(quality_group)
+        quality_layout.setContentsMargins(0, 5, 0, 5)
+        quality_layout.setSpacing(10)
+        quality_layout.addRow(QLabel("상세 품질 설정 (숫자가 낮을수록 고품질)"))
+        
+        # CPU H.264
+        self.q_cpu_h264_crf = QSpinBox()
+        self.q_cpu_h264_crf.setRange(0, 51)
+        self.q_cpu_h264_crf.setValue(self.config.get("quality_cpu_h264_crf", 26)) # ✅ 기본값 26
+        quality_layout.addRow("CPU H.264 CRF (권장: 26):", self.q_cpu_h264_crf) # ✅ 권장값 26
+        
+        # CPU H.265
+        self.q_cpu_h265_crf = QSpinBox()
+        self.q_cpu_h265_crf.setRange(0, 51)
+        self.q_cpu_h265_crf.setValue(self.config.get("quality_cpu_h265_crf", 31)) # ✅ 기본값 31
+        quality_layout.addRow("CPU H.265 CRF (권장: 31):", self.q_cpu_h265_crf) # ✅ 권장값 31
+        
+        # CPU VP9
+        self.q_cpu_vp9_crf = QSpinBox()
+        self.q_cpu_vp9_crf.setRange(0, 63)
+        self.q_cpu_vp9_crf.setValue(self.config.get("quality_cpu_vp9_crf", 36)) # ✅ 기본값 36
+        quality_layout.addRow("CPU VP9 CRF (권장: 36):", self.q_cpu_vp9_crf) # ✅ 권장값 36
+        
+        # CPU AV1
+        self.q_cpu_av1_crf = QSpinBox()
+        self.q_cpu_av1_crf.setRange(0, 63)
+        self.q_cpu_av1_crf.setValue(self.config.get("quality_cpu_av1_crf", 41)) # ✅ 기본값 41
+        quality_layout.addRow("CPU AV1 CRF (권장: 41):", self.q_cpu_av1_crf) # ✅ 권장값 41
+        
+        # GPU CQ
+        self.q_gpu_cq = QSpinBox()
+        self.q_gpu_cq.setRange(0, 51)
+        self.q_gpu_cq.setValue(self.config.get("quality_gpu_cq", 30)) # ✅ 기본값 30
+        quality_layout.addRow("GPU CQ/CQP (권장: 30):", self.q_gpu_cq) # ✅ 권장값 30
+        
+        layout.addWidget(quality_group)
+        # --- [수정된 부분 끝] ---
 
         layout.addStretch(1); self.tabs.addTab(tab, "화질")
 
@@ -190,7 +252,7 @@ class SettingsDialog(QDialog):
         bw_v_layout.addLayout(bw_radio_layout); layout.addWidget(bw_groupbox)
         
         conv_groupbox = QWidget(); conv_v_layout = QVBoxLayout(conv_groupbox); conv_v_layout.setContentsMargins(0,0,0,0)
-        conv_v_layout.addWidget(QLabel("다운로드 후 변환:"))
+        conv_v_layout.addWidget(QLabel("다운로드 후 변환 (컨테이너):"))
         self.conversion_button_group = QButtonGroup(self); conv_radio_layout = QVBoxLayout(); conv_radio_layout.setSpacing(10)
         formats = {"변환 안 함 (MP4)": "none", "AVI로 변환": "avi", "MOV로 변환": "mov", "오디오만 추출 (MP3)": "mp3"}
         current_format = self.config.get("conversion_format", "none")
@@ -204,7 +266,6 @@ class SettingsDialog(QDialog):
         self._toggle_delete_checkbox()
         conv_v_layout.addWidget(self.delete_original_checkbox); layout.addWidget(conv_groupbox)
 
-        # ✅ 시리즈 제외 키워드 입력 필드 추가
         exclude_groupbox = QWidget()
         exclude_v_layout = QVBoxLayout(exclude_groupbox)
         exclude_v_layout.setContentsMargins(0,0,0,0)
@@ -242,19 +303,30 @@ class SettingsDialog(QDialog):
         self.config["download_folder"] = self.folder_path_edit.text()
         self.config["max_concurrent_downloads"] = self.concurrent_spinbox.value()
         if self.theme_button_group.checkedButton(): self.config["theme"] = self.theme_button_group.checkedButton().property("config_value")
+        
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
+        
+        # '화질' 탭 저장
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
         if self.codec_button_group.checkedButton(): self.config["preferred_codec"] = self.codec_button_group.checkedButton().property("config_value")
+        self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
+        self.config["quality_cpu_h264_crf"] = self.q_cpu_h264_crf.value()
+        self.config["quality_cpu_h265_crf"] = self.q_cpu_h265_crf.value()
+        self.config["quality_cpu_vp9_crf"] = self.q_cpu_vp9_crf.value()
+        self.config["quality_cpu_av1_crf"] = self.q_cpu_av1_crf.value()
+        self.config["quality_gpu_cq"] = self.q_gpu_cq.value()
+
+        # '다운로드 후 작업' 탭 저장
         if self.post_action_button_group.checkedButton(): self.config["post_action"] = self.post_action_button_group.checkedButton().property("config_value")
+        
+        # '고급' 탭 저장
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
-        
-        # ✅ 시리즈 제외 키워드 저장 로직 추가
         keywords_str = self.exclude_keywords_edit.text()
         self.config["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
         
