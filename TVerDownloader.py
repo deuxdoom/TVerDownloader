@@ -28,7 +28,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.5.1"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
