@@ -1,5 +1,6 @@
 # src/download_manager.py
 # (변경 없음, 이전 답변과 동일)
+# 수정: _start_download에서 자막 관련 설정 3개를 읽어 DownloadThread로 전달
 
 import os
 import subprocess
@@ -70,9 +71,22 @@ class DownloadManager(QObject):
         quality_format = self.config.get("quality", "bv*+ba/b")
         bandwidth_limit = self.config.get("bandwidth_limit", "0")
 
+        # --- [추가된 부분 시작] ---
+        # 자막 설정 읽기
+        download_subs = self.config.get("download_subtitles", True)
+        embed_subs = self.config.get("embed_subtitles", True)
+        subtitle_format = self.config.get("subtitle_format", "vtt")
+        # --- [추가된 부분 끝] ---
+
         thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
                                 ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
-                                quality_format=quality_format, bandwidth_limit=bandwidth_limit)
+                                quality_format=quality_format, bandwidth_limit=bandwidth_limit,
+                                # --- [추가된 부분 시작] ---
+                                download_subtitles=download_subs,
+                                embed_subtitles=embed_subs,
+                                subtitle_format=subtitle_format
+                                # --- [추가된 부분 끝] ---
+                                )
         thread.progress.connect(self._on_progress); thread.finished.connect(self._on_download_finished)
         self._active_threads[url] = thread; self._logged_start.discard(url); thread.start()
         self._update_queue_counter()

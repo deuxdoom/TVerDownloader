@@ -1,7 +1,13 @@
 # src/threads/download_thread.py
-# 수정: 모든 변환 관련 로직을 제거하고, 순수 다운로드 기능만 수행하도록 복원
+# 수정:
+# - import pathlib.Path 추가
+# - __init__: 자막 관련 인자 3개 추가, ffmpeg 실행 파일 경로/디렉토리 경로 분리 저장
+# - _build_command: 하드코딩된 자막 옵션 제거, 설정에 따른 분기 로직 추가
+# - _convert_vtt_to_srt: VTT->SRT 변환 및 원본 VTT 삭제 메서드 신규 추가
+# - _execute_download: 다운로드 완료 후, 설정에 따라 _convert_vtt_to_srt 호출 로직 추가
 
 import os, re, json, time, signal, subprocess
+from pathlib import Path # --- [추가] ---
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.utils import get_startupinfo, FILENAME_TITLE_MAX_LENGTH
@@ -11,12 +17,30 @@ class DownloadThread(QThread):
     finished = pyqtSignal(str, bool, str, dict)
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
-                 output_template: str, quality_format: str, bandwidth_limit: str, parent=None):
+                 output_template: str, quality_format: str, bandwidth_limit: str, 
+                 # --- [추가된 부분 시작] ---
+                 download_subtitles: bool, embed_subtitles: bool, subtitle_format: str,
+                 # --- [추가된 부분 끝] ---
+                 parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
-        self.ytdlp_exe_path = ytdlp_exe_path; self.ffmpeg_exe_path = os.path.dirname(ffmpeg_exe_path)
+        self.ytdlp_exe_path = ytdlp_exe_path
+        
+        # --- [수정된 부분 시작] ---
+        # yt-dlp는 디렉토리 경로가 필요하고, SRT 변환은 실행 파일 경로가 필요
+        self.ffmpeg_path_dir = os.path.dirname(ffmpeg_exe_path)
+        self.ffmpeg_full_exe_path = ffmpeg_exe_path 
+        # --- [수정된 부분 끝] ---
+
         self.output_template = output_template; self.quality_format = quality_format
         self.bandwidth_limit = bandwidth_limit
+        
+        # --- [추가된 부분 시작] ---
+        self.download_subtitles = download_subtitles
+        self.embed_subtitles = embed_subtitles
+        self.subtitle_format = subtitle_format
+        # --- [추가된 부분 끝] ---
+        
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
         self._metadata: Dict = {}
@@ -53,6 +77,41 @@ class DownloadThread(QThread):
             self.progress.emit(self.url, {"status": "오류", "log": log_msg})
         self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
 
+    # --- [신규 메서드 시작] ---
+    def _convert_vtt_to_srt(self, vtt_filepath: Path):
+        """FFmpeg를 사용하여 VTT 파일을 SRT 파일로 변환하고 원본 VTT를 삭제합니다."""
+        if not vtt_filepath.exists():
+            self.progress.emit(self.url, {"log": f"[오류] SRT 변환 대상 VTT 파일을 찾지 못함: {vtt_filepath}"})
+            return
+
+        srt_filepath = vtt_filepath.with_suffix('.srt')
+        
+        # 이미 SRT 파일이 존재하면 변환을 건너뜁니다.
+        if srt_filepath.exists():
+            self.progress.emit(self.url, {"log": "SRT 파일이 이미 존재합니다."})
+            return
+
+        command = [
+            self.ffmpeg_full_exe_path,
+            '-y',       # 덮어쓰기
+            '-i', str(vtt_filepath),
+            str(srt_filepath)
+        ]
+        
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True, startupinfo=get_startupinfo(), timeout=15)
+            if proc.returncode == 0:
+                self.progress.emit(self.url, {"log": "자막을 SRT로 변환했습니다."})
+                try:
+                    vtt_filepath.unlink() # 원본 VTT 파일 삭제
+                except OSError as e:
+                    self.progress.emit(self.url, {"log": f"[오류] 원본 VTT 파일 삭제 실패: {e}"})
+            else:
+                self.progress.emit(self.url, {"log": f"[오류] SRT 변환 실패: {proc.stderr}"})
+        except Exception as e:
+            self.progress.emit(self.url, {"log": f"[오류] SRT 변환 중 예외 발생: {e}"})
+    # --- [신규 메서드 끝] ---
+
     def _execute_download(self) -> bool:
         self._metadata = self._get_metadata() or {}
         if not self._metadata:
@@ -77,9 +136,22 @@ class DownloadThread(QThread):
         
         # 최종 파일 경로가 존재하는지 다시 한번 확인
         if not os.path.exists(self._final_filepath):
-             self.log.emit(f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}")
+             # self.log.emit(f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}")
+             # self.log가 없으므로 progress.emit 사용
+             self.progress.emit(self.url, {"log": f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}"})
+
 
         success = (rc == 0) and os.path.exists(self._final_filepath)
+        
+        # --- [추가된 부분 시작] ---
+        # SRT 변환 로직 (다운로드 성공 시)
+        if success and self.download_subtitles and not self.embed_subtitles and self.subtitle_format == 'srt':
+            self.progress.emit(self.url, {"status": "자막 변환 중 (SRT)..."})
+            # yt-dlp는 일본어 자막을 .ja.vtt로 저장합니다.
+            vtt_path = Path(self._final_filepath).with_suffix('.ja.vtt')
+            self._convert_vtt_to_srt(vtt_path)
+        # --- [추가된 부분 끝] ---
+
         final_status = "완료" if success else "오류"
         self.progress.emit(self.url, {"status": final_status, "percent": 100, "final_filepath": self._final_filepath})
         return success
@@ -109,15 +181,39 @@ class DownloadThread(QThread):
     def _build_command(self, final_filepath: str) -> List[str]:
         command: List[str] = [
             self.ytdlp_exe_path, self.url,
-            "--ffmpeg-location", self.ffmpeg_exe_path,
+            "--ffmpeg-location", self.ffmpeg_path_dir, # --- [수정] ---
             "-o", final_filepath,
             "--retries", "10", "--fragment-retries", "10", "--force-overwrites", "--no-keep-fragments",
             "--no-check-certificate", "--windows-filenames", "--no-cache-dir", "--abort-on-error",
             "--add-header", "Accept-Language:ja-JP", "--progress", "--encoding", "utf-8", "--newline",
-            "--write-subs", "--sub-format", "vtt", "--embed-subs",
+            
+            # --- [수정된 부분 시작] ---
+            # 하드코딩된 자막 옵션 삭제
+            # "--write-subs", "--sub-format", "vtt", "--embed-subs", 
+            # --- [수정된 부분 끝] ---
+            
             "-f", self.quality_format,
             "--merge-output-format", "mp4",
         ]
+        
+        # --- [추가된 부분 시작] ---
+        # 설정에 따른 자막 옵션 추가
+        if self.download_subtitles:
+            command.append("--write-subs")
+            command.append("--sub-langs")
+            command.append("ja") # 일본어 자막으로 고정
+            
+            if self.embed_subtitles:
+                # 1. 병합(Embed) 옵션이 켜진 경우
+                command.append("--embed-subs")
+            else:
+                # 2. 별도 파일 저장 (SRT 변환을 위해 VTT로 고정)
+                command.append("--sub-format")
+                command.append("vtt")
+        else:
+            # 3. 자막 다운로드 OFF
+            command.append("--no-write-subs")
+        # --- [추가된 부분 끝] ---
 
         if self.bandwidth_limit and self.bandwidth_limit != "0": command.extend(["-r", self.bandwidth_limit])
         return command
