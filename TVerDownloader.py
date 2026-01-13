@@ -1,7 +1,4 @@
 # TVerDownloader.py
-# 수정:
-# - add_favorite: 즐겨찾기 추가 후, 즉시 해당 시리즈 제목을 가져오기 위한 파싱 작업('fav-add-check') 트리거
-# - _on_series_parsed: 'fav-add-check' 컨텍스트 처리 로직 추가 (제목만 업데이트, 다운로드 추가 안 함)
 
 import sys, os, re, webbrowser, subprocess
 from typing import List, Dict, Optional, Tuple
@@ -28,7 +25,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.5.1"
+APP_VERSION = "2.6.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
@@ -108,8 +105,14 @@ class MainWindow(QMainWindow):
         if search_term: entries_to_show = [(url, meta) for url, meta in all_entries if search_term in meta.get('title', '').lower() or search_term in url.lower()]
         else: entries_to_show = all_entries
         if sort_index == 1: entries_to_show.sort(key=lambda item: item[1].get('title', ''))
+        
+        # [최적화] 최근 100개만 표시
+        MAX_DISPLAY = 100
+        total_count = len(entries_to_show)
+        display_entries = entries_to_show[:MAX_DISPLAY]
+        
         self.ui.history_list.clear()
-        for url, meta in entries_to_show:
+        for url, meta in display_entries:
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
             if meta.get("series_id") or meta.get("thumbnail_url"):
                 widget = HistoryItemWidget(url, meta); item.setSizeHint(widget.sizeHint())
@@ -117,6 +120,11 @@ class MainWindow(QMainWindow):
             else:
                 title = meta.get("title", "(제목 없음)"); date = meta.get("date", "")
                 item.setText(f"{title}  •  {date}\n{url}"); item.setSizeHint(QSize(0, 90)); self.ui.history_list.addItem(item)
+        
+        if total_count > MAX_DISPLAY:
+            info_item = QListWidgetItem(f"... 외 {total_count - MAX_DISPLAY}개의 이전 기록이 있습니다. (검색하여 찾을 수 있습니다)")
+            info_item.setFlags(Qt.ItemFlag.NoItemFlags); info_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.ui.history_list.addItem(info_item)
 
     def _process_url(self, url: str):
         if not self.env_ready: self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요."); return
@@ -192,10 +200,8 @@ class MainWindow(QMainWindow):
         if self.config.get("auto_check_favorites_on_start", True):
             QTimer.singleShot(2500, self.check_all_favorites)
 
-    # --- [수정된 부분 시작] ---
     def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
         if context == 'single' or context == 'bulk':
-            # 시리즈 URL 직접 입력 or 다중 추가 시
             if context == 'single': self._set_input_enabled(True)
             if not episode_info: self.append_log(f"[{context}] '{series_url}' 시리즈에서 에피소드를 찾지 못했습니다."); return
             dialog = SeriesSelectionDialog(episode_info, self)
@@ -209,7 +215,6 @@ class MainWindow(QMainWindow):
             else: self.append_log(f"[{context}] 시리즈 에피소드 추가를 취소했습니다.")
         
         elif context == 'fav-check':
-            # '신규 영상 확인' 실행 시 (기존 로직)
             added_count = 0
             for episode in episode_info:
                 url = episode['url']
@@ -220,14 +225,12 @@ class MainWindow(QMainWindow):
             self.refresh_fav_list()
         
         elif context == 'fav-add-check':
-            # ✅ 즐겨찾기 '추가' 시 제목 업데이트만을 위한 로직
             if series_title:
                 self.fav_store.touch_last_check(series_url, series_title)
                 self.refresh_fav_list()
                 self.append_log(f"[즐겨찾기] 시리즈 제목 업데이트: {series_title}")
             else:
                 self.append_log(f"[알림] 즐겨찾기 추가 시 '{series_url}'의 제목을 가져오지 못했습니다.")
-    # --- [수정된 부분 끝] ---
 
     def _add_item_widget(self, url: str):
         existing = self._find_item_widget(url)
@@ -319,9 +322,7 @@ class MainWindow(QMainWindow):
             item.setSizeHint(widget.sizeHint()); item.setData(Qt.ItemDataRole.UserRole, url)
             self.ui.fav_list.addItem(item); self.ui.fav_list.setItemWidget(item, widget)
 
-    # --- [수정된 부분 시작] ---
     def add_favorite(self):
-        """즐겨찾기를 추가하고, 즉시 제목을 가져오는 파싱을 시작합니다."""
         MAX_FAVORITES = 20
         if len(self.fav_store.list_series()) >= MAX_FAVORITES:
             QMessageBox.information(self, "즐겨찾기 개수 초과",
@@ -338,15 +339,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "알림", "이미 즐겨찾기에 등록된 시리즈입니다.")
             return
 
-        # 1. 먼저 스토어에 추가 (제목은 비어있음)
         self.fav_store.add(url)
         self.ui.fav_input.clear()
-        self.refresh_fav_list() # "(제목 확인 중...)"으로 먼저 표시
+        self.refresh_fav_list()
         self.append_log(f"[즐겨찾기] 추가됨: {url}. 시리즈 제목 확인 중...")
-
-        # 2. ✅ 추가된 URL의 제목을 가져오기 위한 파싱 작업 시작
         self.series_parser.parse('fav-add-check', [url])
-    # --- [수정된 부분 끝] ---
 
     def remove_selected_favorite(self):
         selected_items = self.ui.fav_list.selectedItems()

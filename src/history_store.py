@@ -1,11 +1,11 @@
 # src/history_store.py
-# 수정: add 메서드에 thumbnail_url을 선택적으로 저장하는 로직 추가
 
 from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Union, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 class HistoryStore:
     DEFAULT_BAK_DIR = Path("historybak")
@@ -18,6 +18,8 @@ class HistoryStore:
         self._data: Dict[str, dict] = {}
         self.backup_dir: Path = backup_dir or self.DEFAULT_BAK_DIR
         self.keep_backups: int = max(0, int(keep_backups))
+        # UI 블로킹 방지를 위한 단일 스레드 실행기
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     def load(self) -> bool:
         p = Path(self.path)
@@ -41,10 +43,18 @@ class HistoryStore:
         except (json.JSONDecodeError, IOError):
             self._data = {}; return False
 
-    def save(self) -> bool:
+    def save(self) -> None:
+        """비동기로 저장을 수행하여 UI 블로킹을 방지합니다."""
+        # 현재 데이터의 스냅샷을 만들어 백그라운드 스레드로 전달
+        data_snapshot = self._data.copy()
+        self._executor.submit(self._save_sync, data_snapshot)
+
+    def _save_sync(self, data: Dict[str, dict]) -> bool:
+        """실제 디스크 쓰기 작업 (백그라운드에서 실행됨)"""
         try:
             target = Path(self.path)
             self.backup_dir.mkdir(parents=True, exist_ok=True)
+            
             if target.exists():
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 bak_path = self.backup_dir / f"urlhistory_{ts}.bak.json"
@@ -52,8 +62,9 @@ class HistoryStore:
                     bak_path.write_bytes(target.read_bytes())
                     self._prune_backups()
                 except OSError: pass
+            
             tmp_path = target.with_suffix(".tmp")
-            tmp_path.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp_path.replace(target)
             return True
         except Exception: return False

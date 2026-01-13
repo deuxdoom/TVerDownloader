@@ -1,9 +1,4 @@
 # src/dialogs.py
-# 수정:
-# - '화질' 탭 상세 품질 설정의 SpinBox 기본값 및 라벨 권장값 변경
-# - [자막] _create_subtitle_tab 메서드 신규 추가
-# - [자막] __init__에서 _create_subtitle_tab 호출
-# - [자막] _save_settings에서 자막 관련 설정 저장
 
 from __future__ import annotations
 from pathlib import Path
@@ -15,7 +10,7 @@ from PyQt6.QtWidgets import (
     QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame, QComboBox,
     QFormLayout, QGroupBox
 )
-from src.utils import save_config
+from src.utils import save_config, PARALLEL_MAX
 from src.widgets import THUMBNAIL_CACHE_DIR
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
@@ -32,11 +27,7 @@ class SettingsDialog(QDialog):
         self._create_general_tab()
         self._create_filename_tab()
         self._create_quality_tab()
-        
-        # --- [추가된 부분 시작] ---
-        self._create_subtitle_tab() # 자막 탭 추가
-        # --- [추가된 부분 끝] ---
-        
+        self._create_subtitle_tab()
         self._create_post_action_tab()
         self._create_advanced_tab()
         self._create_cache_tab()
@@ -91,8 +82,9 @@ class SettingsDialog(QDialog):
         folder_layout.addLayout(row); layout.addWidget(folder_group)
         dl_count_group = QWidget(); dl_count_layout = QHBoxLayout(dl_count_group); dl_count_layout.setContentsMargins(0,0,0,0)
         dl_count_layout.addWidget(QLabel("최대 동시 다운로드 개수:"))
-        self.concurrent_spinbox = QSpinBox(); self.concurrent_spinbox.setRange(1, 5)
-        self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 3))
+        self.concurrent_spinbox = QSpinBox()
+        self.concurrent_spinbox.setRange(1, PARALLEL_MAX) # 수정: PARALLEL_MAX 적용
+        self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 5))
         dl_count_layout.addWidget(self.concurrent_spinbox); dl_count_layout.addStretch(1); layout.addWidget(dl_count_group)
         theme_group = QWidget(); theme_layout = QVBoxLayout(theme_group); theme_layout.setContentsMargins(0,0,0,0)
         theme_layout.addWidget(QLabel("테마:"))
@@ -193,52 +185,43 @@ class SettingsDialog(QDialog):
         hw_v_layout.addWidget(self.hw_encoder_combo)
         layout.addWidget(hw_groupbox)
 
-        # 4. 상세 품질 설정
         quality_group = QWidget()
         quality_layout = QFormLayout(quality_group)
         quality_layout.setContentsMargins(0, 5, 0, 5)
         quality_layout.setSpacing(10)
         quality_layout.addRow(QLabel("상세 품질 설정 (숫자가 낮을수록 고품질)"))
         
-        # CPU H.264
         self.q_cpu_h264_crf = QSpinBox()
         self.q_cpu_h264_crf.setRange(0, 51)
         self.q_cpu_h264_crf.setValue(self.config.get("quality_cpu_h264_crf", 26)) 
         quality_layout.addRow("CPU H.264 CRF (권장: 26):", self.q_cpu_h264_crf)
         
-        # CPU H.265
         self.q_cpu_h265_crf = QSpinBox()
         self.q_cpu_h265_crf.setRange(0, 51)
         self.q_cpu_h265_crf.setValue(self.config.get("quality_cpu_h265_crf", 31)) 
         quality_layout.addRow("CPU H.265 CRF (권장: 31):", self.q_cpu_h265_crf)
         
-        # CPU VP9
         self.q_cpu_vp9_crf = QSpinBox()
         self.q_cpu_vp9_crf.setRange(0, 63)
         self.q_cpu_vp9_crf.setValue(self.config.get("quality_cpu_vp9_crf", 36)) 
         quality_layout.addRow("CPU VP9 CRF (권장: 36):", self.q_cpu_vp9_crf)
         
-        # CPU AV1
         self.q_cpu_av1_crf = QSpinBox()
         self.q_cpu_av1_crf.setRange(0, 63)
         self.q_cpu_av1_crf.setValue(self.config.get("quality_cpu_av1_crf", 41)) 
         quality_layout.addRow("CPU AV1 CRF (권장: 41):", self.q_cpu_av1_crf)
         
-        # GPU CQ
         self.q_gpu_cq = QSpinBox()
         self.q_gpu_cq.setRange(0, 51)
         self.q_gpu_cq.setValue(self.config.get("quality_gpu_cq", 30)) 
         quality_layout.addRow("GPU CQ/CQP (권장: 30):", self.q_gpu_cq)
         
         layout.addWidget(quality_group)
-        
         layout.addStretch(1); self.tabs.addTab(tab, "화질")
 
-    # --- [신규 메서드 시작] ---
     def _create_subtitle_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
 
-        # 1. 자막 다운로드 활성화
         self.download_subs_checkbox = QCheckBox("자막 다운로드 활성화")
         self.download_subs_checkbox.setChecked(self.config.get("download_subtitles", True))
         layout.addWidget(self.download_subs_checkbox)
@@ -248,12 +231,10 @@ class SettingsDialog(QDialog):
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
-        # 2. 자막 병합 (Embed)
         self.embed_subs_checkbox = QCheckBox("자막을 동영상 파일에 병합 (Embed)")
         self.embed_subs_checkbox.setChecked(self.config.get("embed_subtitles", True))
         layout.addWidget(self.embed_subs_checkbox)
 
-        # 3. 자막 포맷 (별도 저장 시)
         self.sub_fmt_groupbox = QGroupBox("별도 파일 저장 시 포맷")
         sub_fmt_layout = QVBoxLayout(self.sub_fmt_groupbox)
         sub_fmt_layout.setSpacing(10)
@@ -278,22 +259,17 @@ class SettingsDialog(QDialog):
             
         layout.addWidget(self.sub_fmt_groupbox)
 
-        # --- UI 연동 로직 ---
         def update_ui_state():
             is_download_enabled = self.download_subs_checkbox.isChecked()
             is_embed_enabled = self.embed_subs_checkbox.isChecked()
-            
             self.embed_subs_checkbox.setEnabled(is_download_enabled)
             self.sub_fmt_groupbox.setEnabled(is_download_enabled and not is_embed_enabled)
 
         self.download_subs_checkbox.toggled.connect(update_ui_state)
         self.embed_subs_checkbox.toggled.connect(update_ui_state)
-        
-        update_ui_state() # 초기 상태 설정
-
+        update_ui_state()
         layout.addStretch(1)
         self.tabs.addTab(tab, "자막")
-    # --- [신규 메서드 끝] ---
 
     def _create_post_action_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.addWidget(QLabel("모든 다운로드 완료 후 작업:"))
@@ -377,7 +353,6 @@ class SettingsDialog(QDialog):
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
         
-        # '화질' 탭 저장
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
         if self.codec_button_group.checkedButton(): self.config["preferred_codec"] = self.codec_button_group.checkedButton().property("config_value")
         self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
@@ -387,18 +362,13 @@ class SettingsDialog(QDialog):
         self.config["quality_cpu_av1_crf"] = self.q_cpu_av1_crf.value()
         self.config["quality_gpu_cq"] = self.q_gpu_cq.value()
 
-        # --- [추가된 부분 시작] ---
-        # '자막' 탭 저장
         self.config["download_subtitles"] = self.download_subs_checkbox.isChecked()
         self.config["embed_subtitles"] = self.embed_subs_checkbox.isChecked()
         if self.subtitle_format_button_group.checkedButton():
             self.config["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
-        # --- [추가된 부분 끝] ---
 
-        # '다운로드 후 작업' 탭 저장
         if self.post_action_button_group.checkedButton(): self.config["post_action"] = self.post_action_button_group.checkedButton().property("config_value")
         
-        # '고급' 탭 저장
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()

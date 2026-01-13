@@ -1,13 +1,7 @@
 # src/threads/download_thread.py
-# 수정:
-# - import pathlib.Path 추가
-# - __init__: 자막 관련 인자 3개 추가, ffmpeg 실행 파일 경로/디렉토리 경로 분리 저장
-# - _build_command: 하드코딩된 자막 옵션 제거, 설정에 따른 분기 로직 추가
-# - _convert_vtt_to_srt: VTT->SRT 변환 및 원본 VTT 삭제 메서드 신규 추가
-# - _execute_download: 다운로드 완료 후, 설정에 따라 _convert_vtt_to_srt 호출 로직 추가
 
 import os, re, json, time, signal, subprocess
-from pathlib import Path # --- [추가] ---
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.utils import get_startupinfo, FILENAME_TITLE_MAX_LENGTH
@@ -18,28 +12,21 @@ class DownloadThread(QThread):
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
                  output_template: str, quality_format: str, bandwidth_limit: str, 
-                 # --- [추가된 부분 시작] ---
                  download_subtitles: bool, embed_subtitles: bool, subtitle_format: str,
-                 # --- [추가된 부분 끝] ---
                  parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
         self.ytdlp_exe_path = ytdlp_exe_path
         
-        # --- [수정된 부분 시작] ---
-        # yt-dlp는 디렉토리 경로가 필요하고, SRT 변환은 실행 파일 경로가 필요
         self.ffmpeg_path_dir = os.path.dirname(ffmpeg_exe_path)
         self.ffmpeg_full_exe_path = ffmpeg_exe_path 
-        # --- [수정된 부분 끝] ---
 
         self.output_template = output_template; self.quality_format = quality_format
         self.bandwidth_limit = bandwidth_limit
         
-        # --- [추가된 부분 시작] ---
         self.download_subtitles = download_subtitles
         self.embed_subtitles = embed_subtitles
         self.subtitle_format = subtitle_format
-        # --- [추가된 부분 끝] ---
         
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
@@ -77,7 +64,6 @@ class DownloadThread(QThread):
             self.progress.emit(self.url, {"status": "오류", "log": log_msg})
         self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
 
-    # --- [신규 메서드 시작] ---
     def _convert_vtt_to_srt(self, vtt_filepath: Path):
         """FFmpeg를 사용하여 VTT 파일을 SRT 파일로 변환하고 원본 VTT를 삭제합니다."""
         if not vtt_filepath.exists():
@@ -86,14 +72,13 @@ class DownloadThread(QThread):
 
         srt_filepath = vtt_filepath.with_suffix('.srt')
         
-        # 이미 SRT 파일이 존재하면 변환을 건너뜁니다.
         if srt_filepath.exists():
             self.progress.emit(self.url, {"log": "SRT 파일이 이미 존재합니다."})
             return
 
         command = [
             self.ffmpeg_full_exe_path,
-            '-y',       # 덮어쓰기
+            '-y',
             '-i', str(vtt_filepath),
             str(srt_filepath)
         ]
@@ -103,14 +88,13 @@ class DownloadThread(QThread):
             if proc.returncode == 0:
                 self.progress.emit(self.url, {"log": "자막을 SRT로 변환했습니다."})
                 try:
-                    vtt_filepath.unlink() # 원본 VTT 파일 삭제
+                    vtt_filepath.unlink()
                 except OSError as e:
                     self.progress.emit(self.url, {"log": f"[오류] 원본 VTT 파일 삭제 실패: {e}"})
             else:
                 self.progress.emit(self.url, {"log": f"[오류] SRT 변환 실패: {proc.stderr}"})
         except Exception as e:
             self.progress.emit(self.url, {"log": f"[오류] SRT 변환 중 예외 발생: {e}"})
-    # --- [신규 메서드 끝] ---
 
     def _execute_download(self) -> bool:
         self._metadata = self._get_metadata() or {}
@@ -134,23 +118,15 @@ class DownloadThread(QThread):
         if self._stop_flag: return False
         rc = self.process.wait(timeout=5) if self.process else 1
         
-        # 최종 파일 경로가 존재하는지 다시 한번 확인
         if not os.path.exists(self._final_filepath):
-             # self.log.emit(f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}")
-             # self.log가 없으므로 progress.emit 사용
              self.progress.emit(self.url, {"log": f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}"})
-
 
         success = (rc == 0) and os.path.exists(self._final_filepath)
         
-        # --- [추가된 부분 시작] ---
-        # SRT 변환 로직 (다운로드 성공 시)
         if success and self.download_subtitles and not self.embed_subtitles and self.subtitle_format == 'srt':
             self.progress.emit(self.url, {"status": "자막 변환 중 (SRT)..."})
-            # yt-dlp는 일본어 자막을 .ja.vtt로 저장합니다.
             vtt_path = Path(self._final_filepath).with_suffix('.ja.vtt')
             self._convert_vtt_to_srt(vtt_path)
-        # --- [추가된 부분 끝] ---
 
         final_status = "완료" if success else "오류"
         self.progress.emit(self.url, {"status": final_status, "percent": 100, "final_filepath": self._final_filepath})
@@ -165,55 +141,87 @@ class DownloadThread(QThread):
 
     def _build_final_filepath(self, metadata: Dict[str, Any]) -> str:
         template, ext = self.output_template.rsplit('.', 1)
+        
+        # [수정] 시리즈/타이틀 중복 제거 로직 강화 (정규식 도입)
+        series_title = (metadata.get('series') or metadata.get('playlist_title') or '').strip()
+        episode_title = metadata.get('title', 'NA').strip()
+        
+        if series_title:
+            # 1. 먼저 정확한 매칭 시도
+            if episode_title.startswith(series_title):
+                episode_title = episode_title[len(series_title):]
+            else:
+                # 2. 실패 시 정규식으로 유연하게 매칭 (특수문자 이스케이프 + 공백 무시)
+                try:
+                    # 시리즈명을 안전한 패턴으로 변환 (특수문자 처리)
+                    safe_series = re.escape(series_title)
+                    # 시리즈 제목이 에피소드 제목의 '맨 앞'에 오는지 검사
+                    # 뒤에 공백/특수문자가 올 수 있음을 가정
+                    match = re.match(r'^' + safe_series, episode_title, re.IGNORECASE)
+                    if match:
+                         episode_title = episode_title[match.end():]
+                except Exception:
+                    pass
+
+            # 3. 중복 제거 후 남은 문자열 앞쪽의 구분자(공백, 콜론, 대시, 전각공백 등) 제거
+            # \u3000: 전각 공백 (일본어 텍스트에서 흔함)
+            episode_title = re.sub(r'^[:\-\s\u3000]+', '', episode_title).strip()
+            
         def replacer(match):
             key = match.group(1)
             if key == 'title':
-                title = metadata.get('title', 'NA')
-                return title[:FILENAME_TITLE_MAX_LENGTH]
-            elif key == 'series,playlist_title': return metadata.get('series') or metadata.get('playlist_title') or ''
+                return episode_title[:FILENAME_TITLE_MAX_LENGTH]
+            elif key == 'series,playlist_title': return series_title
             elif key == 'upload_date>%Y-%m-%d': return (metadata.get('upload_date') or '')[:8]
             else: return str(metadata.get(key, ''))
+        
         path_without_ext = re.sub(r'%\((.*?)\)s', replacer, template)
         path_without_ext = re.sub(r'\s+', ' ', path_without_ext).strip()
-        final_filename = f"{path_without_ext}.{metadata.get('ext', ext)}"
-        return os.path.join(self.download_folder, final_filename)
+
+        # [수정] 전체 경로 길이 제한 및 자동 축소 (Windows MAX_PATH 대응)
+        full_dir = os.path.abspath(self.download_folder)
+        filename = f"{path_without_ext}.{metadata.get('ext', ext)}"
+        full_path = os.path.join(full_dir, filename)
+        
+        MAX_PATH_LEN = 250
+        current_len = len(full_path)
+        
+        if current_len > MAX_PATH_LEN:
+            excess = current_len - MAX_PATH_LEN
+            name_part = path_without_ext
+            new_len = max(10, len(name_part) - excess)
+            path_without_ext = name_part[:new_len].strip()
+            
+            filename = f"{path_without_ext}.{metadata.get('ext', ext)}"
+            full_path = os.path.join(full_dir, filename)
+            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 파일명을 축소했습니다: {filename}"})
+            
+        return full_path
 
     def _build_command(self, final_filepath: str) -> List[str]:
         command: List[str] = [
             self.ytdlp_exe_path, self.url,
-            "--ffmpeg-location", self.ffmpeg_path_dir, # --- [수정] ---
+            "--ffmpeg-location", self.ffmpeg_path_dir,
             "-o", final_filepath,
             "--retries", "10", "--fragment-retries", "10", "--force-overwrites", "--no-keep-fragments",
             "--no-check-certificate", "--windows-filenames", "--no-cache-dir", "--abort-on-error",
             "--add-header", "Accept-Language:ja-JP", "--progress", "--encoding", "utf-8", "--newline",
-            
-            # --- [수정된 부분 시작] ---
-            # 하드코딩된 자막 옵션 삭제
-            # "--write-subs", "--sub-format", "vtt", "--embed-subs", 
-            # --- [수정된 부분 끝] ---
-            
             "-f", self.quality_format,
             "--merge-output-format", "mp4",
         ]
         
-        # --- [추가된 부분 시작] ---
-        # 설정에 따른 자막 옵션 추가
         if self.download_subtitles:
             command.append("--write-subs")
             command.append("--sub-langs")
-            command.append("ja") # 일본어 자막으로 고정
+            command.append("ja")
             
             if self.embed_subtitles:
-                # 1. 병합(Embed) 옵션이 켜진 경우
                 command.append("--embed-subs")
             else:
-                # 2. 별도 파일 저장 (SRT 변환을 위해 VTT로 고정)
                 command.append("--sub-format")
                 command.append("vtt")
         else:
-            # 3. 자막 다운로드 OFF
             command.append("--no-write-subs")
-        # --- [추가된 부분 끝] ---
 
         if self.bandwidth_limit and self.bandwidth_limit != "0": command.extend(["-r", self.bandwidth_limit])
         return command
@@ -225,14 +233,11 @@ class DownloadThread(QThread):
         log_keywords = ["Merging formats into", "Embedding subtitles", "[error]", "ERROR:"]
         if any(keyword in line for keyword in log_keywords): payload["log"] = line
         
-        # yt-dlp가 최종 파일 경로를 알리는 로그 파싱
-        # 예: [Merger] Merging formats into "C:\...\video.mp4"
         m_merger = re.search(r"\[Merger\] Merging formats into \"(.+)\"", line)
         if m_merger:
             self._final_filepath = m_merger.group(1)
 
         if "[download] Destination:" in line:
-            # 최종 파일 경로가 아직 설정되지 않았을 경우, 임시로 설정
             if not self._final_filepath:
                 self._final_filepath = line.split("Destination:", 1)[1].strip()
             

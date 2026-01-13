@@ -1,7 +1,4 @@
 # src/utils.py
-# 수정:
-# - load_config: 자막 관련 기본 설정 3개 추가 (download_subtitles, embed_subtitles, subtitle_format)
-# - FILENAME_TITLE_MAX_LENGTH 값을 120에서 100으로 변경하여 파일명의 최대 제목 길이 축소
 
 import json
 import os
@@ -17,8 +14,8 @@ from PyQt6.QtWidgets import QMessageBox
 CONFIG_FILE = "downloader_config.json"
 DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
-PARALLEL_MAX = 10
-FILENAME_TITLE_MAX_LENGTH = 100
+PARALLEL_MAX = 20  # 수정: 최대 동시 다운로드 수 상향 (10 -> 20)
+FILENAME_TITLE_MAX_LENGTH = 80  # 수정: 파일명 길이 제한 축소 (경로 길이 오류 방지)
 
 
 def load_config() -> Dict[str, Any]:
@@ -47,12 +44,9 @@ def load_config() -> Dict[str, Any]:
         "quality_cpu_vp9_crf": 36,
         "quality_cpu_av1_crf": 41,
         "quality_gpu_cq": 30,
-        
-        # --- [추가된 부분 시작] ---
         "download_subtitles": True,
         "embed_subtitles": True,
         "subtitle_format": "vtt",
-        # --- [추가된 부분 끝] ---
     }
     if os.path.exists(CONFIG_FILE):
         try:
