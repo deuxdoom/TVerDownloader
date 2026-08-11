@@ -71,21 +71,18 @@ class DownloadManager(QObject):
         quality_format = self.config.get("quality", "bv*+ba/b")
         bandwidth_limit = self.config.get("bandwidth_limit", "0")
 
-        # --- [추가된 부분 시작] ---
-        # 자막 설정 읽기
         download_subs = self.config.get("download_subtitles", True)
         embed_subs = self.config.get("embed_subtitles", True)
         subtitle_format = self.config.get("subtitle_format", "vtt")
-        # --- [추가된 부분 끝] ---
+        ignore_ssl = self.config.get("ignore_ssl_errors", False)
 
         thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
                                 ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
                                 quality_format=quality_format, bandwidth_limit=bandwidth_limit,
-                                # --- [추가된 부분 시작] ---
                                 download_subtitles=download_subs,
                                 embed_subtitles=embed_subs,
-                                subtitle_format=subtitle_format
-                                # --- [추가된 부분 끝] ---
+                                subtitle_format=subtitle_format,
+                                ignore_ssl_errors=ignore_ssl
                                 )
         thread.progress.connect(self._on_progress); thread.finished.connect(self._on_download_finished)
         self._active_threads[url] = thread; self._logged_start.discard(url); thread.start()
@@ -139,9 +136,17 @@ class DownloadManager(QObject):
             self._start_conversion(url, final_filepath, target_format=target_container_format)
             return
 
-        preferred_codec_key = self.config.get("preferred_codec", "avc")
+        preferred_codec_key = self.config.get("preferred_codec", "original")
+
+        # 수정: '원본 유지' 선택 시 ffprobe 코덱 검사와 재인코딩을 모두 건너뜀
+        if preferred_codec_key == "original":
+            self.log.emit("선호 코덱이 '원본 유지'입니다. 재인코딩을 건너뜁니다.")
+            self.task_finished.emit(url, True, final_filepath, metadata)
+            self._check_completion()
+            return
+
         current_codec = self._get_video_codec(final_filepath)
-        
+
         codec_map = {'avc': 'h264', 'hevc': 'hevc', 'vp9': 'vp9', 'av1': 'av1'}
         target_codec = codec_map.get(preferred_codec_key)
         

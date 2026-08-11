@@ -29,9 +29,8 @@ def load_config() -> Dict[str, Any]:
             "episode": True, "id": True,
         },
         "filename_order": ["series", "upload_date", "episode_number", "episode", "id"],
-        "post_action": "None",
         "quality": "bv*+ba/b",
-        "preferred_codec": "avc",
+        "preferred_codec": "original",  # 수정: 기본값을 '원본 유지'로 변경 (불필요한 재인코딩 방지)
         "auto_check_favorites_on_start": True,
         "always_on_top": False,
         "bandwidth_limit": "0",
@@ -47,6 +46,7 @@ def load_config() -> Dict[str, Any]:
         "download_subtitles": True,
         "embed_subtitles": True,
         "subtitle_format": "vtt",
+        "ignore_ssl_errors": False,
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -64,12 +64,14 @@ def load_config() -> Dict[str, Any]:
     return config
 
 
-def save_config(config: dict):
+def save_config(config: dict) -> bool:
+    """설정을 저장하고 성공 여부를 반환합니다. (실패를 조용히 삼키지 않음)"""
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
-    except IOError:
-        pass
+        return True
+    except (IOError, OSError, TypeError):
+        return False
 
 
 def construct_filename_template(config: Dict[str, Any]) -> str:

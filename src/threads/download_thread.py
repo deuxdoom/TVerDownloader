@@ -13,6 +13,7 @@ class DownloadThread(QThread):
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
                  output_template: str, quality_format: str, bandwidth_limit: str, 
                  download_subtitles: bool, embed_subtitles: bool, subtitle_format: str,
+                 ignore_ssl_errors: bool = False,
                  parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
@@ -27,6 +28,7 @@ class DownloadThread(QThread):
         self.download_subtitles = download_subtitles
         self.embed_subtitles = embed_subtitles
         self.subtitle_format = subtitle_format
+        self.ignore_ssl_errors = ignore_ssl_errors
         
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
@@ -134,7 +136,10 @@ class DownloadThread(QThread):
 
     def _get_metadata(self) -> Optional[Dict[str, Any]]:
         try:
-            cmd = [self.ytdlp_exe_path, "-J", "--no-warnings", self.url]
+            cmd = [self.ytdlp_exe_path, "-J", "--no-warnings"]
+            if self.ignore_ssl_errors:
+                cmd.append("--no-check-certificate")
+            cmd.append(self.url)
             p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", startupinfo=get_startupinfo(), timeout=20)
             return json.loads(p.stdout) if p.returncode == 0 else None
         except Exception: return None
@@ -179,23 +184,34 @@ class DownloadThread(QThread):
         path_without_ext = re.sub(r'\s+', ' ', path_without_ext).strip()
 
         # [수정] 전체 경로 길이 제한 및 자동 축소 (Windows MAX_PATH 대응)
+        # 기존 문제: 시리즈 하위 폴더가 포함된 경로에서 뒤에서부터 자르면 '/'까지 잘려나가
+        #            폴더 구조가 통째로 사라지거나 깨진 경로가 생성될 수 있었음.
+        #            이제 하위 폴더와 파일명을 분리해 파일명 부분만 축소한다.
         full_dir = os.path.abspath(self.download_folder)
-        filename = f"{path_without_ext}.{metadata.get('ext', ext)}"
-        full_path = os.path.join(full_dir, filename)
-        
+        final_ext = metadata.get('ext', ext)
+        full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
+
         MAX_PATH_LEN = 250
-        current_len = len(full_path)
-        
-        if current_len > MAX_PATH_LEN:
-            excess = current_len - MAX_PATH_LEN
-            name_part = path_without_ext
-            new_len = max(10, len(name_part) - excess)
-            path_without_ext = name_part[:new_len].strip()
-            
-            filename = f"{path_without_ext}.{metadata.get('ext', ext)}"
-            full_path = os.path.join(full_dir, filename)
-            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 파일명을 축소했습니다: {filename}"})
-            
+
+        if len(full_path) > MAX_PATH_LEN:
+            sub_dir, sep, base_name = path_without_ext.rpartition('/')
+
+            excess = len(full_path) - MAX_PATH_LEN
+            new_len = max(10, len(base_name) - excess)
+            base_name = base_name[:new_len].strip() or "video"
+            path_without_ext = f"{sub_dir}{sep}{base_name}" if sep else base_name
+            full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
+
+            # 파일명을 최소 길이까지 줄여도 여전히 길면 하위 폴더명도 축소
+            if len(full_path) > MAX_PATH_LEN and sep:
+                excess = len(full_path) - MAX_PATH_LEN
+                new_dir_len = max(10, len(sub_dir) - excess)
+                sub_dir = sub_dir[:new_dir_len].strip() or "series"
+                path_without_ext = f"{sub_dir}{sep}{base_name}"
+                full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
+
+            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 이름을 축소했습니다: {path_without_ext}.{final_ext}"})
+
         return full_path
 
     def _build_command(self, final_filepath: str) -> List[str]:
@@ -204,11 +220,15 @@ class DownloadThread(QThread):
             "--ffmpeg-location", self.ffmpeg_path_dir,
             "-o", final_filepath,
             "--retries", "10", "--fragment-retries", "10", "--force-overwrites", "--no-keep-fragments",
-            "--no-check-certificate", "--windows-filenames", "--no-cache-dir", "--abort-on-error",
+            "--windows-filenames", "--no-cache-dir", "--abort-on-error",
             "--add-header", "Accept-Language:ja-JP", "--progress", "--encoding", "utf-8", "--newline",
             "-f", self.quality_format,
             "--merge-output-format", "mp4",
         ]
+
+        # 수정: TLS 인증서 검증을 기본으로 수행. 인증서 오류가 나는 환경에서만 설정으로 해제.
+        if self.ignore_ssl_errors:
+            command.append("--no-check-certificate")
         
         if self.download_subtitles:
             command.append("--write-subs")

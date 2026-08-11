@@ -28,7 +28,6 @@ class SettingsDialog(QDialog):
         self._create_filename_tab()
         self._create_quality_tab()
         self._create_subtitle_tab()
-        self._create_post_action_tab()
         self._create_advanced_tab()
         self._create_cache_tab()
         self.buttons = QDialogButtonBox()
@@ -156,15 +155,24 @@ class SettingsDialog(QDialog):
             if key == current_quality: radio.setChecked(True)
         q_layout.addLayout(q_radio_layout); layout.addWidget(q_groupbox)
 
+        # 수정: 라디오 버튼 4개 -> 콤보박스 1개 (공간 절약, 하단 '코덱 변환 가속'과 UI 통일)
         c_groupbox = QWidget(); c_layout = QVBoxLayout(c_groupbox); c_layout.setContentsMargins(0,0,0,0)
         c_layout.addWidget(QLabel("선호 코덱 (재인코딩):"))
-        c_radio_layout = QVBoxLayout(); c_radio_layout.setSpacing(10); self.codec_button_group = QButtonGroup(self)
-        codecs = {"AVC/H.264 (최고 호환성)": "avc", "HEVC/H.265 (고효율)": "hevc", "VP9 (웹 표준)": "vp9", "AV1 (차세대)": "av1"}
-        current_codec = self.config.get("preferred_codec", "avc")
-        for text, key in codecs.items():
-            radio = QRadioButton(text); radio.setProperty("config_value", key); self.codec_button_group.addButton(radio); c_radio_layout.addWidget(radio)
-            if key == current_codec: radio.setChecked(True)
-        c_layout.addLayout(c_radio_layout); layout.addWidget(c_groupbox)
+        self.codec_combo = QComboBox()
+        self.codec_map = {
+            "원본 유지 (재인코딩 없음, 기본값)": "original",
+            "AVC/H.264 (최고 호환성)": "avc",
+            "HEVC/H.265 (고효율)": "hevc",
+            "VP9 (웹 표준)": "vp9",
+            "AV1 (차세대)": "av1",
+        }
+        current_codec = self.config.get("preferred_codec", "original")
+        for text, key in self.codec_map.items():
+            self.codec_combo.addItem(text, userData=key)
+            if key == current_codec:
+                self.codec_combo.setCurrentText(text)
+        c_layout.addWidget(self.codec_combo)
+        layout.addWidget(c_groupbox)
 
         hw_groupbox = QWidget()
         hw_v_layout = QVBoxLayout(hw_groupbox)
@@ -271,16 +279,6 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
         self.tabs.addTab(tab, "자막")
 
-    def _create_post_action_tab(self):
-        tab = QWidget(); layout = QVBoxLayout(tab); layout.addWidget(QLabel("모든 다운로드 완료 후 작업:"))
-        radio_layout = QVBoxLayout(); radio_layout.setSpacing(10); self.post_action_button_group = QButtonGroup(self)
-        actions = {"아무 작업 안 함": "None", "다운로드 폴더 열기": "Open Folder", "1분 후 시스템 종료": "Shutdown"}
-        current_action = self.config.get("post_action", "None")
-        for text, key in actions.items():
-            radio = QRadioButton(text); radio.setProperty("config_value", key); self.post_action_button_group.addButton(radio); radio_layout.addWidget(radio)
-            if key == current_action: radio.setChecked(True)
-        layout.addLayout(radio_layout); layout.addStretch(1); self.tabs.addTab(tab, "다운로드 후 작업")
-
     def _create_advanced_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
         
@@ -319,6 +317,15 @@ class SettingsDialog(QDialog):
         exclude_v_layout.addWidget(self.exclude_keywords_edit)
         layout.addWidget(exclude_groupbox)
 
+        # 수정: TLS 인증서 검증은 기본 활성화. 인증서 오류가 나는 환경에서만 해제할 수 있도록 노출.
+        self.ignore_ssl_checkbox = QCheckBox("SSL 인증서 검증 건너뛰기 (연결 오류 시에만 사용)")
+        self.ignore_ssl_checkbox.setChecked(self.config.get("ignore_ssl_errors", False))
+        self.ignore_ssl_checkbox.setToolTip(
+            "체크하면 yt-dlp에 --no-check-certificate 옵션을 전달합니다.\n"
+            "중간자 공격에 노출될 수 있으므로 인증서 오류로 다운로드가 실패할 때만 사용하세요."
+        )
+        layout.addWidget(self.ignore_ssl_checkbox)
+
         layout.addStretch(1); self.tabs.addTab(tab, "고급")
 
     def _create_cache_tab(self):
@@ -354,7 +361,7 @@ class SettingsDialog(QDialog):
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
         
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
-        if self.codec_button_group.checkedButton(): self.config["preferred_codec"] = self.codec_button_group.checkedButton().property("config_value")
+        self.config["preferred_codec"] = self.codec_combo.currentData()  # 수정: 콤보박스에서 값 읽기
         self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
         self.config["quality_cpu_h264_crf"] = self.q_cpu_h264_crf.value()
         self.config["quality_cpu_h265_crf"] = self.q_cpu_h265_crf.value()
@@ -367,13 +374,19 @@ class SettingsDialog(QDialog):
         if self.subtitle_format_button_group.checkedButton():
             self.config["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
 
-        if self.post_action_button_group.checkedButton(): self.config["post_action"] = self.post_action_button_group.checkedButton().property("config_value")
-        
         if self.bw_limit_button_group.checkedButton(): self.config["bandwidth_limit"] = self.bw_limit_button_group.checkedButton().property("config_value")
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
+        self.config["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()
         keywords_str = self.exclude_keywords_edit.text()
         self.config["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
         
-        save_config(self.config)
+        # 수정: 저장 실패를 조용히 넘기지 않고 사용자에게 알림
+        if not save_config(self.config):
+            QMessageBox.warning(
+                self, "설정 저장 실패",
+                "설정 파일을 저장하지 못했습니다.\n"
+                "프로그램 폴더에 쓰기 권한이 있는지 확인해 주세요.\n"
+                "변경한 내용은 이번 실행에만 적용되며 다음 실행 시 사라집니다."
+            )
         self.accept()

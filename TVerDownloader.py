@@ -1,6 +1,6 @@
 # TVerDownloader.py
 
-import sys, os, re, webbrowser, subprocess
+import sys, os, re, webbrowser
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
 APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.7.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
@@ -263,15 +263,6 @@ class MainWindow(QMainWindow):
     def _on_all_downloads_finished(self):
         self.append_log("모든 다운로드가 완료되었습니다.")
         self.tray_icon.showMessage("다운로드 완료", "모든 작업이 끝났습니다!", self.windowIcon(), 5000)
-        post_action = self.config.get("post_action", "None")
-        if post_action == "Open Folder":
-            folder = self.config.get("download_folder")
-            if folder and os.path.isdir(folder):
-                try: os.startfile(folder)
-                except Exception as e: self.append_log(f"[오류] 폴더 열기 실패: {e}")
-        elif post_action == "Shutdown":
-            try: self.append_log("1분 후 시스템을 종료합니다..."); subprocess.run(["shutdown", "/s", "/t", "60"])
-            except Exception as e: self.append_log(f"[오류] 시스템 종료 명령 실패: {e}")
 
     def show_download_context_menu(self, pos):
         item = self.ui.download_list.itemAt(pos)

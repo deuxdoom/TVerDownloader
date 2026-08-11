@@ -3,6 +3,7 @@
 # - _get_video_encoder_args: 로그 메시지에 실제 품질 값(CRF/CQ)을 표시하도록 변경
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -95,6 +96,39 @@ class ConversionThread(QThread):
         self.log.emit(f"사용할 인코더: {encoder_name} (설정: {self.hw_encoder_setting}, 품질: {quality_val_str})")
         return args
 
+    def _handle_sidecar_subtitles(self, old_path: Path, new_path: Path) -> None:
+        """
+        변환으로 파일명이 바뀌면 별도 자막 파일(.srt/.vtt)이 영상과 짝이 맞지 않게 된다.
+        원본을 삭제하는 경우에는 자막도 새 이름으로 옮기고, 원본을 남기는 경우에는 복사한다.
+        """
+        if old_path.stem == new_path.stem:
+            return
+
+        prefix = old_path.stem + "."
+        try:
+            candidates = [p for p in old_path.parent.iterdir()
+                          if p.is_file()
+                          and p.name.startswith(prefix)
+                          and p.suffix.lower() in (".srt", ".vtt")]
+        except OSError as e:
+            self.log.emit(f"[오류] 자막 파일 확인 실패: {e}")
+            return
+
+        for sub in candidates:
+            # 'foo.ja.vtt' -> 'foo_h264.ja.vtt' (확장자 앞의 언어 코드 등 유지)
+            target = sub.with_name(new_path.stem + sub.name[len(old_path.stem):])
+            if target.exists():
+                continue
+            try:
+                if self.delete_original:
+                    sub.rename(target)
+                    self.log.emit(f"자막 파일 이동: '{sub.name}' -> '{target.name}'")
+                else:
+                    shutil.copy2(sub, target)
+                    self.log.emit(f"자막 파일 복사: '{sub.name}' -> '{target.name}'")
+            except OSError as e:
+                self.log.emit(f"[오류] 자막 파일 처리 실패 ({sub.name}): {e}")
+
     def run(self):
         if self.target_codec:
             output_path = self.input_path.with_name(f"{self.input_path.stem}_{self.target_codec}.mp4")
@@ -126,6 +160,7 @@ class ConversionThread(QThread):
             
             if proc.returncode == 0:
                 self.log.emit(f"파일 변환 성공: '{output_path.name}'")
+                self._handle_sidecar_subtitles(self.input_path, output_path)
                 if self.delete_original and self.input_path.exists():
                     try:
                         self.input_path.unlink()
