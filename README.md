@@ -106,29 +106,6 @@
 - **설정 저장**: JSON 기반(config / history / favorites)
 - **안정성**: 예외 발생 시 크래시 로그(`TVerDownloader_crash.log`) 저장
 
-### 소스로 실행하기
-
-```bash
-git clone https://github.com/deuxdoom/TVerDownloader.git
-cd TVerDownloader
-
-python -m venv venv
-venv\Scripts\activate
-
-pip install PyQt6 requests
-
-python TVerDownloader.py
-```
-
-> yt-dlp와 FFmpeg는 최초 실행 시 `bin/` 폴더에 자동으로 다운로드됩니다.
-
-### 빌드하기
-
-```bash
-pip install pyinstaller
-pyinstaller --noconfirm --onedir --windowed --icon=tver.ico --name=TVerDownloader TVerDownloader.py
-```
-
 ---
 
 ## 📂 프로젝트 트리구조
@@ -180,8 +157,9 @@ pyinstaller --noconfirm --onedir --windowed --icon=tver.ico --name=TVerDownloade
 ## 🤝 기여 및 응원
 
 - 버그 제보 및 코드 기여: [Issues](https://github.com/deuxdoom/TVerDownloader/issues)
-- 개발자 응원: [YouTube 구독](https://www.youtube.com/@LE_SSERAFIM?sub_confirmation=1)
-- 별 ⭐을 눌러주시면 큰 힘이 됩니다!
+- 상단의 [NordVPN 링크](https://refer-nordvpn.com/RRXwGuSQXTe) 로 가입시 개발자에게도 도움이 됩니다.
+- 개발자 유투브: [YouTube 구독](https://www.youtube.com/@LE_SSERAFIM?sub_confirmation=1)
+- Star 별 ⭐을 눌러주시면 큰 힘이 됩니다.
 
 ---
 
