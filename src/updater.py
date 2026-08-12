@@ -4,6 +4,7 @@
 from __future__ import annotations
 import re
 import webbrowser
+from datetime import datetime
 
 def _norm(tag: str) -> tuple[int,int,int]:
     """버전 태그를 비교 가능한 튜플로 변환합니다. (예: 'v2.3.1' -> (2, 3, 1))"""
@@ -31,18 +32,36 @@ def maybe_show_update(parent, current_version: str) -> None:
     RELEASE_PAGE_URL = "https://github.com/deuxdoom/TVerDownloader/releases/latest"
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "TVerDownloader-UpdateCheck"}
 
+    def _notify(msg: str) -> None:
+        # 메인 창에 로그 창이 있으면 실패 사실을 남기고, 없으면 조용히 넘어감
+        log_fn = getattr(parent, "append_log", None)
+        if callable(log_fn):
+            log_fn(msg)
+
     latest_tag = ""
     html_url = RELEASE_PAGE_URL
-    
+
     try:
         # GitHub API를 통해 최신 릴리스 정보 요청
         response = requests.get(API_URL, headers=headers, timeout=10)
+        if response.status_code in (403, 429) and response.headers.get("X-RateLimit-Remaining") == "0":
+            wait_msg = "잠시 후 다시 시도해주세요."
+            reset_ts = response.headers.get("X-RateLimit-Reset")
+            if reset_ts:
+                try:
+                    reset_dt = datetime.fromtimestamp(int(reset_ts))
+                    wait_msg = f"{reset_dt.strftime('%H:%M')}경 이후 다시 시도해주세요."
+                except (ValueError, OSError, OverflowError):
+                    pass
+            _notify(f"[알림] 업데이트 확인 중 GitHub API 호출 제한(시간당 60회)을 초과했습니다. {wait_msg}")
+            return
         response.raise_for_status()
         release_data = response.json()
         latest_tag = release_data.get("tag_name") or release_data.get("name") or ""
         html_url = release_data.get("html_url") or RELEASE_PAGE_URL
-    except requests.exceptions.RequestException:
-        # API 호출 실패 시 조용히 종료
+    except requests.exceptions.RequestException as e:
+        # API 호출 실패 시 로그에 남기고 종료 (조용히 무시하지 않음)
+        _notify(f"[알림] 업데이트 확인에 실패했습니다: {e}")
         return
 
     # 새 버전이 없으면 아무 작업도 하지 않음
