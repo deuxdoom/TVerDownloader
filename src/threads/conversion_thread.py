@@ -29,6 +29,24 @@ class ConversionThread(QThread):
         self.delete_original = delete_original
         self.hw_encoder_setting = hw_encoder_setting
         self.quality_cfg = quality_cfg
+        self.process = None
+        self._stop_flag = False
+
+    def stop(self):
+        """변환을 중단한다.
+
+        QThread.terminate()는 실행 중인 스레드를 임의 지점에서 죽여 프로세스를
+        통째로 날릴 수 있고, ffmpeg는 고아로 남는다. 자식 프로세스를 끝내서
+        run()이 스스로 빠져나오게 한다.
+        """
+        self._stop_flag = True
+        proc = self.process
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
     def _get_video_encoder_args(self) -> List[str]:
         """선호 코덱과 GPU/CPU 설정에 맞는 FFmpeg 인코더 및 품질 인자를 반환합니다."""
@@ -155,10 +173,22 @@ class ConversionThread(QThread):
             self.log.emit(f"파일 변환 시작: '{self.input_path.name}' -> '{output_path.name}'")
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             
-            proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
-                                  startupinfo=get_startupinfo(), creationflags=flags)
-            
-            if proc.returncode == 0:
+            # Popen으로 띄워 핸들을 들고 있어야 중단 요청 때 끝낼 수 있다.
+            self.process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace",
+                startupinfo=get_startupinfo(), creationflags=flags)
+            _, stderr_text = self.process.communicate()
+            returncode = self.process.returncode
+
+            if self._stop_flag:
+                self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
+                if output_path.exists():
+                    try: output_path.unlink()
+                    except OSError: pass
+                self.finished.emit(False, self.url, ""); return
+
+            if returncode == 0:
                 self.log.emit(f"파일 변환 성공: '{output_path.name}'")
                 self._handle_sidecar_subtitles(self.input_path, output_path)
                 if self.delete_original and self.input_path.exists():
@@ -169,7 +199,7 @@ class ConversionThread(QThread):
                         self.log.emit(f"[오류] 원본 파일 삭제 실패: {e}")
                 self.finished.emit(True, self.url, str(output_path))
             else:
-                self.log.emit(f"[오류] 파일 변환 실패: {proc.stderr}")
+                self.log.emit(f"[오류] 파일 변환 실패: {stderr_text}")
                 if output_path.exists(): output_path.unlink()
                 self.finished.emit(False, self.url, "")
         except Exception as e:

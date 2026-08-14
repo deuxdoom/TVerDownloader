@@ -16,12 +16,24 @@ pip-wheel-metadata/
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # Logs/temps
 *.log
 *.tmp
 
-# PyInstaller/빌드
+# PyInstaller/빌드 산출물
 dist/
 build/
-*.spec
+# TVerDownloader.spec 은 손으로 관리하는 빌드 레시피라 반드시 커밋한다.
+# (서체·로고·번역 번들, Qt 모듈 제외 목록 등이 여기에만 있다)
+
+# 실행 중 만들어지는 것들 - 사용자 환경마다 다르므로 커밋하지 않는다
+bin/
+thumbnails/
+downloader_config.json
+favorites.json
+
+# 아래는 생성물이지만 반드시 커밋해야 한다. 실수로 무시되지 않도록 남겨 둔다.
+#   src/icons_data.py   : Fluent 아이콘 19종 임베드 (tools/gen_icons.py)
+#   assets/logo/*.png   : 헤더 로고 6종 (tools/gen_titlelogo.py)

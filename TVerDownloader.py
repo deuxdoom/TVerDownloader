@@ -5,12 +5,14 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QMenu, QWidget)
-from PyQt6.QtCore import Qt, QEvent, QTimer, QSize
+from PyQt6.QtCore import Qt, QEvent, QTimer, QSize, QLocale, QTranslator, QLibraryInfo
 from PyQt6.QtGui import QCursor, QAction, QGuiApplication, QFontDatabase, QFont
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
-from src.utils import load_config, save_config, handle_exception, open_file_location
-from src.qss import build_qss
+from src.utils import (load_config, save_config, handle_exception, open_file_location,
+                       ERROR_STATUSES, localized_app_name, get_resource_path)
+from src.qss import build_qss, palette
+from src.message import confirm
 from src.about_dialog import AboutDialog
 from src.bulk_dialog import BulkAddDialog
 from src.dialogs import SettingsDialog
@@ -24,22 +26,20 @@ from src.ui.main_window_ui import MainWindowUI
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
-APP_NAME_EN = "TVer Downloader"
-APP_VERSION = "2.7.0"
+APP_VERSION = "3.0.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
-
-ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME_EN} v{APP_VERSION}")
+        self.setWindowTitle(f"{localized_app_name()} v{APP_VERSION}")
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
         self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
         self.download_manager = DownloadManager(self.config, self.history_store)
         self._connect_signals(); self._set_input_enabled(False)
+        self.apply_theme(self.config.get("theme", "light"), persist=False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
         self.refresh_history_list(); self.refresh_fav_list()
         self.ui.download_list.installEventFilter(self)
@@ -48,20 +48,32 @@ class MainWindow(QMainWindow):
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
 
     def open_settings(self):
-        current_theme = self.config.get("theme", "light")
         dialog = SettingsDialog(self.config, self)
-
         if dialog.exec():
             self.config = load_config()
             self.download_manager.update_config(self.config)
             self.series_parser.update_config(self.config)
-            new_theme = self.config.get("theme", "light")
-            if new_theme != current_theme:
-                QApplication.instance().setStyleSheet(build_qss(new_theme))
-                self.append_log(f"테마가 '{new_theme}' (으)로 변경되었습니다. (일부 UI는 재시작 시 완벽 적용)")
             self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
             self.refresh_history_list()
             self.refresh_fav_list()
+
+    def apply_theme(self, theme: str, persist: bool = True):
+        """QSS와 아이콘 색을 한 번에 새 테마로 맞춘다."""
+        self.config["theme"] = theme
+        if persist:
+            save_config(self.config)
+        QApplication.instance().setStyleSheet(build_qss(theme))
+        self.ui.apply_theme(theme)
+        for list_widget in (self.ui.download_list, self.ui.history_list, self.ui.fav_list):
+            for i in range(list_widget.count()):
+                widget = list_widget.itemWidget(list_widget.item(i))
+                if hasattr(widget, "apply_theme"):
+                    widget.apply_theme(theme)
+
+    def toggle_theme(self):
+        new_theme = "dark" if self.config.get("theme", "light") == "light" else "light"
+        self.apply_theme(new_theme)
+        self.append_log(f"테마를 '{new_theme}'(으)로 전환했습니다.")
 
     def eventFilter(self, source, event):
         if source is self.ui.download_list and event.type() == QEvent.Type.KeyPress:
@@ -78,15 +90,39 @@ class MainWindow(QMainWindow):
             url = widget.url
             if url in self.download_manager._active_threads: continue
             if url in self.download_manager._task_queue: self.download_manager.remove_task_from_queue(url)
-            self.ui.download_list.takeItem(row)
+            self._remove_download_row(row)
+
+    def _sync_selection_styles(self, list_widget):
+        """목록 위젯 안의 항목들에게 자신의 선택 여부를 알린다."""
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            widget = list_widget.itemWidget(item)
+            if hasattr(widget, "set_selected"):
+                widget.set_selected(item.isSelected())
+
+    def _remove_download_row(self, row: int):
+        """카드를 목록에서 뺀다. 애니메이션과 콜백을 먼저 끊어야 리소스가 남지 않는다."""
+        item = self.ui.download_list.item(row)
+        if item is None:
+            return
+        widget = self.ui.download_list.itemWidget(item)
+        if isinstance(widget, DownloadItemWidget):
+            widget.cleanup()
+        self.ui.download_list.takeItem(row)
 
     def _connect_signals(self):
         self.ui.add_button.clicked.connect(self.process_input_url); self.ui.url_input.returnPressed.connect(self.process_input_url)
         self.ui.bulk_button.clicked.connect(self.open_bulk_add); self.ui.settings_button.clicked.connect(self.open_settings)
-        self.ui.about_button.clicked.connect(lambda: AboutDialog(APP_VERSION, self).exec())
+        self.ui.about_button.clicked.connect(
+            lambda: AboutDialog(APP_VERSION, self, self.config.get("theme", "light")).exec())
         self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
+        self.ui.theme_button.clicked.connect(self.toggle_theme)
         self.ui.clear_completed_button.clicked.connect(self._clear_completed_downloads)
         self.ui.download_list.customContextMenuRequested.connect(self.show_download_context_menu)
+        # 선택된 행의 글자·아이콘 색을 강조 배경에 맞춰 올린다.
+        for list_widget in (self.ui.download_list, self.ui.history_list, self.ui.fav_list):
+            list_widget.itemSelectionChanged.connect(
+                lambda lw=list_widget: self._sync_selection_styles(lw))
         self.ui.history_list.customContextMenuRequested.connect(self.show_history_menu)
         self.ui.history_search_input.textChanged.connect(self.refresh_history_list)
         self.ui.history_sort_combo.currentIndexChanged.connect(self.refresh_history_list)
@@ -115,7 +151,7 @@ class MainWindow(QMainWindow):
         for url, meta in display_entries:
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
             if meta.get("series_id") or meta.get("thumbnail_url"):
-                widget = HistoryItemWidget(url, meta); item.setSizeHint(widget.sizeHint())
+                widget = HistoryItemWidget(url, meta, self.config.get("theme", "light")); item.setSizeHint(widget.sizeHint())
                 self.ui.history_list.addItem(item); self.ui.history_list.setItemWidget(item, widget)
             else:
                 title = meta.get("title", "(제목 없음)"); date = meta.get("date", "")
@@ -135,14 +171,14 @@ class MainWindow(QMainWindow):
     def set_always_on_top(self, on: bool, init: bool = False):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on); self.show()
         if not init: self.config["always_on_top"] = on; save_config(self.config)
-        self.ui.on_top_btn.setChecked(on); self.ui.on_top_btn.setText("📍" if on else "📌")
+        self.ui.on_top_btn.setChecked(on); self.ui.update_pin_button(on)
 
     def _clear_completed_downloads(self):
         for i in range(self.ui.download_list.count() - 1, -1, -1):
             item = self.ui.download_list.item(i); widget = self.ui.download_list.itemWidget(item)
             if not isinstance(widget, DownloadItemWidget): continue
             url = widget.url; is_active = url in self.download_manager._active_threads; is_queued = url in self.download_manager._task_queue
-            if not is_active and not is_queued: self.ui.download_list.takeItem(i)
+            if not is_active and not is_queued: self._remove_download_row(i)
 
     def _handle_new_instance(self):
         server = self.sender()
@@ -157,6 +193,7 @@ class MainWindow(QMainWindow):
     def _set_input_enabled(self, enabled: bool):
         self.ui.url_input.setEnabled(enabled); self.ui.add_button.setEnabled(enabled)
         self.ui.bulk_button.setEnabled(enabled); self.ui.fav_chk_btn.setEnabled(enabled)
+        self.ui.set_primary_action_enabled(enabled)
 
     def _ensure_download_folder(self) -> bool:
         folder = self.config.get("download_folder")
@@ -172,11 +209,10 @@ class MainWindow(QMainWindow):
 
     def _request_add_task(self, url: str) -> bool:
         if self.history_store.exists(url):
-            msg_box = QMessageBox(self); msg_box.setWindowTitle('중복 다운로드')
-            msg_box.setText(f"이미 다운로드한 항목입니다:\n\n{self.history_store.get_title(url)}\n\n다시 다운로드할까요?")
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No); msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-            msg_box.button(QMessageBox.StandardButton.Yes).setText('예'); msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
-            if msg_box.exec() == QMessageBox.StandardButton.No: self.append_log(f"[알림] 중복 다운로드 취소: {url}"); return False
+            again = confirm(self, "중복 다운로드",
+                            f"이미 다운로드한 항목입니다:\n\n{self.history_store.get_title(url)}\n\n다시 다운로드할까요?",
+                            icon_name="download", theme=self.config.get("theme", "light"))
+            if not again: self.append_log(f"[알림] 중복 다운로드 취소: {url}"); return False
         return self.download_manager.add_task(url)
 
     def open_bulk_add(self):
@@ -194,7 +230,8 @@ class MainWindow(QMainWindow):
         if not ok: self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다."); QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요."); return
         self.download_manager.set_paths(ytdlp_path, ffmpeg_path); self.series_parser.set_ytdlp_path(ytdlp_path); self.env_ready = True
         self._set_input_enabled(True)
-        self.append_log(f"{'=' * 44}\n📢 [안내] TVer는 일본 지역 제한이 있습니다.\n📢 원활한 다운로드를 위해 반드시 일본 VPN을 켜고 사용해주세요.\n{'=' * 44}")
+        rule = "─" * 12
+        self.append_log(f"{rule} 안내 {rule}\nTVer는 일본 지역 제한이 있습니다.\n원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요.")
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
         QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
         if self.config.get("auto_check_favorites_on_start", True):
@@ -237,8 +274,10 @@ class MainWindow(QMainWindow):
         if isinstance(existing, DownloadItemWidget):
             existing.reset_for_retry()
             return
-        item = QListWidgetItem(); widget = DownloadItemWidget(url)
-        widget.play_requested.connect(self.play_file); item.setSizeHint(widget.sizeHint())
+        item = QListWidgetItem(); widget = DownloadItemWidget(url, self.config.get("theme", "light"))
+        widget.play_requested.connect(self.play_file)
+        widget.open_folder_requested.connect(open_file_location)
+        item.setSizeHint(widget.sizeHint())
         self.ui.download_list.insertItem(0, item); self.ui.download_list.setItemWidget(item, widget)
 
     def _find_item_widget(self, url: str) -> Optional[QWidget]:
@@ -274,18 +313,22 @@ class MainWindow(QMainWindow):
             menu.addAction("중지", lambda: self.download_manager.stop_task(url))
         elif url in self.download_manager._task_queue:
             def remove_from_queue():
-                if self.download_manager.remove_task_from_queue(url): self.ui.download_list.takeItem(self.ui.download_list.row(item))
+                if self.download_manager.remove_task_from_queue(url): self._remove_download_row(self.ui.download_list.row(item))
             menu.addAction("대기열에서 제거", remove_from_queue)
         else:
             if widget.status in ERROR_STATUSES:
                 menu.addAction("재다운로드", lambda: self._retry_download(url))
-            menu.addAction("목록에서 삭제", lambda: self.ui.download_list.takeItem(self.ui.download_list.row(item)))
+            menu.addAction("목록에서 삭제", lambda: self._remove_download_row(self.ui.download_list.row(item)))
         if widget.final_filepath and os.path.exists(widget.final_filepath):
             menu.addAction("파일 위치 열기", lambda: open_file_location(widget.final_filepath))
         menu.exec(QCursor.pos())
 
     def append_log(self, text: str):
-        color_map = {"[오류]": "#EF4444", "[치명적 오류]": "#EF4444", "완료": "#22C55E", "성공": "#22C55E"}
+        colors = palette(self.config.get("theme", "light"))
+        color_map = {
+            "[오류]": colors["danger"], "[치명적 오류]": colors["danger"],
+            "완료": colors["log_success"], "성공": colors["log_success"],
+        }
         color = next((c for k, c in color_map.items() if k in text), None)
         self.ui.log_output.append(f'<span style="color: {color};">{text}</span>' if color else text)
         self.ui.log_output.verticalScrollBar().setValue(self.ui.log_output.verticalScrollBar().maximum())
@@ -309,7 +352,7 @@ class MainWindow(QMainWindow):
     def refresh_fav_list(self):
         self.ui.fav_list.clear()
         for url, meta in self.fav_store.sorted_entries():
-            item = QListWidgetItem(); widget = FavoriteItemWidget(url, meta)
+            item = QListWidgetItem(); widget = FavoriteItemWidget(url, meta, self.config.get("theme", "light"))
             item.setSizeHint(widget.sizeHint()); item.setData(Qt.ItemDataRole.UserRole, url)
             self.ui.fav_list.addItem(item); self.ui.fav_list.setItemWidget(item, widget)
 
@@ -339,8 +382,9 @@ class MainWindow(QMainWindow):
     def remove_selected_favorite(self):
         selected_items = self.ui.fav_list.selectedItems()
         if not selected_items: QMessageBox.information(self, "알림", "삭제할 항목을 목록에서 선택하세요."); return
-        reply = QMessageBox.question(self, "삭제 확인", f"{len(selected_items)}개의 항목을 삭제할까요?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
+        if confirm(self, "삭제 확인", f"{len(selected_items)}개의 항목을 삭제할까요?",
+                   icon_name="nav_cache", color_key="danger",
+                   theme=self.config.get("theme", "light")):
             for item in selected_items:
                 url = item.data(Qt.ItemDataRole.UserRole); self.fav_store.remove(url); self.append_log(f"[즐겨찾기] 삭제: {url}")
             self.refresh_fav_list()
@@ -371,15 +415,20 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
-            self.hide(); self.tray_icon.showMessage(APP_NAME_EN, "프로그램이 트레이로 이동했습니다.", self.windowIcon(), 2000)
+            self.hide(); self.tray_icon.showMessage(localized_app_name(), "프로그램이 트레이로 이동했습니다.", self.windowIcon(), 2000)
 
     def closeEvent(self, event):
         if self.force_quit: event.accept(); return
-        msg_box = QMessageBox(self); msg_box.setWindowTitle('종료 확인'); msg_box.setText('종료하시겠습니까?')
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No); msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-        msg_box.button(QMessageBox.StandardButton.Yes).setText('예'); msg_box.button(QMessageBox.StandardButton.No).setText('아니오')
-        if msg_box.exec() == QMessageBox.StandardButton.Yes: self.quit_application(); event.accept()
-        else: event.ignore()
+        if self.config.get("close_action", "exit") == "tray":
+            event.ignore(); self.hide()
+            self.tray_icon.showMessage(localized_app_name(), "프로그램이 트레이로 이동했습니다.", self.windowIcon(), 2000)
+            return
+        if confirm(self, "종료 확인", "종료하시겠습니까?",
+                   icon_name="cancel", color_key="danger",
+                   theme=self.config.get("theme", "light")):
+            self.quit_application(); event.accept()
+        else:
+            event.ignore()
 
     def quit_application(self):
         self.append_log("프로그램을 종료합니다...")
@@ -398,24 +447,112 @@ class MainWindow(QMainWindow):
             widget.reset_for_retry()
         self.download_manager.add_task(url)
 
-def get_resource_path(relative_path):
-    try: base_path = Path(sys._MEIPASS)
-    except Exception: base_path = Path(".").resolve()
-    return base_path / relative_path
+# 본문 서체. 나열 순서가 곧 글리프 폴백 우선순위다.
+# Pretendard Variable에는 한자가 없어서(한글/라틴/가나만 보유) 일본어 제목의
+# 한자(第3話 등)를 같은 디자인 계열인 Pretendard JP가 이어받는다.
+FONT_DIR = Path("assets") / "fonts"
+UI_FONT_FILES = [
+    FONT_DIR / "PretendardVariable.ttf",
+    FONT_DIR / "PretendardJP-Regular.ttf",
+]
+# 수치용 고정폭. 등록만 하고, 적용은 qss.py의 고정폭 스택이 패밀리명으로 한다.
+MONO_FONT_FILES = [FONT_DIR / "JetBrainsMono-Regular.ttf"]
+# 번들 서체가 하나도 등록되지 않아도 앱이 읽히도록 남겨두는 시스템 서체.
+UI_FONT_FALLBACKS = ["Yu Gothic UI", "Malgun Gothic", "Segoe UI"]
+
+# 글자 렌더링 옵션. tools/font_preview.py 로 조합을 눈으로 비교한 뒤 여기만 바꾸면 된다.
+#   PreferFullHinting     - 획을 픽셀 격자에 강하게 맞춘다. 세로획 굵기는 균일해지지만
+#                           곡선과 사선이 각져 보여 '계단 현상'으로 읽힐 수 있다.
+#   PreferVerticalHinting - 세로 방향만 맞춘다. 위 둘의 절충.
+#   PreferNoHinting       - 원래 외곽선을 그대로 둔다. 부드럽지만 획 굵기가 덜 균일하다.
+# StyleStrategy를 지정하지 않으면 Windows의 ClearType 설정을 그대로 따른다.
+# 눈으로 비교해 고른 조합(tools/font_preview.py 5번).
+# FullHinting은 세로획 굵기를 균일하게 만드는 대신 곡선과 사선을 각지게 꺾어
+# '계단 현상'으로 읽혔다. 힌팅을 끄면 외곽선이 원래 설계대로 부드럽게 남는다.
+UI_FONT_HINTING = QFont.HintingPreference.PreferNoHinting
+UI_FONT_STYLE_STRATEGY = QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
+
+
+def register_font(path: Path) -> List[str]:
+    """서체 파일 하나를 등록하고 패밀리명 목록을 돌려준다.
+
+    파일이 없거나 등록에 실패해도 예외를 내지 않고 빈 목록을 돌려준다.
+    """
+    try:
+        full_path = get_resource_path(path)
+        if not full_path.is_file():
+            print(f"INFO: 번들 서체를 찾지 못했습니다: {full_path}")
+            return []
+        font_id = QFontDatabase.addApplicationFont(str(full_path))
+        if font_id == -1:
+            print(f"WARNING: 서체를 불러오지 못했습니다: {full_path}")
+            return []
+        return QFontDatabase.applicationFontFamilies(font_id)
+    except Exception as e:
+        print(f"WARNING: 서체 등록 중 오류가 발생했습니다: {path} - {e}")
+        return []
+
+
+def setup_translations(app: QApplication) -> None:
+    """Qt 기본 위젯의 문구를 OS 표시 언어로 맞춘다.
+
+    입력창 우클릭 메뉴(잘라내기/붙여넣기/모두 선택)나 표준 대화상자 문구는 Qt가
+    제공하는 번역 파일에서 온다. QTranslator를 설치하지 않으면 OS 언어와 무관하게
+    영어로 나온다. 실패해도 영어로 동작하므로 예외를 밖으로 내보내지 않는다.
+    """
+    try:
+        translator = QTranslator(app)
+        candidates = [
+            str(get_resource_path(Path("translations"))),          # 번들
+            QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath),  # 개발 환경
+        ]
+        for directory in candidates:
+            if translator.load(QLocale.system(), "qtbase", "_", directory):
+                app.installTranslator(translator)
+                return
+        print(f"INFO: {QLocale.system().name()} 용 Qt 번역을 찾지 못했습니다. 영어로 표시됩니다.")
+    except Exception as e:
+        print(f"WARNING: Qt 번역을 불러오지 못했습니다: {e}")
+
+
+def setup_app_font(app: QApplication) -> None:
+    """번들 서체를 등록하고 앱 기본 서체를 지정한다.
+
+    어느 하나가 없거나 실패해도 예외를 밖으로 내보내지 않는다.
+    등록된 것까지만 쓰고 나머지는 시스템 서체로 폴백한다.
+    """
+    families: List[str] = []
+    for font_file in UI_FONT_FILES:
+        registered = register_font(font_file)
+        if registered:
+            # [0]은 가변 폰트의 기본 패밀리명("Pretendard Variable")이다.
+            families.append(registered[0])
+    for font_file in MONO_FONT_FILES:
+        register_font(font_file)
+
+    if not families:
+        print("INFO: 번들 서체를 하나도 등록하지 못했습니다. 시스템 서체를 사용합니다.")
+
+    try:
+        font = QFont()
+        font.setFamilies(families + UI_FONT_FALLBACKS)
+        # 분수 배율(예: 150% = devicePixelRatio 1.5) 화면에서 기본 힌팅은 획을
+        # 픽셀 격자에 불균일하게 스냅해, 한 글자 안에서 획 굵기가 2px/3px로
+        # 갈리고 윤곽이 자글거린다. 전체 힌팅은 모든 획을 같은 폭으로 맞춘다.
+        font.setHintingPreference(UI_FONT_HINTING)
+        if UI_FONT_STYLE_STRATEGY is not None:
+            font.setStyleStrategy(UI_FONT_STYLE_STRATEGY)
+        app.setFont(font)
+    except Exception as e:
+        print(f"WARNING: 기본 서체 지정에 실패했습니다: {e}. Qt 기본값을 사용합니다.")
 
 if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
     config = load_config()
     theme = config.get("theme", "light")
-    font_path = get_resource_path(Path("fonts/NotoSansCJKkr-Medium.otf"))
-    if font_path.exists():
-        font_id = QFontDatabase.addApplicationFont(str(font_path))
-        if font_id != -1:
-            family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            app.setFont(QFont(family))
-        else: print("WARNING: Font file could not be loaded.")
-    else: print(f"INFO: Custom font not found at '{font_path}', using system default.")
+    setup_translations(app)
+    setup_app_font(app)
     app.setStyleSheet(build_qss(theme))
     socket = QLocalSocket()
     socket.connectToServer(SOCKET_NAME)
@@ -426,7 +563,7 @@ if __name__ == "__main__":
         QLocalServer.removeServer(SOCKET_NAME)
         server = QLocalServer()
         server.listen(SOCKET_NAME)
-        app.setApplicationName("티버 다운로더"); app.setApplicationVersion(APP_VERSION)
+        app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
         app.setStyle("Fusion")
         window = MainWindow()
         server.newConnection.connect(window._handle_new_instance)

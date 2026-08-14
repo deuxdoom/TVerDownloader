@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from src.threads.download_thread import DownloadThread
 from src.threads.conversion_thread import ConversionThread
 from src.history_store import HistoryStore
-from src.utils import get_startupinfo
+from src.utils import get_startupinfo, DEFAULT_PARALLEL
 
 class DownloadManager(QObject):
     log = pyqtSignal(str)
@@ -28,6 +28,7 @@ class DownloadManager(QObject):
         self._active_conversions: Dict[str, ConversionThread] = {}
         self._active_urls: set[str] = set(); self._logged_start: set[str] = set()
         self._conversion_meta_cache: Dict[str, Dict] = {}
+        self._concurrency_logged = False
 
     def set_paths(self, ytdlp_path: str, ffmpeg_path: str):
         self.ytdlp_path = ytdlp_path; self.ffmpeg_path = ffmpeg_path
@@ -47,7 +48,7 @@ class DownloadManager(QObject):
 
     def stop_task(self, url: str):
         if url in self._active_threads: self._active_threads[url].stop()
-        if url in self._active_conversions: self._active_conversions[url].terminate()
+        if url in self._active_conversions: self._active_conversions[url].stop()
 
     def remove_task_from_queue(self, url: str):
         if url in self._task_queue:
@@ -58,7 +59,10 @@ class DownloadManager(QObject):
 
     def check_queue_and_start(self):
         if not self.ytdlp_path or not self.ffmpeg_path: return
-        max_concurrent = self.config.get("max_concurrent_downloads", 3)
+        max_concurrent = self.config.get("max_concurrent_downloads", DEFAULT_PARALLEL)
+        if self._task_queue and not self._concurrency_logged:
+            self._concurrency_logged = True
+            self.log.emit(f"동시 다운로드 최대 {max_concurrent}개로 진행합니다.")
         while len(self._active_threads) < max_concurrent and self._task_queue:
             url = self._task_queue.pop(0); self._start_download(url)
         self._update_queue_counter()
@@ -69,7 +73,6 @@ class DownloadManager(QObject):
         from src.utils import construct_filename_template
         output_template = construct_filename_template(self.config)
         quality_format = self.config.get("quality", "bv*+ba/b")
-        bandwidth_limit = self.config.get("bandwidth_limit", "0")
 
         download_subs = self.config.get("download_subtitles", True)
         embed_subs = self.config.get("embed_subtitles", True)
@@ -78,7 +81,7 @@ class DownloadManager(QObject):
 
         thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
                                 ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
-                                quality_format=quality_format, bandwidth_limit=bandwidth_limit,
+                                quality_format=quality_format,
                                 download_subtitles=download_subs,
                                 embed_subtitles=embed_subs,
                                 subtitle_format=subtitle_format,
@@ -91,7 +94,8 @@ class DownloadManager(QObject):
     def _on_progress(self, url: str, payload: Dict[str, Any]):
         if url not in self._logged_start and 'log' in payload:
             self._logged_start.add(url)
-            self.log.emit(f"{'='*44}\n다운로드 시작: {url}\n{'='*44}")
+            rule = "─" * 12
+            self.log.emit(f"{rule} 다운로드 시작 {rule}\n{url}")
         self.progress_updated.emit(url, payload)
         
     def _get_video_codec(self, filepath: str) -> Optional[str]:
@@ -186,6 +190,8 @@ class DownloadManager(QObject):
                                   quality_cfg=quality_cfg)
         thread.log.connect(self.log); thread.finished.connect(self._on_conversion_finished)
         self._active_conversions[url] = thread; thread.start()
+        # 다운로드 슬롯이 비었으니 대기 중인 다음 작업을 바로 시작한다.
+        self.check_queue_and_start()
         
     def _on_conversion_finished(self, success: bool, url:str, new_filepath: str):
         thread = self._active_conversions.pop(url, None)
@@ -204,7 +210,9 @@ class DownloadManager(QObject):
         self.check_queue_and_start()
 
         if not self._task_queue and not self._active_threads and not self._active_conversions:
-            self._active_urls.clear(); self._logged_start.clear(); self.all_tasks_completed.emit()
+            self._active_urls.clear(); self._logged_start.clear()
+            self._concurrency_logged = False
+            self.all_tasks_completed.emit()
 
     def _update_queue_counter(self):
         queued = len(self._task_queue)

@@ -45,6 +45,7 @@ class SeriesSelectionDialog(QDialog):
         button_layout.addWidget(self.select_all_btn); button_layout.addWidget(self.deselect_all_btn); button_layout.addStretch(1)
         self.dialog_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setText("선택한 항목 추가")
+        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName("PrimaryButton")
         self.dialog_buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
         button_layout.addWidget(self.dialog_buttons); root.addLayout(button_layout)
         

@@ -11,7 +11,7 @@ class DownloadThread(QThread):
     finished = pyqtSignal(str, bool, str, dict)
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
-                 output_template: str, quality_format: str, bandwidth_limit: str, 
+                 output_template: str, quality_format: str,
                  download_subtitles: bool, embed_subtitles: bool, subtitle_format: str,
                  ignore_ssl_errors: bool = False,
                  parent=None):
@@ -23,7 +23,6 @@ class DownloadThread(QThread):
         self.ffmpeg_full_exe_path = ffmpeg_exe_path 
 
         self.output_template = output_template; self.quality_format = quality_format
-        self.bandwidth_limit = bandwidth_limit
         
         self.download_subtitles = download_subtitles
         self.embed_subtitles = embed_subtitles
@@ -243,7 +242,6 @@ class DownloadThread(QThread):
         else:
             command.append("--no-write-subs")
 
-        if self.bandwidth_limit and self.bandwidth_limit != "0": command.extend(["-r", self.bandwidth_limit])
         return command
 
     def _parse_line(self, line: str):
@@ -267,8 +265,11 @@ class DownloadThread(QThread):
         
         m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
         if m_progress:
+            # yt-dlp는 조각 단위 다운로드에서 "ETA 00:15 (frag 123/456)"처럼 붙여 보낸다.
+            # 조각 번호는 사용자가 알 필요가 없고 길어서 잘리기만 하므로 남은 시간만 남긴다.
+            eta = m_progress.group(3).split("(")[0].strip()
             payload.update({"status": "다운로드 중", "percent": float(m_progress.group(1)), "speed": m_progress.group(2),
-                            "eta": m_progress.group(3), "component": self._current_component})
+                            "eta": eta, "component": self._current_component})
         
         if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"
         elif "Embedding subtitles" in line: payload["status"] = "후처리 중 (자막)"

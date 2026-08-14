@@ -9,13 +9,48 @@ import webbrowser
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QMessageBox
+
+# OS 표시 언어별 앱 이름. 괄호 병기 없이 하나만 노출한다.
+APP_NAME_FALLBACK = "TVer Downloader"
+APP_NAME_BY_LANGUAGE = {
+    QLocale.Language.Korean: "티버 다운로더",
+    QLocale.Language.Japanese: "TVer ダウンローダー",
+}
+
+
+def localized_app_name(language: QLocale.Language | None = None) -> str:
+    """OS 표시 언어에 맞는 앱 이름을 돌려준다. 모르는 언어면 영문 이름.
+
+    language를 넘기면 그 언어로 계산한다(검증용). 평소에는 시스템 언어를 쓴다.
+    """
+    if language is None:
+        language = QLocale.system().language()
+    return APP_NAME_BY_LANGUAGE.get(language, APP_NAME_FALLBACK)
+
 
 CONFIG_FILE = "downloader_config.json"
 DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
 PARALLEL_MAX = 20  # 수정: 최대 동시 다운로드 수 상향 (10 -> 20)
 FILENAME_TITLE_MAX_LENGTH = 80  # 수정: 파일명 길이 제한 축소 (경로 길이 오류 방지)
+
+# 실패로 간주하는 상태값. 편성 스트립 색과 재다운로드 메뉴가 함께 참조한다.
+# TVerDownloader.py와 widgets.py 양쪽에서 쓰이므로 순환 참조를 피해 여기에 둔다.
+ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
+
+
+def get_resource_path(relative_path) -> Path:
+    """개발 실행과 PyInstaller 번들(onefile/onedir) 양쪽에서 리소스 경로를 돌려준다.
+
+    PyInstaller는 두 모드 모두에서 sys._MEIPASS를 설정한다(onedir은 _internal 폴더).
+    번들이 아닐 때는 현재 작업 디렉터리가 아니라 이 파일이 속한 프로젝트 루트를 쓴다.
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    if base is None:
+        base = Path(__file__).resolve().parent.parent
+    return Path(base) / relative_path
 
 
 def load_config() -> Dict[str, Any]:
@@ -33,7 +68,6 @@ def load_config() -> Dict[str, Any]:
         "preferred_codec": "original",  # 수정: 기본값을 '원본 유지'로 변경 (불필요한 재인코딩 방지)
         "auto_check_favorites_on_start": True,
         "always_on_top": False,
-        "bandwidth_limit": "0",
         "conversion_format": "none",
         "delete_on_conversion": False,
         "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"],
@@ -47,6 +81,8 @@ def load_config() -> Dict[str, Any]:
         "embed_subtitles": True,
         "subtitle_format": "vtt",
         "ignore_ssl_errors": False,
+        # 닫기 버튼(X) 동작. exit=종료 확인 후 종료(기존 동작), tray=트레이로 이동
+        "close_action": "exit",
     }
     if os.path.exists(CONFIG_FILE):
         try:

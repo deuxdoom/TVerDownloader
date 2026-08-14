@@ -1,95 +1,130 @@
 # src/about_dialog.py
-# 수정: v2.3.1의 기능에 맞춰 '주요 기능' 설명 텍스트 업데이트
+# QTextBrowser + 인라인 HTML 스타일을 걷어내고 일반 위젯으로 다시 구성했다.
+# 서체와 색은 전역 QSS를 그대로 따르고, 스크롤 없이 한 화면에 담긴다.
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QDialogButtonBox, QTextBrowser, QWidget
+    QDialogButtonBox, QWidget, QFrame
 )
 from PyQt6.QtCore import Qt
 from src.icon import get_app_icon
-from src.utils import open_developer_link, open_feedback_link
+from src.qss import palette
+from src.utils import open_developer_link, open_feedback_link, localized_app_name
+
+# 실제로 구현돼 있는 기능만 적는다.
+FEATURES = [
+    "에피소드 · 시리즈 URL 분석과 다중 추가",
+    "다운로드 대기열과 동시 다운로드 수 조절 (최대 20)",
+    "즐겨찾기 시리즈 등록, 시작 시 신규 회차 자동 확인",
+    "화질 선택, 코덱 재인코딩(GPU 가속), 자막 병합",
+    "사용자 정의 파일명 형식과 대역폭 제한",
+    "썸네일 미리보기, 다운로드 기록, 트레이 최소화",
+]
+
+LINKS = [
+    ("yt-dlp", "https://github.com/yt-dlp/yt-dlp"),
+    ("FFmpeg", "https://ffmpeg.org/"),
+    ("PyQt6", "https://pypi.org/project/PyQt6/"),
+    ("GitHub", "https://github.com/deuxdoom/TVerDownloader"),
+]
+
 
 class AboutDialog(QDialog):
-    def __init__(self, version: str, parent: QWidget | None = None):
+    def __init__(self, version: str, parent: QWidget | None = None, theme: str = "light"):
         super().__init__(parent)
+        self._colors = palette(theme)
         self.setWindowTitle("정보")
         self.setWindowIcon(get_app_icon())
         self.setModal(True)
-        self.setMinimumSize(640, 480)
+        self.setFixedWidth(520)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(20, 20, 20, 16)
+        root.setSpacing(14)
 
-        # 상단 헤더
+        root.addLayout(self._build_header(version))
+        root.addWidget(self._label(
+            "TVer 콘텐츠를 개인 용도로 내려받는 데스크톱 앱입니다. "
+            "지역 제한이 있는 서비스라 일본 VPN 환경에서 사용하는 것을 권장합니다.",
+            wrap=True,
+        ))
+        root.addWidget(self._separator())
+
+        root.addWidget(self._label("주요 기능", object_name="PaneTitle"))
+        features = QVBoxLayout()
+        features.setContentsMargins(2, 0, 0, 0)
+        features.setSpacing(4)
+        for text in FEATURES:
+            features.addWidget(self._label(f"· {text}"))
+        root.addLayout(features)
+
+        root.addWidget(self._separator())
+
+        # QLabel 안의 <a>는 QSS로 색을 줄 수 없어 인라인으로 테마 색을 넣는다.
+        anchor = f'color:{self._colors["accent"]}; text-decoration:none;'
+        links_html = "  ·  ".join(
+            f'<a href="{url}" style="{anchor}">{name}</a>' for name, url in LINKS
+        )
+        links = self._label(links_html, object_name="PaneSubtitle")
+        links.setOpenExternalLinks(True)
+        links.setTextFormat(Qt.TextFormat.RichText)
+        root.addWidget(links)
+
+        root.addWidget(self._label(
+            "콘텐츠 제공자의 약관과 저작권을 지키는 범위에서 사용해 주세요.",
+            object_name="PaneSubtitle", wrap=True,
+        ))
+
+        root.addStretch(1)
+        root.addLayout(self._build_buttons())
+
+    # ── 구성 요소 ─────────────────────────────────────────────────────────
+    def _build_header(self, version: str) -> QHBoxLayout:
         header = QHBoxLayout()
+        header.setSpacing(12)
         icon_label = QLabel()
-        icon_label.setPixmap(get_app_icon().pixmap(32, 32))
+        icon_label.setPixmap(get_app_icon().pixmap(40, 40))
+        icon_label.setFixedSize(40, 40)
+
         title_box = QVBoxLayout()
-        title = QLabel("티버 다운로더"); title.setObjectName("PaneTitle")
-        subtitle = QLabel(f"버전: {version}"); subtitle.setObjectName("PaneSubtitle")
-        title_box.addWidget(title); title_box.addWidget(subtitle)
-        header.addWidget(icon_label); header.addLayout(title_box); header.addStretch(1)
-        root.addLayout(header)
+        title_box.setSpacing(2)
+        title_box.addWidget(self._label(localized_app_name(), object_name="SectionTitle"))
+        title_box.addWidget(self._label(f"버전 {version}", object_name="PaneSubtitle"))
 
-        # 본문
-        self.viewer = QTextBrowser(objectName="AboutViewer")
-        self.viewer.setOpenExternalLinks(True)
-        self.viewer.setHtml(self._build_html())
-        root.addWidget(self.viewer, 1)
+        header.addWidget(icon_label)
+        header.addLayout(title_box)
+        header.addStretch(1)
+        return header
 
-        # 하단 버튼
-        btn_row = QHBoxLayout()
-        youtube_btn = QPushButton("제작자 유투브"); youtube_btn.setObjectName("LinkButton"); youtube_btn.clicked.connect(open_developer_link)
-        contact_btn = QPushButton("문의하기"); contact_btn.setObjectName("LinkButton"); contact_btn.clicked.connect(open_feedback_link)
-        btn_row.addWidget(youtube_btn); btn_row.addWidget(contact_btn); btn_row.addStretch(1)
+    def _build_buttons(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        youtube_btn = QPushButton("제작자 유투브", objectName="LinkButton")
+        youtube_btn.clicked.connect(open_developer_link)
+        contact_btn = QPushButton("문의하기", objectName="LinkButton")
+        contact_btn.clicked.connect(open_feedback_link)
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_box.button(QDialogButtonBox.StandardButton.Close).setText("닫기")
         close_box.rejected.connect(self.reject)
-        btn_row.addWidget(close_box)
 
-        root.addLayout(btn_row)
+        row.addWidget(youtube_btn)
+        row.addWidget(contact_btn)
+        row.addStretch(1)
+        row.addWidget(close_box)
+        return row
 
-    def _build_html(self) -> str:
-        # v2.3.1 기준 핵심 기능 목록으로 업데이트
-        return """
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body { font-family: -apple-system, Segoe UI, Arial, sans-serif; font-size: 14px; }
-                h3 { margin: 12px 0 6px 0; }
-                ul { margin: 6px 0 12px 24px; list-style-type: disc; }
-                li { margin: 6px 0; }
-            </style>
-        </head>
-        <body>
-            <p><b>티버 다운로더</b>는 TVer 콘텐츠를 합법적 범위 내 개인 용도로 다운로드하는 데 도움을 주는 데스크톱 앱입니다.</p>
-            <p>지역 제한 서비스 특성상 일본 VPN 환경에서의 사용을 권장합니다.</p>
+    def _label(self, text: str, object_name: str = "", wrap: bool = False) -> QLabel:
+        label = QLabel(text)
+        if object_name:
+            label.setObjectName(object_name)
+        label.setWordWrap(wrap)
+        return label
 
-            <h3>주요 기능</h3>
-            <ul>
-                <li>에피소드/시리즈 URL 분석 및 일괄 다운로드</li>
-                <li>다운로드 큐 및 동시 다운로드 수 제어</li>
-                <li>즐겨찾기 시리즈 등록 및 신규 영상 자동 확인</li>
-                <li>영상/오디오 품질 선택 및 자막 자동 병합</li>
-                <li>사용자 정의 파일명 형식 지원</li>
-                <li>다운로드 완료 후 자동 작업 (폴더 열기, 시스템 종료)</li>
-                <li>썸네일 미리보기 (확대/저장) 및 다운로드 기록 관리</li>
-                <li>단일 인스턴스 실행 (프로그램 중복 실행 방지)</li>
-            </ul>
-
-            <h3>오픈소스/레퍼런스</h3>
-            <ul>
-                <li><a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a></li>
-                <li><a href="https://ffmpeg.org/">FFmpeg</a></li>
-                <li><a href="https://pypi.org/project/PyQt6/">PyQt6</a></li>
-                <li><a href="https://pypi.org/project/requests/">requests</a></li>
-                <li><a href="https://github.com/deuxdoom/TVerDownloader">TVerDownloader (GitHub)</a></li>
-            </ul>
-
-            <p style="color:#6b7280;">* 사용자는 콘텐츠 제공자의 약관과 저작권을 준수해야 합니다.</p>
-        </body>
-        </html>
-        """
+    def _separator(self) -> QFrame:
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Plain)
+        line.setObjectName("Separator")
+        line.setFixedHeight(1)
+        return line

@@ -38,7 +38,7 @@ class BulkAddDialog(QDialog):
         btns = QHBoxLayout()
         btns.setSpacing(8)
         btns.addStretch(1)
-        self.ok_btn = QPushButton("추가")
+        self.ok_btn = QPushButton("추가", objectName="PrimaryButton")
         self.cancel_btn = QPushButton("취소")
         self.ok_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)

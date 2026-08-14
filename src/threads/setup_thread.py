@@ -1,10 +1,8 @@
 # src/threads/setup_thread.py
 # 수정: FFmpeg 업데이트 시 ffmpeg.exe와 함께 ffprobe.exe도 bin 폴더로 복사하도록 수정
 
-import datetime
 import os
 import shutil
-import time
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -22,9 +20,6 @@ class SetupThread(QThread):
     FFMPEG_API_URL = "https://api.github.com/repos/GyanD/codexffmpeg/releases/latest"
     FFMPEG_ASSET_KEYWORD = "essentials"
     FFMPEG_ASSET_EXTENSION = ".zip"
-    API_HEADERS = {"Accept": "application/vnd.github+json", "User-Agent": "TVerDownloader-Setup"}
-    MAX_RETRIES = 3
-    RETRY_BACKOFF_BASE_SEC = 3
 
     def run(self):
         try:
@@ -38,35 +33,14 @@ class SetupThread(QThread):
             self.log.emit(f"[치명적 오류] 설정 중 예외 발생: {e}")
             self.finished.emit(False, "", "")
 
-    def _format_rate_limit_reset(self, reset_ts: Optional[str]) -> str:
-        if reset_ts:
-            try:
-                reset_dt = datetime.datetime.fromtimestamp(int(reset_ts))
-                return f"{reset_dt.strftime('%H:%M')}경 이후 다시 시도해주세요."
-            except (ValueError, OSError, OverflowError):
-                pass
-        return "잠시 후 다시 시도해주세요."
-
     def _get_api_info(self, url: str) -> Optional[dict]:
-        delay = self.RETRY_BACKOFF_BASE_SEC
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            try:
-                r = requests.get(url, headers=self.API_HEADERS, timeout=10)
-                if r.status_code in (403, 429) and r.headers.get("X-RateLimit-Remaining") == "0":
-                    wait_msg = self._format_rate_limit_reset(r.headers.get("X-RateLimit-Reset"))
-                    self.log.emit(f"[알림] GitHub API 호출 제한(시간당 60회)을 초과했습니다. {wait_msg}")
-                    return None
-                r.raise_for_status()
-                return r.json()
-            except requests.exceptions.RequestException as e:
-                if attempt < self.MAX_RETRIES:
-                    self.log.emit(f"[경고] GitHub API 호출 실패 ({attempt}/{self.MAX_RETRIES}회): {e} -> {delay}초 후 재시도합니다.")
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    self.log.emit(f"[오류] GitHub API 호출 실패: {e}")
-                    return None
-        return None
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            self.log.emit(f"[오류] GitHub API 호출 실패: {e}")
+            return None
 
     def _download_and_place(self, url: str, target_path: Path) -> bool:
         self.log.emit(f" -> 다운로드 시작: {url}")
