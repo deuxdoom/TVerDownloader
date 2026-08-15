@@ -1,4 +1,3 @@
-# tools/gen_icons.py
 """assets/icons/*.svg 를 읽어 src/icons_data.py 로 임베드한다.
 
 아이콘을 추가하거나 교체한 뒤 다시 돌리면 된다:
@@ -17,10 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT / "assets" / "icons"
 OUT = ROOT / "src" / "icons_data.py"
 
-# Fluent SVG가 하드코딩하는 fill 값. 런타임에 테마 색으로 치환된다.
 FLUENT_FILL = "#212121"
 
-# 코드에서 쓰는 이름 -> 원본 파일명
 ICON_FILES = {
     "settings": "ic_fluent_settings_20_regular.svg",
     "theme_dark": "ic_fluent_weather_moon_20_regular.svg",
@@ -32,15 +29,14 @@ ICON_FILES = {
     "bulk_add": "ic_fluent_grid_20_regular.svg",
     "play": "ic_fluent_play_20_regular.svg",
     "folder_open": "ic_fluent_folder_open_20_regular.svg",
-    "pause": "ic_fluent_pause_20_regular.svg",
     "cancel": "ic_fluent_dismiss_20_regular.svg",
-    # 설정창 좌측 내비게이션
     "nav_filename": "ic_fluent_document_text_20_regular.svg",
     "nav_quality": "ic_fluent_video_20_regular.svg",
     "nav_subtitle": "ic_fluent_subtitles_20_regular.svg",
     "nav_advanced": "ic_fluent_wrench_20_regular.svg",
     "nav_cache": "ic_fluent_delete_20_regular.svg",
-    # 메인 세그먼트 컨트롤 (다운로드 탭은 위의 download 아이콘을 함께 쓴다)
+    "nav_shortcut": "ic_keyboard_20_regular.svg",
+    "log": "ic_fluent_document_table_20_regular.svg",
     "tab_history": "ic_fluent_history_20_regular.svg",
     "tab_favorites": "ic_fluent_star_20_regular.svg",
 }
@@ -62,13 +58,14 @@ def main() -> int:
             print(f"  [{name}] {SRC_DIR / f}", file=sys.stderr)
 
     lines = [
-        "# src/icons_data.py",
-        "# 자동 생성 파일 — 직접 수정하지 마세요.",
-        "#   생성: python tools/gen_icons.py",
-        "#   원본: assets/icons/*.svg",
-        "#",
-        "# Fluent UI System Icons (c) Microsoft Corporation, MIT License",
-        "# https://github.com/microsoft/fluentui-system-icons",
+        '"""src/icons_data.py — 자동 생성 파일. 직접 수정하지 마세요.',
+        "",
+        "생성: python tools/gen_icons.py",
+        "원본: assets/icons/*.svg",
+        "",
+        "Fluent UI System Icons (c) Microsoft Corporation, MIT License",
+        "https://github.com/microsoft/fluentui-system-icons",
+        '"""',
         "",
         "ICON_SVG = {",
     ]
@@ -81,7 +78,6 @@ def main() -> int:
         if FLUENT_FILL not in svg:
             print(f"경고: {filename} 에 {FLUENT_FILL} 가 없어 테마 색이 적용되지 않습니다.", file=sys.stderr)
             warnings += 1
-        lines.append(f"    # {filename}")
         lines.append(f"    {name!r}: {svg!r},")
     lines.append("}")
     lines.append("")

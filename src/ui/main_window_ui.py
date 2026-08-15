@@ -1,45 +1,109 @@
-# src/ui/main_window_ui.py
-# 수정:
-# - QAbstractItemView import 추가
-# - _create_download_tab: download_list의 SelectionMode를 ExtendedSelection으로 설정하여 다중 선택 허용
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTextEdit,
-    QLabel, QListWidget, QFrame, QSplitter, QTabWidget, QToolButton, QMenu,
+    QLabel, QListWidget, QFrame, QTabWidget, QToolButton, QMenu,
     QComboBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction
 
-from src.icon import get_app_icon
+from src import shortcuts
+from src.appicon import get_app_icon
 from src.titlelogo import LOGO_HEIGHT, build_logo
 from src.utils import localized_app_name
 from src.icons import get_icon
 from src.qss import palette
+from src.widgets import GridListWidget, FavoriteItemWidget
 
 class MainWindowUI:
-    # 클릭 영역 32x32, 아이콘 20px (로고 30px와 균형을 맞춘 값)
     ICON_BUTTON_SIZE = 32
     ICON_SIZE = 20
-    # 좌우 분할 구조라 폭이 좁아지면 카드와 로그가 서로를 밀어낸다.
     MIN_WIDTH = 940
+    MIN_WIDTH_WITH_LOG = 970
+    """로그를 편 상태의 최소 창 폭.
+
+    로그가 LOG_PANE_WIDTH로 고정이므로, 그 옆에 다운로드 카드가 잘리지 않고 들어갈
+    폭(548px)과 탭 여백을 더한 값이다. 로그 폭을 줄이면 이 값도 같은 만큼 함께
+    내려야 왼쪽 목록에 돌아가는 폭이 그대로 유지된다. 한쪽만 고치면 최소 폭에서
+    목록이 넓어지거나(로그만 줄임) 카드가 눌린다(최소 폭만 줄임).
+
+    로그를 접으면 MIN_WIDTH로 돌아가 좁은 화면에서도 쓸 수 있다.
+    """
     MIN_HEIGHT = 620
-    # 세그먼트 컨트롤 탭 순서와 아이콘
     TAB_ICONS = (("download", "ctx_download"),
                  ("tab_history", "ctx_history"),
                  ("tab_favorites", "ctx_favorites"))
+    FAV_COLUMNS = 2
+    FAV_MIN_CARD_WIDTH = 340
+    LOG_PANE_WIDTH = 390
+    """로그 패널 고정 폭.
+
+    로그는 읽고 지나가는 곳이라 목록보다 좁아도 된다. 480px일 때는 최소 폭 창에서
+    화면의 45%를 가져가 정작 카드가 뒤로 밀렸다. 바꿀 때는 MIN_WIDTH_WITH_LOG도
+    같은 만큼 움직인다.
+    """
+
+    LEFT_PANE_MIN_WIDTH = 360
+
+    TAB_MARGIN = 12
+    TAB_SPACING = 8
+    """세 탭이 같은 여백을 쓴다. 탭을 옮길 때 제목이 제자리에 있어야 한다."""
+
+    HEADER_ROW_HEIGHT = 32
+    """탭 제목 줄의 높이. 줄 안에 무엇이 들어가든 이 높이로 고정한다.
+
+    줄 높이는 그 안에서 가장 큰 위젯이 정한다. 탭마다 놓이는 위젯이 달라
+    그대로 두면 아이콘 버튼(32)이 있는 탭과 입력칸(31)만 있는 탭의 높이가
+    1px 어긋나고, 그만큼 아래 목록 상자가 위아래로 튄다.
+    """
+
+    SEARCH_INPUT_WIDTH = 200
+    FAV_INPUT_WIDTH = 280
+    """시리즈 URL은 190px 남짓이라 입력칸이 이만큼이면 충분하다.
+    남는 폭을 다 먹게 두면 옆 버튼들이 화면 끝으로 밀려 읽기 어렵다."""
+
+    SHORTCUT_HINT_BUTTONS = {
+        "open_settings": "settings_button",
+        "clear_log": "clear_log_button",
+    }
+    """툴팁 끝에 지금 걸린 조합을 붙일 버튼.
+
+    조합을 사용자가 바꿀 수 있게 된 이상 지금 값이 화면 어딘가에는 보여야 한다.
+    툴팁이 그 자리로 가장 방해가 적고, 버튼이 곧 그 동작이라 설명이 따로 없어도 된다.
+    """
+
+    def _tab_page(self, object_name: str):
+        """탭 한 장과 그 세로 레이아웃을 같은 여백으로 만들어 돌려준다."""
+        tab = QWidget(objectName=object_name)
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(self.TAB_MARGIN, self.TAB_MARGIN,
+                                  self.TAB_MARGIN, self.TAB_MARGIN)
+        layout.setSpacing(self.TAB_SPACING)
+        return tab, layout
+
+    def _make_pane_title(self, text: str) -> QLabel:
+        """탭 제목 라벨. 높이를 고정해 제목 줄 전체 높이를 붙든다."""
+        label = QLabel(text, objectName="PaneTitle")
+        label.setMinimumHeight(self.HEADER_ROW_HEIGHT)
+        return label
+
+    def _make_search_input(self, placeholder: str = "검색...") -> QLineEdit:
+        """탭 제목 줄 오른쪽에 놓는 검색칸. 세 탭이 같은 모양을 쓴다."""
+        box = QLineEdit(placeholderText=placeholder)
+        box.setClearButtonEnabled(True)
+        box.setFixedWidth(self.SEARCH_INPUT_WIDTH)
+        return box
 
     def __init__(self, main_window):
         self.main_window = main_window
         main_window.setWindowIcon(get_app_icon())
         main_window.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
         main_window.resize(1100, 700)
-        # 테마가 바뀌면 다시 칠해야 하는 버튼들
         self._icon_buttons = []
         self._theme = "light"
         self._icon_colors = palette("light")
+        self._log_visible = True
+        self._shortcut_hint_bases = {}
 
-    # ── 아이콘 ────────────────────────────────────────────────────────────
     def _register_icon(self, btn, icon_name, color_key="text"):
         """버튼에 아이콘 정보를 붙이고 테마 전환 대상으로 등록한다."""
         btn.setProperty("icon_name", icon_name)
@@ -103,6 +167,21 @@ class MainWindowUI:
         self.on_top_btn.setProperty("icon_name", "pin_on" if on else "pin")
         self._paint_icon(self.on_top_btn)
 
+    def apply_shortcut_hints(self, table: dict):
+        """버튼 툴팁 끝에 지금 걸린 조합을 붙인다.
+
+        원래 문구는 처음 한 번만 따로 기억해 둔다. 이미 붙은 문자열에 다시 붙이면
+        설정을 열고 닫을 때마다 조합이 줄줄이 쌓인다. 조합을 비워 둔 동작은
+        붙일 것이 없으므로 원래 문구로 되돌린다.
+        """
+        for key, attribute in self.SHORTCUT_HINT_BUTTONS.items():
+            button = getattr(self, attribute, None)
+            if button is None:
+                continue
+            base = self._shortcut_hint_bases.setdefault(attribute, button.toolTip())
+            text = table.get(key, "")
+            button.setToolTip(f"{base} ({shortcuts.display(text)})" if text else base)
+
     def setup_ui(self):
         central = QWidget()
         self.main_window.setCentralWidget(central)
@@ -122,17 +201,20 @@ class MainWindowUI:
         self.on_top_btn = self._make_icon_button("pin", "항상 위", checkable=True)
         self.about_button = self._make_icon_button("info", "정보")
         layout.addWidget(self.app_title); layout.addStretch(1)
-        for btn in (self.settings_button, self.theme_button, self.on_top_btn, self.about_button):
+        for btn in (self.settings_button, self.theme_button,
+                    self.on_top_btn, self.about_button):
             layout.addWidget(btn)
         root_layout.addWidget(header)
 
     def _create_input_bar(self, root_layout):
         input_bar = QFrame(objectName="InputBar")
         layout = QHBoxLayout(input_bar); layout.setContentsMargins(16, 12, 16, 12); layout.setSpacing(10)
-        self.url_input = QLineEdit(placeholderText="TVer 영상 URL 붙여넣기", objectName="UrlInput")
+        self.url_input = QLineEdit(placeholderText="TVer 영상 URL 붙여넣기 또는 끌어다 놓기", objectName="UrlInput")
+        self.url_input.setToolTip(
+            "브라우저 주소창에서 주소를 끌어다 놓아도 됩니다.\n"
+            "여러 개를 한 번에 놓으면 다중 추가 창이 열립니다.")
         self.bulk_button = QPushButton("다중 추가")
         self.add_button = QPushButton("다운로드", objectName="PrimaryButton")
-        # 다운로드 버튼은 accent로 채워지므로 아이콘도 그 위에서 읽히는 색으로 칠한다.
         self._register_icon(self.bulk_button, "bulk_add")
         self._register_icon(self.add_button, "download", color_key="primary_fg")
         for btn in (self.bulk_button, self.add_button):
@@ -143,11 +225,10 @@ class MainWindowUI:
     def _create_tabs(self, root_layout):
         self.tabs = QTabWidget(objectName="MainTabs")
         self.tabs.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
-        # 세그먼트 컨트롤 모양은 QSS가 그린다. 구조는 QTabWidget 그대로다.
         self.tabs.setDocumentMode(True)
         tab_bar = self.tabs.tabBar()
-        tab_bar.setDrawBase(False)          # 탭 아래 기본 밑줄 제거
-        tab_bar.setExpanding(False)         # 탭이 폭 전체로 늘어나지 않게
+        tab_bar.setDrawBase(False)
+        tab_bar.setExpanding(False)
         tab_bar.setCursor(Qt.CursorShape.PointingHandCursor)
         self._create_download_tab()
         self._create_history_tab()
@@ -169,53 +250,86 @@ class MainWindowUI:
         for index, (name, ctx_key) in enumerate(self.TAB_ICONS):
             if index >= self.tabs.count():
                 break
-            # 선택된 탭만 그 탭의 포인트 컬러로 칠해 화면마다 다른 인상을 준다.
             color_key = ctx_key if index == current else "text_dim"
             self.tabs.setTabIcon(index, get_icon(name, self._icon_colors[color_key], self.ICON_SIZE))
 
     def _create_download_tab(self):
-        tab = QWidget(objectName="DownloadTab"); layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12); layout.setSpacing(8)
-        splitter = QSplitter(Qt.Orientation.Horizontal, objectName="MainSplitter")
+        """다운로드 목록과 로그를 좌우로 놓는다.
+
+        로그는 폭을 고정한다. 스플리터로 사용자가 끌어 줄일 수 있게 두면 그때마다
+        복원할 폭을 기억해야 하고, 창이 뜨기 전에는 그 값을 신뢰할 수 없어 상태가
+        어긋난다. 고정폭이면 그 부류의 문제가 처음부터 생기지 않는다.
+        """
+        tab, layout = self._tab_page("DownloadTab")
+        panes = QHBoxLayout(); panes.setContentsMargins(0, 0, 0, 0)
+        panes.setSpacing(self.TAB_SPACING)
+
         left_pane = QFrame(objectName="LeftPane"); left_layout = QVBoxLayout(left_pane)
-        left_layout.setContentsMargins(8, 8, 8, 8); row = QHBoxLayout()
-        self.queue_label = QLabel("다운로드 목록", objectName="PaneTitle")
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(self.TAB_SPACING); row = QHBoxLayout()
+        self.cancel_selected_button = QPushButton("선택 항목 취소")
+        self.cancel_selected_button.setToolTip(
+            "진행 중인 항목은 중지하고, 대기 중인 항목은 대기열에서 뺍니다.\n"
+            "여러 개를 선택하면 한 번에 처리합니다.")
+        self.cancel_selected_button.setEnabled(False)
         self.clear_completed_button = QPushButton("완료 항목 삭제")
         self.queue_count_label = QLabel("0 대기 / 0 진행", objectName="PaneSubtitle")
-        row.addWidget(self.queue_label); row.addStretch(1)
+        self.log_toggle_btn = self._make_icon_button("log", "로그 숨기기")
+        row.addWidget(self._make_pane_title("다운로드 목록")); row.addStretch(1)
+        row.addWidget(self.cancel_selected_button)
         row.addWidget(self.clear_completed_button)
         row.addWidget(self.queue_count_label)
+        row.addWidget(self.log_toggle_btn)
         left_layout.addLayout(row)
         self.download_list = QListWidget(objectName="DownloadList")
         self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        # --- 다중 선택 모드 설정 ---
         self.download_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.download_list.setSpacing(6)
         left_layout.addWidget(self.download_list, 1)
+
         right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
-        right_layout.setContentsMargins(8, 8, 8, 8); row_log = QHBoxLayout()
-        self.log_title = QLabel("로그", objectName="PaneTitle")
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(self.TAB_SPACING); row_log = QHBoxLayout()
         self.clear_log_button = QPushButton("지우기")
-        row_log.addWidget(self.log_title); row_log.addStretch(1); row_log.addWidget(self.clear_log_button)
+        self.clear_log_button.setToolTip("로그 패널의 내용을 비웁니다.")
+        row_log.addWidget(self._make_pane_title("로그")); row_log.addStretch(1)
+        row_log.addWidget(self.clear_log_button)
         self.log_output = QTextEdit(objectName="LogOutput", readOnly=True)
         right_layout.addLayout(row_log); right_layout.addWidget(self.log_output, 1)
-        splitter.addWidget(left_pane); splitter.addWidget(right_pane); splitter.setSizes([640, 480])
-        layout.addWidget(splitter, 1); self.tabs.addTab(tab, "다운로드")
+        right_pane.setFixedWidth(self.LOG_PANE_WIDTH)
+
+        self.log_pane = right_pane
+        left_pane.setMinimumWidth(self.LEFT_PANE_MIN_WIDTH)
+        panes.addWidget(left_pane, 1); panes.addWidget(right_pane)
+        layout.addLayout(panes, 1); self.tabs.addTab(tab, "다운로드")
+
+    def set_log_visible(self, visible: bool):
+        """로그 패널을 접거나 편다. 폭이 고정이라 되돌릴 상태가 없다.
+
+        편 상태에서는 창 최소 폭도 함께 올린다. 그러지 않으면 좁은 창에서
+        고정폭 로그가 목록을 밀어내 카드가 잘린다.
+        """
+        self.log_pane.setVisible(visible)
+        self.main_window.setMinimumWidth(
+            self.MIN_WIDTH_WITH_LOG if visible else self.MIN_WIDTH)
+        self._log_visible = visible
+        self.update_log_toggle_button(visible)
+
+    def is_log_visible(self) -> bool:
+        return self._log_visible
+
+    def update_log_toggle_button(self, visible: bool):
+        """지금 상태가 아니라 '누르면 일어날 일'을 알려 준다."""
+        self.log_toggle_btn.setToolTip("로그 숨기기" if visible else "로그 보기")
 
     def _create_history_tab(self):
-        tab = QWidget(objectName="HistoryTab")
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        tab, layout = self._tab_page("HistoryTab")
         top_controls = QHBoxLayout()
-        self.history_title = QLabel("다운로드 기록", objectName="PaneTitle")
         self.history_sort_combo = QComboBox()
         self.history_sort_combo.addItem("다운로드 최신순")
         self.history_sort_combo.addItem("제목 오름차순")
-        self.history_search_input = QLineEdit(placeholderText="검색...")
-        self.history_search_input.setClearButtonEnabled(True)
-        self.history_search_input.setFixedWidth(200)
-        top_controls.addWidget(self.history_title)
+        self.history_search_input = self._make_search_input()
+        top_controls.addWidget(self._make_pane_title("다운로드 기록"))
         top_controls.addStretch(1)
         top_controls.addWidget(self.history_sort_combo)
         top_controls.addWidget(self.history_search_input)
@@ -227,20 +341,30 @@ class MainWindowUI:
         self.tabs.addTab(tab, "기록")
 
     def _create_favorites_tab(self):
-        tab = QWidget(objectName="FavoritesTab")
-        layout = QVBoxLayout(tab); layout.setContentsMargins(12, 12, 12, 12); layout.setSpacing(8)
-        row = QHBoxLayout(); row.addWidget(QLabel("즐겨찾기 (시리즈)", objectName="PaneTitle")); row.addStretch(1); layout.addLayout(row)
-        ctrl = QHBoxLayout()
-        self.fav_input = QLineEdit(placeholderText="TVer 시리즈 URL (예: https://tver.jp/series/....)")
+        tab, layout = self._tab_page("FavoritesTab")
+        row = QHBoxLayout()
+        row.addWidget(self._make_pane_title("즐겨찾기 (시리즈)"))
+        row.addStretch(1)
+        self.fav_input = QLineEdit(placeholderText="https://tver.jp/series/...")
+        self.fav_input.setFixedWidth(self.FAV_INPUT_WIDTH)
         self.fav_add_btn = QPushButton("추가")
         self.fav_del_btn = QPushButton("삭제", objectName="DangerButton")
-        self.fav_chk_btn = QPushButton("신규 영상 확인")
-        ctrl.addWidget(self.fav_input, 1); ctrl.addWidget(self.fav_add_btn); ctrl.addWidget(self.fav_del_btn)
-        ctrl.addWidget(self.fav_chk_btn); layout.addLayout(ctrl)
-        self.fav_list = QListWidget(objectName="FavoritesList"); self.fav_list.setSpacing(6)
+        self.fav_chk_btn = QPushButton("갱신")
+        self.fav_chk_btn.setToolTip("등록한 시리즈를 모두 확인해 새로 올라온 회차를 찾습니다.")
+        self.fav_search_input = self._make_search_input()
+        for widget in (self.fav_input, self.fav_add_btn, self.fav_del_btn,
+                       self.fav_chk_btn, self.fav_search_input):
+            row.addWidget(widget)
+        layout.addLayout(row)
+        self.fav_list = GridListWidget(columns=self.FAV_COLUMNS,
+                                       min_item_width=self.FAV_MIN_CARD_WIDTH)
+        self.fav_list.setObjectName("FavoritesList")
+        self.fav_list.setSpacing(6)
+        self.fav_list.set_item_height(FavoriteItemWidget.CARD_HEIGHT)
+        self.fav_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, "즐겨찾기")
-    
+
     def setup_tray(self, app_version):
         tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
         tray_icon.setToolTip(f"{localized_app_name()} {app_version}")

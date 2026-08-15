@@ -1,18 +1,18 @@
-# src/utils.py
-
 import json
 import os
+import re
 import sys
 import traceback
 import subprocess
 import webbrowser
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional
 from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QMessageBox
 
-# OS 표시 언어별 앱 이름. 괄호 병기 없이 하나만 노출한다.
+from src.shortcuts import defaults as default_shortcuts
+
 APP_NAME_FALLBACK = "TVer Downloader"
 APP_NAME_BY_LANGUAGE = {
     QLocale.Language.Korean: "티버 다운로더",
@@ -33,12 +33,93 @@ def localized_app_name(language: QLocale.Language | None = None) -> str:
 CONFIG_FILE = "downloader_config.json"
 DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
-PARALLEL_MAX = 20  # 수정: 최대 동시 다운로드 수 상향 (10 -> 20)
-FILENAME_TITLE_MAX_LENGTH = 80  # 수정: 파일명 길이 제한 축소 (경로 길이 오류 방지)
+PARALLEL_MAX = 20
+FILENAME_TITLE_MAX_LENGTH = 80
 
-# 실패로 간주하는 상태값. 편성 스트립 색과 재다운로드 메뉴가 함께 참조한다.
-# TVerDownloader.py와 widgets.py 양쪽에서 쓰이므로 순환 참조를 피해 여기에 둔다.
-ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류"}
+NO_AUDIO_STATUS = "음성 없음"
+"""내려받기는 끝났지만 음성 트랙이 빠진 상태.
+
+파일은 남아 있으니 실패는 아니지만 그대로 두면 안 되는 결과다. 재다운로드
+대상으로 삼으려고 ERROR_STATUSES에 넣지만, 색만은 따로 구분한다.
+"""
+
+ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류", NO_AUDIO_STATUS}
+
+FINISHED_STATUSES = {"완료", NO_AUDIO_STATUS}
+"""파일이 손에 남는 종료 상태. 재생·폴더 열기 버튼을 띄울지 판단한다."""
+
+
+TVER_URL_RE = re.compile(
+    r"^https?://(?:www\.)?tver\.jp/(?:episodes|series)/[A-Za-z0-9_-]+(?:[/?#]\S*)?$",
+    re.IGNORECASE)
+"""클립보드에서 받아들일 TVer 주소.
+
+에피소드와 시리즈만 본다. 전체 일치를 요구해서, 주소가 섞인 긴 글을 복사했을 때
+멋대로 반응하지 않게 한다. 뒤에 붙는 물음표나 조각(#) 부분은 허용한다.
+"""
+
+
+def match_tver_url(text: str) -> Optional[str]:
+    """텍스트가 TVer 주소면 다듬어 돌려주고, 아니면 None."""
+    candidate = (text or "").strip()
+    return candidate if TVER_URL_RE.match(candidate) else None
+
+
+def resolve_ffprobe_path(ffmpeg_path: str):
+    """ffmpeg 경로에서 짝이 되는 ffprobe 경로를 찾는다. 없으면 None.
+
+    같은 폴더에 함께 설치되므로 이름만 바꿔 본다. 확장자가 붙은 경우를 먼저
+    시도해야 'ffmpeg'가 경로 중간에 들어간 설치본에서 엉뚱한 치환을 피할 수 있다.
+    """
+    if not ffmpeg_path:
+        return None
+    for candidate in (ffmpeg_path.replace("ffmpeg.exe", "ffprobe.exe"),
+                      ffmpeg_path.replace("ffmpeg", "ffprobe")):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+RATE_LIMIT_STATUSES = (403, 429)
+
+
+def github_api_headers(user_agent: str) -> Dict[str, str]:
+    """GitHub API 호출에 붙이는 공통 헤더.
+
+    User-Agent가 없으면 GitHub이 403으로 막는다. 호출 주체별로 다른 이름을 주면
+    할당량이 어디서 소모됐는지 응답 헤더로 되짚을 수 있다.
+    """
+    return {"Accept": "application/vnd.github+json", "User-Agent": user_agent}
+
+
+def is_rate_limited(response) -> bool:
+    """호출 한도에 걸린 응답인지 판별한다.
+
+    403은 권한 문제로도 오고 429는 일시적 과부하로도 온다. 둘 다 기다린다고
+    풀리는 게 아니라서, 남은 호출 수가 0이라고 명시된 경우만 한도 초과로 본다.
+    """
+    if response.status_code not in RATE_LIMIT_STATUSES:
+        return False
+    return response.headers.get("X-RateLimit-Remaining") == "0"
+
+
+def rate_limit_reset_text(response) -> str:
+    """X-RateLimit-Reset(에포크 초)을 사람이 읽을 수 있는 시각으로 바꾼다.
+
+    헤더가 없거나 숫자가 아니면 빈 문자열을 돌려준다. 호출부는 시각 안내를
+    생략하고 나머지 문구만 보이면 된다.
+    """
+    raw = response.headers.get("X-RateLimit-Reset", "")
+    try:
+        return datetime.fromtimestamp(int(raw)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return ""
+
+
+def rate_limit_message(response) -> str:
+    """한도 초과 안내 문구. 리셋 시각을 알 수 있으면 함께 붙인다."""
+    reset = rate_limit_reset_text(response)
+    tail = f" 제한은 {reset} 이후에 풀립니다." if reset else ""
+    return f"GitHub API 호출 한도를 초과했습니다(인증 없이 시간당 60회).{tail}"
 
 
 def get_resource_path(relative_path) -> Path:
@@ -65,9 +146,11 @@ def load_config() -> Dict[str, Any]:
         },
         "filename_order": ["series", "upload_date", "episode_number", "episode", "id"],
         "quality": "bv*+ba/b",
-        "preferred_codec": "original",  # 수정: 기본값을 '원본 유지'로 변경 (불필요한 재인코딩 방지)
+        "preferred_codec": "original",
         "auto_check_favorites_on_start": True,
         "always_on_top": False,
+        "log_visible": True,
+        "clipboard_watch": False,
         "conversion_format": "none",
         "delete_on_conversion": False,
         "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"],
@@ -77,12 +160,13 @@ def load_config() -> Dict[str, Any]:
         "quality_cpu_vp9_crf": 36,
         "quality_cpu_av1_crf": 41,
         "quality_gpu_cq": 30,
+        "embed_thumbnail": False,
         "download_subtitles": True,
-        "embed_subtitles": True,
+        "embed_subtitles": False,
         "subtitle_format": "vtt",
         "ignore_ssl_errors": False,
-        # 닫기 버튼(X) 동작. exit=종료 확인 후 종료(기존 동작), tray=트레이로 이동
         "close_action": "exit",
+        "shortcuts": default_shortcuts(),
     }
     if os.path.exists(CONFIG_FILE):
         try:

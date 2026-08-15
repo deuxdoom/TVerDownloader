@@ -1,7 +1,3 @@
-# src/download_manager.py
-# (변경 없음, 이전 답변과 동일)
-# 수정: _start_download에서 자막 관련 설정 3개를 읽어 DownloadThread로 전달
-
 import os
 import subprocess
 from typing import List, Dict, Optional, Any
@@ -10,7 +6,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from src.threads.download_thread import DownloadThread
 from src.threads.conversion_thread import ConversionThread
 from src.history_store import HistoryStore
-from src.utils import get_startupinfo, DEFAULT_PARALLEL
+from src.utils import get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path
 
 class DownloadManager(QObject):
     log = pyqtSignal(str)
@@ -75,9 +71,10 @@ class DownloadManager(QObject):
         quality_format = self.config.get("quality", "bv*+ba/b")
 
         download_subs = self.config.get("download_subtitles", True)
-        embed_subs = self.config.get("embed_subtitles", True)
+        embed_subs = self.config.get("embed_subtitles", False)
         subtitle_format = self.config.get("subtitle_format", "vtt")
         ignore_ssl = self.config.get("ignore_ssl_errors", False)
+        embed_thumb = self.config.get("embed_thumbnail", False)
 
         thread = DownloadThread(url=url, download_folder=download_folder, ytdlp_exe_path=self.ytdlp_path,
                                 ffmpeg_exe_path=self.ffmpeg_path, output_template=output_template,
@@ -85,25 +82,26 @@ class DownloadManager(QObject):
                                 download_subtitles=download_subs,
                                 embed_subtitles=embed_subs,
                                 subtitle_format=subtitle_format,
-                                ignore_ssl_errors=ignore_ssl
+                                ignore_ssl_errors=ignore_ssl,
+                                embed_thumbnail=embed_thumb
                                 )
         thread.progress.connect(self._on_progress); thread.finished.connect(self._on_download_finished)
         self._active_threads[url] = thread; self._logged_start.discard(url); thread.start()
         self._update_queue_counter()
-    
+
     def _on_progress(self, url: str, payload: Dict[str, Any]):
         if url not in self._logged_start and 'log' in payload:
             self._logged_start.add(url)
             rule = "─" * 12
             self.log.emit(f"{rule} 다운로드 시작 {rule}\n{url}")
         self.progress_updated.emit(url, payload)
-        
+
     def _get_video_codec(self, filepath: str) -> Optional[str]:
-        if not self.ffmpeg_path: return None
-        ffprobe_path = self.ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe')
-        if not os.path.exists(ffprobe_path):
-             ffprobe_path = self.ffmpeg_path.replace('ffmpeg', 'ffprobe')
-        
+        ffprobe_path = resolve_ffprobe_path(self.ffmpeg_path)
+        if not ffprobe_path:
+            self.log.emit("[오류] ffprobe를 찾지 못해 코덱을 확인할 수 없습니다.")
+            return None
+
         command = [
             ffprobe_path, '-v', 'error', '-select_streams', 'v:0',
             '-show_entries', 'stream=codec_name',
@@ -126,12 +124,12 @@ class DownloadManager(QObject):
     def _on_download_finished(self, url: str, success: bool, final_filepath: str, metadata: dict):
         thread = self._active_threads.pop(url, None)
         if thread: thread.deleteLater()
-        
+
         if not success or not final_filepath or not os.path.exists(final_filepath):
             self.log.emit(f"[실패] 다운로드 실패 또는 파일 없음: {url}")
             self.task_finished.emit(url, False, "", metadata)
             self._check_completion(); return
-        
+
         self.log.emit(f"[성공] 다운로드 완료: {final_filepath}")
         self._conversion_meta_cache[url] = metadata
 
@@ -142,7 +140,6 @@ class DownloadManager(QObject):
 
         preferred_codec_key = self.config.get("preferred_codec", "original")
 
-        # 수정: '원본 유지' 선택 시 ffprobe 코덱 검사와 재인코딩을 모두 건너뜀
         if preferred_codec_key == "original":
             self.log.emit("선호 코덱이 '원본 유지'입니다. 재인코딩을 건너뜁니다.")
             self.task_finished.emit(url, True, final_filepath, metadata)
@@ -153,7 +150,7 @@ class DownloadManager(QObject):
 
         codec_map = {'avc': 'h264', 'hevc': 'hevc', 'vp9': 'vp9', 'av1': 'av1'}
         target_codec = codec_map.get(preferred_codec_key)
-        
+
         if current_codec and target_codec and current_codec != target_codec:
             self.log.emit(f"코덱 불일치. 변환 시작: (원본) '{current_codec}' -> (목표) '{target_codec}'")
             self._start_conversion(url, final_filepath, target_codec=target_codec, delete_original=True)
@@ -161,19 +158,19 @@ class DownloadManager(QObject):
             if current_codec: self.log.emit(f"코덱 일치 ('{current_codec}'). 변환이 불필요합니다.")
             self.task_finished.emit(url, True, final_filepath, metadata)
             self._check_completion()
-            
+
     def _start_conversion(self, url: str, input_path: str, target_format: Optional[str] = None, target_codec: Optional[str] = None, delete_original: Optional[bool] = None):
         status_msg = ""
         if target_format: status_msg = f"{target_format.upper()} 변환 중..."
         elif target_codec: status_msg = f"{target_codec.upper()} 변환 중..."
         self.progress_updated.emit(url, {"status": status_msg})
-        
+
         delete_on_conv = self.config.get("delete_on_conversion", False)
         if delete_original is not None:
             delete_on_conv = delete_original
 
         hw_encoder_setting = self.config.get("hardware_encoder", "cpu")
-        
+
         quality_cfg = {
             "cpu_h264_crf": self.config.get("quality_cpu_h264_crf", 26),
             "cpu_h265_crf": self.config.get("quality_cpu_h265_crf", 31),
@@ -182,17 +179,16 @@ class DownloadManager(QObject):
             "gpu_cq": self.config.get("quality_gpu_cq", 30),
         }
 
-        thread = ConversionThread(url, input_path, self.ffmpeg_path, 
-                                  target_format=target_format, 
-                                  target_codec=target_codec, 
+        thread = ConversionThread(url, input_path, self.ffmpeg_path,
+                                  target_format=target_format,
+                                  target_codec=target_codec,
                                   delete_original=delete_on_conv,
                                   hw_encoder_setting=hw_encoder_setting,
                                   quality_cfg=quality_cfg)
         thread.log.connect(self.log); thread.finished.connect(self._on_conversion_finished)
         self._active_conversions[url] = thread; thread.start()
-        # 다운로드 슬롯이 비었으니 대기 중인 다음 작업을 바로 시작한다.
         self.check_queue_and_start()
-        
+
     def _on_conversion_finished(self, success: bool, url:str, new_filepath: str):
         thread = self._active_conversions.pop(url, None)
         if thread: thread.deleteLater()
@@ -206,7 +202,7 @@ class DownloadManager(QObject):
 
     def _check_completion(self):
         self._update_queue_counter()
-        
+
         self.check_queue_and_start()
 
         if not self._task_queue and not self._active_threads and not self._active_conversions:

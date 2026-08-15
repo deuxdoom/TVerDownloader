@@ -1,17 +1,19 @@
-# TVerDownloader.py
-
-import sys, os, re, webbrowser
-from typing import List, Dict, Optional, Tuple
+import sys, os, webbrowser
+from html import escape
+from typing import List, Dict, Optional
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QMenu, QWidget)
-from PyQt6.QtCore import Qt, QEvent, QTimer, QSize, QLocale, QTranslator, QLibraryInfo
-from PyQt6.QtGui import QCursor, QAction, QGuiApplication, QFontDatabase, QFont
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QMenu, QWidget,
+                             QAbstractSpinBox, QLineEdit, QTextEdit)
+from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QSize, QLocale, QTranslator, QLibraryInfo
+from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
+from src import shortcuts
 from src.utils import (load_config, save_config, handle_exception, open_file_location,
-                       ERROR_STATUSES, localized_app_name, get_resource_path)
-from src.qss import build_qss, palette
+                       ERROR_STATUSES, localized_app_name, get_resource_path,
+                       match_tver_url)
+from src.qss import build_qss, palette, UI_FONT_FALLBACKS
 from src.message import confirm
 from src.about_dialog import AboutDialog
 from src.bulk_dialog import BulkAddDialog
@@ -19,21 +21,26 @@ from src.dialogs import SettingsDialog
 from src.series_dialog import SeriesSelectionDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
-from src.widgets import DownloadItemWidget, FavoriteItemWidget, HistoryItemWidget, THUMBNAIL_CACHE_DIR
+from src.widgets import DownloadItemWidget, FavoriteItemWidget, HistoryItemWidget
 from src.updater import maybe_show_update
 from src.threads.setup_thread import SetupThread
 from src.ui.main_window_ui import MainWindowUI
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
+NOTICE_RULE = "─" * 12
+FAV_AUTO_ADD_LIMIT = 2
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{localized_app_name()} v{APP_VERSION}")
         self.force_quit = False; self.env_ready = False; self.config = load_config()
+        self._clipboard_connected = False; self._last_clipboard_url = ""; self._bulk_dialog = None
+        self._shortcuts: List[QShortcut] = []; self._guarded_shortcuts: List[QShortcut] = []
+        self.setAcceptDrops(True)
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
         self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
@@ -41,8 +48,11 @@ class MainWindow(QMainWindow):
         self._connect_signals(); self._set_input_enabled(False)
         self.apply_theme(self.config.get("theme", "light"), persist=False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
+        self.ui.set_log_visible(self.config.get("log_visible", True))
+        self.apply_clipboard_watch(self.config.get("clipboard_watch", False))
         self.refresh_history_list(); self.refresh_fav_list()
-        self.ui.download_list.installEventFilter(self)
+        self.apply_shortcuts()
+        QApplication.instance().focusChanged.connect(self._sync_shortcut_guard)
         self.append_log("프로그램 시작. 환경 설정을 시작합니다...")
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
@@ -53,6 +63,8 @@ class MainWindow(QMainWindow):
             self.config = load_config()
             self.download_manager.update_config(self.config)
             self.series_parser.update_config(self.config)
+            self.apply_clipboard_watch(self.config.get("clipboard_watch", False))
+            self.apply_shortcuts()
             self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
             self.refresh_history_list()
             self.refresh_fav_list()
@@ -70,15 +82,201 @@ class MainWindow(QMainWindow):
                 if hasattr(widget, "apply_theme"):
                     widget.apply_theme(theme)
 
+    def apply_clipboard_watch(self, enabled: bool):
+        """클립보드 감시를 켜거나 끈다.
+
+        끄면 시그널 연결 자체를 끊는다. 콜백 안에서 그냥 돌아 나오게 두면 꺼 놓고도
+        복사할 때마다 클립보드를 읽게 되는데, 이 기능을 꺼림칙해하는 쪽에서는
+        그것부터가 문제다.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if enabled and not self._clipboard_connected:
+            clipboard.dataChanged.connect(self._on_clipboard_changed)
+            self._clipboard_connected = True
+        elif not enabled and self._clipboard_connected:
+            try:
+                clipboard.dataChanged.disconnect(self._on_clipboard_changed)
+            except TypeError:
+                pass
+            self._clipboard_connected = False
+
+    def _on_clipboard_changed(self):
+        """복사된 TVer 주소를 받아 둘 자리를 정한다.
+
+        받기까지 자동으로 하지는 않는다. 주소가 맞는지 눈으로 보고 누르는 편이
+        낫고, 잘못 복사한 것이 곧바로 대기열에 들어가면 되돌리기 번거롭다.
+
+        입력창은 한 칸이라 둘째 주소부터는 갈 곳이 없었다. 예전에는 그때 그냥
+        돌아 나와서, 주소를 연달아 복사하면 감시가 꺼진 것처럼 보였다. 이제는
+        이미 든 주소와 함께 다중 추가 창으로 옮기고, 그 창이 열려 있는 동안은
+        복사할 때마다 한 줄씩 쌓는다.
+
+        입력창에 TVer 주소가 아닌 글이 들어 있으면 예전처럼 아무것도 하지 않는다.
+        직접 적던 내용을 치우고 그 자리를 가져갈 이유가 없다.
+
+        시리즈 주소도 즐겨찾기 칸이 아니라 이 흐름으로 보낸다. 복사한 사람이
+        지금 받고 싶은 것인지 즐겨찾기에 두고 싶은 것인지 알 수 없으므로, 손이
+        가 있는 자리 하나로 모은다.
+        """
+        url = match_tver_url(QGuiApplication.clipboard().text())
+        if not url or url == self._last_clipboard_url:
+            return
+        if self._bulk_dialog is not None:
+            self._last_clipboard_url = url
+            if self._bulk_dialog.append_url(url):
+                self.append_log(f"[클립보드] 다중 추가 창에 넣었습니다: {url}")
+            return
+        pending = match_tver_url(self.ui.url_input.text())
+        if pending and pending != url:
+            self._last_clipboard_url = url
+            self.append_log("[클립보드] 주소가 하나 더 들어와 다중 추가 창으로 모읍니다.")
+            self.ui.url_input.clear()
+            if not self.open_bulk_add([pending, url]):
+                self.ui.url_input.setText(pending)
+            return
+        if self.ui.url_input.text().strip():
+            return
+        self._last_clipboard_url = url
+        self.ui.url_input.setText(url)
+        self.append_log(f"[클립보드] 주소를 입력창에 넣었습니다: {url}")
+
+    def toggle_log_panel(self):
+        """로그 패널을 접거나 펴고 그 선택을 설정에 남긴다."""
+        visible = not self.ui.is_log_visible()
+        self.ui.set_log_visible(visible)
+        self.config["log_visible"] = visible
+        save_config(self.config)
+        self.append_log("로그 패널을 폈습니다." if visible else "로그 패널을 접었습니다.")
+
     def toggle_theme(self):
         new_theme = "dark" if self.config.get("theme", "light") == "light" else "light"
         self.apply_theme(new_theme)
         self.append_log(f"테마를 '{new_theme}'(으)로 전환했습니다.")
 
-    def eventFilter(self, source, event):
-        if source is self.ui.download_list and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Delete: self._delete_selected_download_items(); return True
-        return super().eventFilter(source, event)
+    TEXT_ENTRY_TYPES = (QLineEdit, QTextEdit, QAbstractSpinBox)
+    """글자를 입력받는 위젯들. 이 중 하나에 포커스가 있으면 '입력 중'으로 본다."""
+
+    def apply_shortcuts(self):
+        """설정에 저장된 조합으로 단축키를 처음부터 다시 만든다.
+
+        setKey로 갈아끼우지 않고 버린 뒤 새로 만든다. 조합이 비면 QShortcut 자체를
+        두지 않아야 '사용 안 함'이 확실해지고, 범위가 여러 위젯에 걸린 항목은 만들
+        개수까지 달라져서 어차피 한 번에 다시 세우는 편이 경로가 하나로 남는다.
+        """
+        for shortcut in self._shortcuts:
+            shortcut.setEnabled(False)
+            shortcut.setParent(None)
+            shortcut.deleteLater()
+        self._shortcuts.clear(); self._guarded_shortcuts.clear()
+        targets = {
+            shortcuts.WINDOW: (self,),
+            shortcuts.DOWNLOAD_LIST: (self.ui.download_list,),
+            shortcuts.SEARCH_INPUT: (self.ui.history_search_input, self.ui.fav_search_input),
+        }
+        table = shortcuts.resolve(self.config)
+        for definition in shortcuts.SHORTCUT_DEFS:
+            text = table.get(definition.key, "")
+            if not text:
+                continue
+            window_scope = definition.scope == shortcuts.WINDOW
+            for widget in targets[definition.scope]:
+                handler = self._shortcut_handler(definition.key, widget)
+                if handler is None:
+                    continue
+                shortcut = QShortcut(QKeySequence(text), widget)
+                shortcut.setContext(Qt.ShortcutContext.WindowShortcut if window_scope
+                                    else Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                shortcut.activated.connect(handler)
+                self._shortcuts.append(shortcut)
+                if window_scope and shortcuts.needs_typing_guard(text):
+                    self._guarded_shortcuts.append(shortcut)
+        self.ui.apply_shortcut_hints(table)
+        self._sync_shortcut_guard(None, QApplication.focusWidget())
+
+    def _shortcut_handler(self, key: str, widget):
+        """단축키 하나가 부를 함수를 돌려준다.
+
+        검색어 지우기는 탭마다 대상 입력칸이 달라서, 붙은 위젯을 닫아 넣은 함수를
+        만든다. 이름을 모르는 항목은 None을 돌려주고 호출부가 건너뛴다.
+        """
+        handlers = {
+            "open_settings": self.open_settings,
+            "clear_log": self.clear_log,
+            "delete_selected": self._delete_selected_download_items,
+            "clear_search": lambda: widget.clear(),
+        }
+        return handlers.get(key)
+
+    def _sync_shortcut_guard(self, _old=None, new=None):
+        """글자를 입력하는 중에는 수식키 없는 창 단축키를 꺼 둔다.
+
+        QShortcut은 켜져 있는 한 키를 위젯보다 먼저 가져간다. 콜백 안에서 상황을
+        보고 되돌아 나와도 이미 삼킨 키는 입력칸에 도착하지 않으므로, 판단을
+        콜백이 아니라 활성 여부로 옮긴다.
+
+        범위가 위젯인 단축키는 손대지 않는다. 검색칸의 Esc처럼 대상이 입력칸
+        자신인 경우가 있어서, 입력 중이라고 끄면 있어야 할 자리에서 사라진다.
+        """
+        typing = isinstance(new, self.TEXT_ENTRY_TYPES)
+        for shortcut in self._guarded_shortcuts:
+            shortcut.setEnabled(not typing)
+
+    def dragEnterEvent(self, event):
+        if self._urls_from_mime(event.mimeData()):
+            event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """dragEnter에서 받아 놓고도 이걸 빼면 커서가 금지 표시로 바뀐다."""
+        if self._urls_from_mime(event.mimeData()):
+            event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = self._urls_from_mime(event.mimeData())
+        if not urls:
+            event.ignore(); return
+        event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+        self._accept_dropped_urls(urls)
+
+    def _urls_from_mime(self, mime) -> List[str]:
+        """드롭된 데이터에서 TVer 주소만 순서대로 골라낸다.
+
+        브라우저는 주소 하나를 끌어도 text/uri-list와 text/plain을 함께 실어 보낸다.
+        양쪽을 다 보고 중복을 걷어내야 같은 주소가 두 번 들어오지 않는다. 판별은
+        클립보드와 같은 전체 일치 규칙이라, 주소가 아닌 것을 끌어다 놓으면 창이
+        아예 받지 않는다.
+        """
+        candidates: List[str] = []
+        if mime.hasUrls():
+            candidates.extend(url.toString() for url in mime.urls())
+        if mime.hasText():
+            candidates.extend(mime.text().splitlines())
+        found: List[str] = []
+        for candidate in candidates:
+            url = match_tver_url(candidate)
+            if url and url not in found:
+                found.append(url)
+        return found
+
+    def _accept_dropped_urls(self, urls: List[str]):
+        """끌어다 놓은 주소를 개수에 따라 다른 흐름으로 넘긴다.
+
+        하나면 입력창에 채우기만 한다. 클립보드와 달리 이미 들어 있는 내용을
+        덮어쓰는데, 창을 겨냥해 끌어다 놓은 것은 지금 이걸 받겠다는 뜻이라
+        직전에 적어 둔 것보다 나중 의사가 앞선다.
+
+        여럿이면 다중 추가 창을 미리 채워서 연다. 곧바로 대기열에 넣지 않는 것은
+        무엇이 들어왔는지 확인하고 지울 기회를 주기 위해서다.
+        """
+        if len(urls) == 1:
+            self.ui.url_input.setText(urls[0]); self.ui.url_input.setFocus()
+            self.append_log(f"[드롭] 주소를 입력창에 넣었습니다: {urls[0]}")
+            return
+        self.append_log(f"[드롭] 주소 {len(urls)}개를 받았습니다. 다중 추가 창을 엽니다.")
+        self.open_bulk_add(urls)
 
     def _delete_selected_download_items(self):
         selected_items = self.ui.download_list.selectedItems()
@@ -112,19 +310,22 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         self.ui.add_button.clicked.connect(self.process_input_url); self.ui.url_input.returnPressed.connect(self.process_input_url)
-        self.ui.bulk_button.clicked.connect(self.open_bulk_add); self.ui.settings_button.clicked.connect(self.open_settings)
+        self.ui.bulk_button.clicked.connect(lambda: self.open_bulk_add()); self.ui.settings_button.clicked.connect(self.open_settings)
         self.ui.about_button.clicked.connect(
             lambda: AboutDialog(APP_VERSION, self, self.config.get("theme", "light")).exec())
         self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
         self.ui.theme_button.clicked.connect(self.toggle_theme)
+        self.ui.log_toggle_btn.clicked.connect(self.toggle_log_panel)
         self.ui.clear_completed_button.clicked.connect(self._clear_completed_downloads)
+        self.ui.cancel_selected_button.clicked.connect(self._cancel_selected_downloads)
+        self.ui.download_list.itemSelectionChanged.connect(self._sync_cancel_button)
         self.ui.download_list.customContextMenuRequested.connect(self.show_download_context_menu)
-        # 선택된 행의 글자·아이콘 색을 강조 배경에 맞춰 올린다.
         for list_widget in (self.ui.download_list, self.ui.history_list, self.ui.fav_list):
             list_widget.itemSelectionChanged.connect(
                 lambda lw=list_widget: self._sync_selection_styles(lw))
         self.ui.history_list.customContextMenuRequested.connect(self.show_history_menu)
         self.ui.history_search_input.textChanged.connect(self.refresh_history_list)
+        self.ui.fav_search_input.textChanged.connect(self.refresh_fav_list)
         self.ui.history_sort_combo.currentIndexChanged.connect(self.refresh_history_list)
         self.ui.fav_add_btn.clicked.connect(self.add_favorite); self.ui.fav_del_btn.clicked.connect(self.remove_selected_favorite)
         self.ui.fav_chk_btn.clicked.connect(self.check_all_favorites); self.ui.fav_list.customContextMenuRequested.connect(self.show_fav_menu)
@@ -141,12 +342,11 @@ class MainWindow(QMainWindow):
         if search_term: entries_to_show = [(url, meta) for url, meta in all_entries if search_term in meta.get('title', '').lower() or search_term in url.lower()]
         else: entries_to_show = all_entries
         if sort_index == 1: entries_to_show.sort(key=lambda item: item[1].get('title', ''))
-        
-        # [최적화] 최근 100개만 표시
+
         MAX_DISPLAY = 100
         total_count = len(entries_to_show)
         display_entries = entries_to_show[:MAX_DISPLAY]
-        
+
         self.ui.history_list.clear()
         for url, meta in display_entries:
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
@@ -156,7 +356,7 @@ class MainWindow(QMainWindow):
             else:
                 title = meta.get("title", "(제목 없음)"); date = meta.get("date", "")
                 item.setText(f"{title}  •  {date}\n{url}"); item.setSizeHint(QSize(0, 90)); self.ui.history_list.addItem(item)
-        
+
         if total_count > MAX_DISPLAY:
             info_item = QListWidgetItem(f"... 외 {total_count - MAX_DISPLAY}개의 이전 기록이 있습니다. (검색하여 찾을 수 있습니다)")
             info_item.setFlags(Qt.ItemFlag.NoItemFlags); info_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -165,13 +365,51 @@ class MainWindow(QMainWindow):
     def _process_url(self, url: str):
         if not self.env_ready: self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요."); return
         if not self._ensure_download_folder(): self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다."); return
-        if "/series/" in url: self._set_input_enabled(False); self.series_parser.parse('single', [url])
-        else: self._request_add_task(url)
+        if "/series/" in url:
+            self.append_log(f"[시리즈] 분석을 시작합니다: {url}")
+            self.series_parser.parse('single', [url])
+        else:
+            self._request_add_task(url)
 
     def set_always_on_top(self, on: bool, init: bool = False):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on); self.show()
         if not init: self.config["always_on_top"] = on; save_config(self.config)
         self.ui.on_top_btn.setChecked(on); self.ui.update_pin_button(on)
+
+    def _cancel_selected_downloads(self):
+        """선택한 항목을 상태에 맞게 정리한다.
+
+        진행 중이면 중지하고 카드는 남긴다(취소됨으로 보이고 재다운로드할 수 있다).
+        대기 중이면 대기열에서 빼고 목록에서도 지운다. 이미 끝난 항목은 건드리지
+        않는다. 그쪽은 '완료 항목 삭제'가 맡는다.
+        """
+        selected_items = self.ui.download_list.selectedItems()
+        if not selected_items:
+            return
+        rows = sorted((self.ui.download_list.row(item) for item in selected_items), reverse=True)
+        stopped = removed = 0
+        for row in rows:
+            item = self.ui.download_list.item(row)
+            widget = self.ui.download_list.itemWidget(item)
+            if not isinstance(widget, DownloadItemWidget):
+                continue
+            url = widget.url
+            if (url in self.download_manager._active_threads
+                    or url in self.download_manager._active_conversions):
+                self.download_manager.stop_task(url)
+                stopped += 1
+            elif url in self.download_manager._task_queue:
+                if self.download_manager.remove_task_from_queue(url):
+                    self._remove_download_row(row)
+                    removed += 1
+        parts = []
+        if stopped: parts.append(f"진행 중 {stopped}개 중지")
+        if removed: parts.append(f"대기 중 {removed}개 제거")
+        self.append_log("[대기열] " + (", ".join(parts) if parts
+                                      else "선택한 항목 중 중지하거나 뺄 것이 없습니다."))
+
+    def _sync_cancel_button(self):
+        self.ui.cancel_selected_button.setEnabled(bool(self.ui.download_list.selectedItems()))
 
     def _clear_completed_downloads(self):
         for i in range(self.ui.download_list.count() - 1, -1, -1):
@@ -215,52 +453,91 @@ class MainWindow(QMainWindow):
             if not again: self.append_log(f"[알림] 중복 다운로드 취소: {url}"); return False
         return self.download_manager.add_task(url)
 
-    def open_bulk_add(self):
-        if not self.env_ready: self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요."); return
-        if not self._ensure_download_folder(): self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다."); return
-        dialog = BulkAddDialog(self)
-        if dialog.exec():
+    def open_bulk_add(self, initial_urls: Optional[List[str]] = None) -> bool:
+        """다중 추가 창을 연다. initial_urls를 주면 그 목록으로 채워서 연다.
+
+        창을 실제로 띄웠는지 돌려준다. 클립보드에서 모아 넘길 때는 입력창을 비운
+        뒤에 부르므로, 준비가 안 돼 돌아 나온 경우 호출부가 원래 주소를 되돌려
+        놓아야 한다.
+
+        떠 있는 동안 self._bulk_dialog에 자기를 걸어 둔다. exec()가 중첩 이벤트
+        루프라서 그 사이에도 클립보드 감시가 계속 돌고, 새 주소를 이 창에 넣으려면
+        어느 창이 열려 있는지 알아야 한다.
+        """
+        if not self.env_ready:
+            self.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            return False
+        if not self._ensure_download_folder():
+            self.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
+            return False
+        dialog = BulkAddDialog(self, initial_urls)
+        self._bulk_dialog = dialog
+        try:
+            accepted = dialog.exec()
+        finally:
+            self._bulk_dialog = None
+        if accepted:
             urls = dialog.get_urls()
-            if not urls: return
-            normal_urls = [u for u in urls if "/series/" not in u]; series_urls = [u for u in urls if "/series/" in u]
+            normal_urls = [u for u in urls if "/series/" not in u]
+            series_urls = [u for u in urls if "/series/" in u]
             for url in normal_urls: self._request_add_task(url)
             if series_urls: self.series_parser.parse('bulk', series_urls)
+        return True
 
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
         if not ok: self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다."); QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요."); return
         self.download_manager.set_paths(ytdlp_path, ffmpeg_path); self.series_parser.set_ytdlp_path(ytdlp_path); self.env_ready = True
         self._set_input_enabled(True)
-        rule = "─" * 12
-        self.append_log(f"{rule} 안내 {rule}\nTVer는 일본 지역 제한이 있습니다.\n원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요.")
+        self.append_notice("안내", ["TVer는 일본 지역 제한이 있습니다.",
+                                    "원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요."])
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
-        QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION))
+        QTimer.singleShot(1000, lambda: maybe_show_update(self, APP_VERSION, self.append_log))
         if self.config.get("auto_check_favorites_on_start", True):
             QTimer.singleShot(2500, self.check_all_favorites)
 
+    def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
+        """에피소드 선택 창을 띄우고, 고른 것만 대기열에 넣는다."""
+        dialog = SeriesSelectionDialog(episode_info, self)
+        if not dialog.exec():
+            self.append_log(f"{label} 에피소드 추가를 취소했습니다.")
+            return
+        selected_urls = dialog.get_selected_urls()
+        if not selected_urls:
+            self.append_log(f"{label} 선택된 에피소드가 없어 추가하지 않았습니다.")
+            return
+        added_count = 0
+        for url in selected_urls:
+            if self._request_add_task(url): added_count += 1
+        self.append_log(f"{label} 선택한 {added_count}개 에피소드를 추가했습니다.")
+
     def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
-        if context == 'single' or context == 'bulk':
-            if context == 'single': self._set_input_enabled(True)
+        """분석이 끝난 시리즈를 요청 맥락에 맞게 처리한다.
+
+        즐겨찾기 확인은 신규가 FAV_AUTO_ADD_LIMIT 이하면 그냥 받고, 그보다 많으면
+        선택 창을 띄운다. 회차가 수십 개인 시리즈를 확인 없이 대기열에 통째로
+        쏟아부으면 정작 지금 받고 싶은 영상이 그 뒤에 밀린다.
+        """
+        if context in ('single', 'bulk'):
             if not episode_info: self.append_log(f"[{context}] '{series_url}' 시리즈에서 에피소드를 찾지 못했습니다."); return
-            dialog = SeriesSelectionDialog(episode_info, self)
-            if dialog.exec():
-                selected_urls = dialog.get_selected_urls()
-                if not selected_urls: self.append_log(f"[{context}] 선택된 에피소드가 없어 추가하지 않았습니다."); return
-                added_count = 0
-                for url in selected_urls:
-                    if self._request_add_task(url): added_count += 1
-                self.append_log(f"[{context}] 시리즈에서 선택한 {added_count}개 에피소드를 추가했습니다.")
-            else: self.append_log(f"[{context}] 시리즈 에피소드 추가를 취소했습니다.")
-        
+            self._add_from_selection(episode_info, f"[{context}] 시리즈에서")
+
         elif context == 'fav-check':
-            added_count = 0
-            for episode in episode_info:
-                url = episode['url']
-                if self.history_store.exists(url): continue
-                if self._request_add_task(url): added_count += 1
-            if added_count > 0: self.append_log(f"'{series_url}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
             self.fav_store.touch_last_check(series_url, series_title)
             self.refresh_fav_list()
-        
+            label = series_title or series_url
+            new_episodes = [ep for ep in episode_info if not self.history_store.exists(ep['url'])]
+            if not new_episodes:
+                return
+            if len(new_episodes) <= FAV_AUTO_ADD_LIMIT:
+                added_count = 0
+                for episode in new_episodes:
+                    if self._request_add_task(episode['url']): added_count += 1
+                if added_count:
+                    self.append_log(f"[즐겨찾기] '{label}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
+                return
+            self.append_log(f"[즐겨찾기] '{label}'에서 신규 에피소드 {len(new_episodes)}개를 찾았습니다. 받을 항목을 선택하세요.")
+            self._add_from_selection(new_episodes, f"[즐겨찾기] '{label}'에서")
+
         elif context == 'fav-add-check':
             if series_title:
                 self.fav_store.touch_last_check(series_url, series_title)
@@ -308,6 +585,15 @@ class MainWindow(QMainWindow):
         if not item: return
         widget = self.ui.download_list.itemWidget(item)
         if not isinstance(widget, DownloadItemWidget): return
+        selected = self.ui.download_list.selectedItems()
+        if len(selected) > 1 and item in selected:
+            menu = QMenu()
+            menu.addAction(f"선택한 {len(selected)}개 중지 · 대기열에서 제거",
+                           self._cancel_selected_downloads)
+            menu.addAction(f"선택한 {len(selected)}개 목록에서 삭제",
+                           self._delete_selected_download_items)
+            menu.exec(QCursor.pos())
+            return
         url = widget.url; menu = QMenu()
         if url in self.download_manager._active_threads or url in self.download_manager._active_conversions:
             menu.addAction("중지", lambda: self.download_manager.stop_task(url))
@@ -330,8 +616,49 @@ class MainWindow(QMainWindow):
             "완료": colors["log_success"], "성공": colors["log_success"],
         }
         color = next((c for k, c in color_map.items() if k in text), None)
-        self.ui.log_output.append(f'<span style="color: {color};">{text}</span>' if color else text)
-        self.ui.log_output.verticalScrollBar().setValue(self.ui.log_output.verticalScrollBar().maximum())
+        if color:
+            self.ui.log_output.append(
+                f'<span style="color: {color};">{self._as_html(text)}</span>')
+        else:
+            self.ui.log_output.append(text)
+        self._scroll_log_to_end()
+
+    def append_notice(self, title: str, lines: List[str]):
+        """가장 중요한 안내를 굵은 적색으로, 위아래 괘선 사이에 넣어 출력한다.
+
+        색과 굵기만으로는 뒤이어 쌓이는 로그에 묻히기 쉬워서 블록을 괘선으로 닫는다.
+        """
+        colors = palette(self.config.get("theme", "light"))
+        head = f"{NOTICE_RULE} {title} {NOTICE_RULE}"
+        block = "\n".join([head, *lines, self._rule_matching(head)])
+        self.ui.log_output.append(
+            f'<span style="color: {colors["notice"]}; font-weight: bold;">'
+            f'{self._as_html(block)}</span>')
+        self._scroll_log_to_end()
+
+    def _rule_matching(self, head: str) -> str:
+        """head와 같은 폭으로 보이는 괘선을 만든다.
+
+        글자 수로 세면 어긋난다. 괘선은 전각이고 제목 양옆 공백은 반각이라,
+        같은 개수를 찍으면 닫는 줄이 여는 줄보다 넓어진다.
+        """
+        metrics = self.ui.log_output.fontMetrics()
+        dash_width = metrics.horizontalAdvance("─") or 1
+        count = max(1, round(metrics.horizontalAdvance(head) / dash_width))
+        return "─" * count
+
+    @staticmethod
+    def _as_html(text: str) -> str:
+        """로그 한 덩어리를 서식 있는 텍스트로 바꾼다.
+
+        QTextEdit은 span 안의 줄바꿈 문자를 그냥 공백으로 흘려버린다. 이걸 넣지
+        않으면 여러 줄짜리 메시지가 한 줄로 이어붙는다.
+        """
+        return escape(text).replace("\n", "<br>")
+
+    def _scroll_log_to_end(self):
+        scrollbar = self.ui.log_output.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def clear_log(self): self.ui.log_output.clear()
 
@@ -350,11 +677,24 @@ class MainWindow(QMainWindow):
         self.history_store.remove(url); self.history_store.save(); self.refresh_history_list(); self.append_log(f"[알림] 기록에서 제거됨: {url}")
 
     def refresh_fav_list(self):
+        """검색어에 걸리는 즐겨찾기만 다시 그린다.
+
+        기록 탭과 같은 방식이다. 항목을 숨기는 대신 목록을 새로 채운다.
+        GridListWidget은 항목 폭으로 열을 나누므로, 다 채운 뒤 relayout()으로
+        지금 폭에 맞는 크기를 다시 먹여야 열이 어긋나지 않는다.
+        """
+        search_term = self.ui.fav_search_input.text().strip().lower()
         self.ui.fav_list.clear()
+        column_width = self.ui.fav_list.column_width()
         for url, meta in self.fav_store.sorted_entries():
+            if search_term and (search_term not in (meta.get("title") or "").lower()
+                                and search_term not in url.lower()):
+                continue
             item = QListWidgetItem(); widget = FavoriteItemWidget(url, meta, self.config.get("theme", "light"))
-            item.setSizeHint(widget.sizeHint()); item.setData(Qt.ItemDataRole.UserRole, url)
+            item.setSizeHint(QSize(column_width, FavoriteItemWidget.CARD_HEIGHT))
+            item.setData(Qt.ItemDataRole.UserRole, url)
             self.ui.fav_list.addItem(item); self.ui.fav_list.setItemWidget(item, widget)
+        self.ui.fav_list.relayout()
 
     def add_favorite(self):
         MAX_FAVORITES = 20
@@ -375,6 +715,7 @@ class MainWindow(QMainWindow):
 
         self.fav_store.add(url)
         self.ui.fav_input.clear()
+        self.ui.fav_search_input.clear()
         self.refresh_fav_list()
         self.append_log(f"[즐겨찾기] 추가됨: {url}. 시리즈 제목 확인 중...")
         self.series_parser.parse('fav-add-check', [url])
@@ -447,30 +788,45 @@ class MainWindow(QMainWindow):
             widget.reset_for_retry()
         self.download_manager.add_task(url)
 
-# 본문 서체. 나열 순서가 곧 글리프 폴백 우선순위다.
-# Pretendard Variable에는 한자가 없어서(한글/라틴/가나만 보유) 일본어 제목의
-# 한자(第3話 등)를 같은 디자인 계열인 Pretendard JP가 이어받는다.
 FONT_DIR = Path("assets") / "fonts"
 UI_FONT_FILES = [
     FONT_DIR / "PretendardVariable.ttf",
     FONT_DIR / "PretendardJP-Regular.ttf",
 ]
-# 수치용 고정폭. 등록만 하고, 적용은 qss.py의 고정폭 스택이 패밀리명으로 한다.
 MONO_FONT_FILES = [FONT_DIR / "JetBrainsMono-Regular.ttf"]
-# 번들 서체가 하나도 등록되지 않아도 앱이 읽히도록 남겨두는 시스템 서체.
-UI_FONT_FALLBACKS = ["Yu Gothic UI", "Malgun Gothic", "Segoe UI"]
 
-# 글자 렌더링 옵션. tools/font_preview.py 로 조합을 눈으로 비교한 뒤 여기만 바꾸면 된다.
-#   PreferFullHinting     - 획을 픽셀 격자에 강하게 맞춘다. 세로획 굵기는 균일해지지만
-#                           곡선과 사선이 각져 보여 '계단 현상'으로 읽힐 수 있다.
-#   PreferVerticalHinting - 세로 방향만 맞춘다. 위 둘의 절충.
-#   PreferNoHinting       - 원래 외곽선을 그대로 둔다. 부드럽지만 획 굵기가 덜 균일하다.
-# StyleStrategy를 지정하지 않으면 Windows의 ClearType 설정을 그대로 따른다.
-# 눈으로 비교해 고른 조합(tools/font_preview.py 5번).
-# FullHinting은 세로획 굵기를 균일하게 만드는 대신 곡선과 사선을 각지게 꺾어
-# '계단 현상'으로 읽혔다. 힌팅을 끄면 외곽선이 원래 설계대로 부드럽게 남는다.
 UI_FONT_HINTING = QFont.HintingPreference.PreferNoHinting
 UI_FONT_STYLE_STRATEGY = QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
+
+
+class FontRenderingGuard(QObject):
+    """스타일시트가 새로 만든 폰트에 글자 렌더링 설정을 다시 입힌다.
+
+    QSS에 font 속성이 있으면 Qt는 그 값으로 QFont를 새로 만든다. 그런데
+    QApplication.setFont()에 걸어 둔 힌팅과 안티앨리어싱 설정은 그 새 폰트로
+    따라오지 않는다. QListWidget처럼 항목을 델리게이트가 직접 그리는 위젯에서
+    특히 그렇고, 그대로 두면 기본 힌팅으로 그려져 글자가 자글자글해진다.
+
+    스타일이 폰트를 갈아끼우는 시점은 Polish가 아니라 그 뒤에 오는 FontChange다.
+    QListWidget에서 이벤트 순서를 찍어 보면 Polish까지는 설정이 살아 있다가
+    직후 FontChange에서 기본값으로 덮인다. 그래서 세 시점을 모두 본다.
+
+    고칠 때는 위젯의 현재 폰트를 가져와 두 속성만 바꾼다. QSS가 정한 서체와
+    크기는 그대로 두고 렌더링 방식만 되돌리기 위해서다. 이미 규칙대로면 손대지
+    않으므로, 우리가 부른 setFont가 다시 FontChange를 부르며 도는 일은 없다.
+    """
+
+    WATCHED = (QEvent.Type.Polish, QEvent.Type.FontChange, QEvent.Type.StyleChange)
+
+    def eventFilter(self, obj, event):
+        if event.type() in self.WATCHED and isinstance(obj, QWidget):
+            font = obj.font()
+            if (font.hintingPreference() != UI_FONT_HINTING
+                    or font.styleStrategy() != UI_FONT_STYLE_STRATEGY):
+                font.setHintingPreference(UI_FONT_HINTING)
+                font.setStyleStrategy(UI_FONT_STYLE_STRATEGY)
+                obj.setFont(font)
+        return super().eventFilter(obj, event)
 
 
 def register_font(path: Path) -> List[str]:
@@ -503,8 +859,8 @@ def setup_translations(app: QApplication) -> None:
     try:
         translator = QTranslator(app)
         candidates = [
-            str(get_resource_path(Path("translations"))),          # 번들
-            QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath),  # 개발 환경
+            str(get_resource_path(Path("translations"))),
+            QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath),
         ]
         for directory in candidates:
             if translator.load(QLocale.system(), "qtbase", "_", directory):
@@ -525,7 +881,6 @@ def setup_app_font(app: QApplication) -> None:
     for font_file in UI_FONT_FILES:
         registered = register_font(font_file)
         if registered:
-            # [0]은 가변 폰트의 기본 패밀리명("Pretendard Variable")이다.
             families.append(registered[0])
     for font_file in MONO_FONT_FILES:
         register_font(font_file)
@@ -535,14 +890,13 @@ def setup_app_font(app: QApplication) -> None:
 
     try:
         font = QFont()
-        font.setFamilies(families + UI_FONT_FALLBACKS)
-        # 분수 배율(예: 150% = devicePixelRatio 1.5) 화면에서 기본 힌팅은 획을
-        # 픽셀 격자에 불균일하게 스냅해, 한 글자 안에서 획 굵기가 2px/3px로
-        # 갈리고 윤곽이 자글거린다. 전체 힌팅은 모든 획을 같은 폭으로 맞춘다.
+        font.setFamilies(families + list(UI_FONT_FALLBACKS))
         font.setHintingPreference(UI_FONT_HINTING)
         if UI_FONT_STYLE_STRATEGY is not None:
             font.setStyleStrategy(UI_FONT_STYLE_STRATEGY)
         app.setFont(font)
+        app._font_guard = FontRenderingGuard(app)
+        app.installEventFilter(app._font_guard)
     except Exception as e:
         print(f"WARNING: 기본 서체 지정에 실패했습니다: {e}. Qt 기본값을 사용합니다.")
 

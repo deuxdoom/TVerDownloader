@@ -1,16 +1,14 @@
-# src/dialogs.py
-
 from __future__ import annotations
-from pathlib import Path
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QStackedWidget, QWidget, QFileDialog, QDialogButtonBox,
     QListWidget, QListWidgetItem, QAbstractItemView,
     QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame, QComboBox,
-    QFormLayout, QGroupBox
+    QFormLayout, QGroupBox, QGridLayout, QKeySequenceEdit
 )
+from src import shortcuts
 from src.icons import get_icon
 from src.message import confirm
 from src.qss import palette
@@ -19,8 +17,6 @@ from src.widgets import THUMBNAIL_CACHE_DIR
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
-# 파일명 미리보기에 쓰는 실제 방송 예시(아메토크). 항목을 켜고 끌 때
-# 어떤 조각이 붙고 빠지는지 바로 보이도록 구성 요소 이름 대신 실제 값을 보여준다.
 PREVIEW_SAMPLES = {
     "series": "アメトーーク！",
     "upload_date": "20260807",
@@ -37,8 +33,6 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("설정")
         self.setMinimumSize(760, 580)
 
-        # 좌측 세로 내비게이션 + 우측 스택 (UI_REDESIGN.md 6항).
-        # 각 페이지를 만드는 _create_*_tab 본문은 그대로 두고 담는 그릇만 바꿨다.
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -52,13 +46,13 @@ class SettingsDialog(QDialog):
         right = QVBoxLayout()
         right.setContentsMargins(20, 16, 20, 16)
         right.setSpacing(12)
-        # 어디에 있는지 항상 보이도록 현재 섹션명을 우측 상단에 되풀이한다.
         self.section_title = QLabel(objectName="SectionTitle")
         right.addWidget(self.section_title)
         self.pages = QStackedWidget()
         right.addWidget(self.pages, 1)
 
         self._create_general_tab()
+        self._create_shortcuts_tab()
         self._create_filename_tab()
         self._create_quality_tab()
         self._create_subtitle_tab()
@@ -83,7 +77,7 @@ class SettingsDialog(QDialog):
         colors = palette(self._theme)
         normal = get_icon(icon_name, colors["text_dim"], 18).pixmap(18, 18)
         selected = get_icon(icon_name, colors["ctx_settings"], 18).pixmap(18, 18)
-        icon = QIcon(normal)   # 캐시된 QIcon을 직접 건드리지 않도록 새로 만든다
+        icon = QIcon(normal)
         if not selected.isNull():
             icon.addPixmap(selected, QIcon.Mode.Selected)
         return icon
@@ -143,9 +137,8 @@ class SettingsDialog(QDialog):
         dl_count_group = QWidget(); dl_count_layout = QHBoxLayout(dl_count_group); dl_count_layout.setContentsMargins(0,0,0,0)
         dl_count_layout.addWidget(QLabel("최대 동시 다운로드 개수:"))
         self.concurrent_spinbox = QSpinBox(objectName="StepperSpinBox")
-        self.concurrent_spinbox.setRange(1, PARALLEL_MAX) # 수정: PARALLEL_MAX 적용
+        self.concurrent_spinbox.setRange(1, PARALLEL_MAX)
         self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 5))
-        # 위/아래 화살표가 작아 누르기 불편해서 위젯 자체를 키운다.
         self.concurrent_spinbox.setMinimumSize(96, 36)
         dl_count_layout.addWidget(self.concurrent_spinbox); dl_count_layout.addStretch(1); layout.addWidget(dl_count_group)
 
@@ -161,7 +154,105 @@ class SettingsDialog(QDialog):
             if key == current_close: radio.setChecked(True)
         close_layout.addLayout(close_radio_layout); layout.addWidget(close_group)
 
+        clip_group = QWidget(); clip_layout = QVBoxLayout(clip_group); clip_layout.setContentsMargins(0, 0, 0, 0)
+        clip_layout.setSpacing(10)
+        clip_layout.addWidget(QLabel("클립보드:"))
+        self.clipboard_watch_checkbox = QCheckBox("TVer 주소를 복사하면 입력창에 자동으로 넣기")
+        self.clipboard_watch_checkbox.setChecked(self.config.get("clipboard_watch", False))
+        self.clipboard_watch_checkbox.setToolTip(
+            "TVer 주소를 복사하면 위쪽 입력창에 자동으로 채워 넣습니다.\n"
+            "다운로드가 저절로 시작되지는 않고, 입력창에 이미 내용이 있으면 건드리지 않습니다.\n"
+            "TVer 주소가 아닌 클립보드 내용은 어디로도 보내지 않습니다.\n"
+            "꺼 두면 클립보드를 아예 감시하지 않습니다."
+        )
+        clip_layout.addWidget(self.clipboard_watch_checkbox); layout.addWidget(clip_group)
+
         layout.addStretch(1); self._add_page(tab, "일반", "settings")
+
+    SHORTCUT_EDIT_WIDTH = 190
+    """조합 입력칸 폭. 'Ctrl+Shift+F12'까지 잘리지 않는다."""
+
+    def _create_shortcuts_tab(self):
+        """동작마다 조합 입력칸을 하나씩 놓는다.
+
+        QKeySequenceEdit는 눌린 키를 그대로 받아 적는다. 조합을 글자로 적게 하면
+        'Ctrl + L'인지 'Control+l'인지부터 헷갈리고, 그 키가 실제로 눌리는 키인지
+        확인할 방법도 없다.
+
+        빈 칸 안내 문구는 Qt가 자기 번역에서 넣는다(setup_translations). 직접
+        바꿔 봐야 QKeySequenceEdit가 상태를 되돌릴 때마다 원래 문구로 덮인다.
+        """
+        tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(12)
+        guide = QLabel("입력칸을 누른 뒤 원하는 키를 누르면 바뀝니다. "
+                       "칸을 비우면 그 단축키는 사용하지 않습니다.")
+        guide.setWordWrap(True)
+        layout.addWidget(guide)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12); grid.setVerticalSpacing(4)
+        grid.setColumnStretch(0, 1)
+        self.shortcut_edits: dict[str, QKeySequenceEdit] = {}
+        current = shortcuts.resolve(self.config)
+        for index, definition in enumerate(shortcuts.SHORTCUT_DEFS):
+            row = index * 2
+            editor = QKeySequenceEdit(QKeySequence(current[definition.key]))
+            editor.setMaximumSequenceLength(1)
+            editor.setClearButtonEnabled(True)
+            editor.setFixedWidth(self.SHORTCUT_EDIT_WIDTH)
+            editor.setToolTip(definition.hint)
+            editor.keySequenceChanged.connect(self._sync_shortcut_warning)
+            hint = QLabel(definition.hint, objectName="PaneSubtitle")
+            hint.setWordWrap(True)
+            grid.addWidget(QLabel(definition.label), row, 0)
+            grid.addWidget(editor, row, 1)
+            grid.addWidget(hint, row + 1, 0, 1, 2)
+            self.shortcut_edits[definition.key] = editor
+        layout.addLayout(grid)
+
+        self.shortcut_warning = QLabel(objectName="ShortcutWarning")
+        self.shortcut_warning.setWordWrap(True)
+        layout.addWidget(self.shortcut_warning)
+
+        note = QLabel("Ctrl·Alt 없이 쓰는 조합은 글자를 입력하는 동안에는 동작하지 않습니다.",
+                      objectName="PaneSubtitle")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        button_row = QHBoxLayout()
+        self.shortcut_reset_button = QPushButton("기본값으로 되돌리기")
+        self.shortcut_reset_button.clicked.connect(self._reset_shortcuts)
+        button_row.addWidget(self.shortcut_reset_button); button_row.addStretch(1)
+        layout.addLayout(button_row)
+
+        layout.addStretch(1)
+        self._sync_shortcut_warning()
+        self._add_page(tab, "단축키", "nav_shortcut")
+        self._shortcut_page_row = self.nav.count() - 1
+
+    def _shortcut_table(self) -> dict[str, str]:
+        """입력칸에 적힌 조합을 저장 표기로 모은다."""
+        return {key: shortcuts.normalize(editor.keySequence().toString())
+                for key, editor in self.shortcut_edits.items()}
+
+    def _sync_shortcut_warning(self):
+        """겹치는 조합이 있으면 고치는 자리에서 바로 알린다.
+
+        저장할 때만 알리면 어느 칸이 문제인지 되짚어야 한다.
+        """
+        clashes = shortcuts.conflicts(self._shortcut_table())
+        if not clashes:
+            self.shortcut_warning.setText("")
+            return
+        lines = ["같은 조합을 나눠 쓰고 있습니다. 이대로면 눌러도 어느 쪽도 동작하지 않습니다."]
+        for text, keys in clashes:
+            labels = " · ".join(shortcuts.DEF_BY_KEY[key].label for key in keys)
+            lines.append(f"{shortcuts.display(text)} → {labels}")
+        self.shortcut_warning.setText("\n".join(lines))
+
+    def _reset_shortcuts(self):
+        for key, editor in self.shortcut_edits.items():
+            editor.setKeySequence(QKeySequence(shortcuts.DEF_BY_KEY[key].default))
+        self._sync_shortcut_warning()
 
     def _create_filename_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(8)
@@ -169,12 +260,9 @@ class SettingsDialog(QDialog):
 
         self.order_list = QListWidget()
         self.order_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        # 화살표 버튼 대신 끌어놓기로 순서를 바꾼다.
         self.order_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.order_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.order_list.setDropIndicatorShown(True)
-        # 행 "위"가 아니라 행 "사이"로만 떨어지게 한다. 이게 없으면 드롭 지점의
-        # 항목을 덮어써서 구성 요소 하나가 사라지고 다른 하나가 중복된다.
         self.order_list.setDragDropOverwriteMode(False)
         self.order_list.setStyleSheet("QListWidget::item{ padding:6px 8px; }")
         fm = self.order_list.fontMetrics(); row_h = max(28, fm.height() + 12)
@@ -185,7 +273,6 @@ class SettingsDialog(QDialog):
         for key in current_order:
             if key not in self.part_names: continue
             item = QListWidgetItem(self.part_names[key]); item.setData(ROLE_KEY, key)
-            # ItemIsDropEnabled를 빼야 항목 위로 떨어지지 않는다(덮어쓰기 방지).
             item.setFlags(
                 (item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsDragEnabled)
                 & ~Qt.ItemFlag.ItemIsDropEnabled
@@ -193,8 +280,6 @@ class SettingsDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked if parts_cfg.get(key, True) else Qt.CheckState.Unchecked)
             item.setSizeHint(QSize(0, row_h)); self.order_list.addItem(item)
 
-        # 목록 높이를 내용에 맞춘다. 늘어나게 두면 항목 아래로 빈 공간이 크게 남아
-        # 미리보기가 저 아래에 동떨어져 보인다.
         self.order_list.setFixedHeight(
             self.order_list.count() * row_h + self.order_list.frameWidth() * 2 + 4
         )
@@ -203,15 +288,13 @@ class SettingsDialog(QDialog):
         pv = QVBoxLayout(); pv.setSpacing(4)
         pv.addWidget(QLabel("파일명 미리보기:"))
         self.preview_label = QLabel(objectName="FilenamePreview")
-        self.preview_label.setWordWrap(True)     # 실제 제목이 길어 한 줄에 안 들어간다
+        self.preview_label.setWordWrap(True)
         self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         pv.addWidget(self.preview_label)
         layout.addLayout(pv)
         layout.addStretch(1)
 
         self.order_list.itemChanged.connect(self._update_preview)
-        # 끌어놓기 결과도 미리보기에 반영한다. Qt 구현에 따라 rowsMoved 대신
-        # 제거 후 삽입으로 처리되는 경우가 있어 둘 다 연결한다.
         self.order_list.model().rowsMoved.connect(self._update_preview)
         self.order_list.model().rowsInserted.connect(self._update_preview)
         self._update_preview()
@@ -229,7 +312,7 @@ class SettingsDialog(QDialog):
 
     def _create_quality_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
-        
+
         q_groupbox = QWidget(); q_layout = QVBoxLayout(q_groupbox); q_layout.setContentsMargins(0,0,0,0)
         q_layout.addWidget(QLabel("다운로드 화질 선택:"))
         q_radio_layout = QVBoxLayout(); q_radio_layout.setSpacing(10); self.quality_button_group = QButtonGroup(self)
@@ -240,7 +323,6 @@ class SettingsDialog(QDialog):
             if key == current_quality: radio.setChecked(True)
         q_layout.addLayout(q_radio_layout); layout.addWidget(q_groupbox)
 
-        # 수정: 라디오 버튼 4개 -> 콤보박스 1개 (공간 절약, 하단 '코덱 변환 가속'과 UI 통일)
         c_groupbox = QWidget(); c_layout = QVBoxLayout(c_groupbox); c_layout.setContentsMargins(0,0,0,0)
         c_layout.addWidget(QLabel("선호 코덱 (재인코딩):"))
         self.codec_combo = QComboBox()
@@ -284,32 +366,32 @@ class SettingsDialog(QDialog):
         quality_layout.setContentsMargins(0, 5, 0, 5)
         quality_layout.setSpacing(10)
         quality_layout.addRow(QLabel("상세 품질 설정 (숫자가 낮을수록 고품질)"))
-        
+
         self.q_cpu_h264_crf = QSpinBox()
         self.q_cpu_h264_crf.setRange(0, 51)
-        self.q_cpu_h264_crf.setValue(self.config.get("quality_cpu_h264_crf", 26)) 
+        self.q_cpu_h264_crf.setValue(self.config.get("quality_cpu_h264_crf", 26))
         quality_layout.addRow("CPU H.264 CRF (권장: 26):", self.q_cpu_h264_crf)
-        
+
         self.q_cpu_h265_crf = QSpinBox()
         self.q_cpu_h265_crf.setRange(0, 51)
-        self.q_cpu_h265_crf.setValue(self.config.get("quality_cpu_h265_crf", 31)) 
+        self.q_cpu_h265_crf.setValue(self.config.get("quality_cpu_h265_crf", 31))
         quality_layout.addRow("CPU H.265 CRF (권장: 31):", self.q_cpu_h265_crf)
-        
+
         self.q_cpu_vp9_crf = QSpinBox()
         self.q_cpu_vp9_crf.setRange(0, 63)
-        self.q_cpu_vp9_crf.setValue(self.config.get("quality_cpu_vp9_crf", 36)) 
+        self.q_cpu_vp9_crf.setValue(self.config.get("quality_cpu_vp9_crf", 36))
         quality_layout.addRow("CPU VP9 CRF (권장: 36):", self.q_cpu_vp9_crf)
-        
+
         self.q_cpu_av1_crf = QSpinBox()
         self.q_cpu_av1_crf.setRange(0, 63)
-        self.q_cpu_av1_crf.setValue(self.config.get("quality_cpu_av1_crf", 41)) 
+        self.q_cpu_av1_crf.setValue(self.config.get("quality_cpu_av1_crf", 41))
         quality_layout.addRow("CPU AV1 CRF (권장: 41):", self.q_cpu_av1_crf)
-        
+
         self.q_gpu_cq = QSpinBox()
         self.q_gpu_cq.setRange(0, 51)
-        self.q_gpu_cq.setValue(self.config.get("quality_gpu_cq", 30)) 
+        self.q_gpu_cq.setValue(self.config.get("quality_gpu_cq", 30))
         quality_layout.addRow("GPU CQ/CQP (권장: 30):", self.q_gpu_cq)
-        
+
         layout.addWidget(quality_group)
         self._crf_group = quality_group
         self.codec_combo.currentIndexChanged.connect(self._sync_codec_dependent_state)
@@ -329,31 +411,31 @@ class SettingsDialog(QDialog):
         layout.addWidget(line)
 
         self.embed_subs_checkbox = QCheckBox("자막을 동영상 파일에 병합 (Embed)")
-        self.embed_subs_checkbox.setChecked(self.config.get("embed_subtitles", True))
+        self.embed_subs_checkbox.setChecked(self.config.get("embed_subtitles", False))
         layout.addWidget(self.embed_subs_checkbox)
 
         self.sub_fmt_groupbox = QGroupBox("별도 파일 저장 시 포맷")
         sub_fmt_layout = QVBoxLayout(self.sub_fmt_groupbox)
         sub_fmt_layout.setSpacing(10)
-        
+
         self.subtitle_format_button_group = QButtonGroup(self)
         self.sub_format_vtt = QRadioButton("VTT (원본)")
         self.sub_format_vtt.setProperty("config_value", "vtt")
         self.sub_format_srt = QRadioButton("SRT (변환, 호환성 좋음)")
         self.sub_format_srt.setProperty("config_value", "srt")
-        
+
         self.subtitle_format_button_group.addButton(self.sub_format_vtt)
         self.subtitle_format_button_group.addButton(self.sub_format_srt)
-        
+
         sub_fmt_layout.addWidget(self.sub_format_vtt)
         sub_fmt_layout.addWidget(self.sub_format_srt)
-        
+
         current_sub_format = self.config.get("subtitle_format", "vtt")
         if current_sub_format == "srt":
             self.sub_format_srt.setChecked(True)
         else:
             self.sub_format_vtt.setChecked(True)
-            
+
         layout.addWidget(self.sub_fmt_groupbox)
 
         def update_ui_state():
@@ -370,7 +452,7 @@ class SettingsDialog(QDialog):
 
     def _create_advanced_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
-        
+
         conv_groupbox = QWidget(); conv_v_layout = QVBoxLayout(conv_groupbox); conv_v_layout.setContentsMargins(0,0,0,0)
         conv_v_layout.addWidget(QLabel("다운로드 후 변환 (컨테이너):"))
         self.conversion_button_group = QButtonGroup(self); conv_radio_layout = QVBoxLayout(); conv_radio_layout.setSpacing(10)
@@ -396,7 +478,15 @@ class SettingsDialog(QDialog):
         exclude_v_layout.addWidget(self.exclude_keywords_edit)
         layout.addWidget(exclude_groupbox)
 
-        # 수정: TLS 인증서 검증은 기본 활성화. 인증서 오류가 나는 환경에서만 해제할 수 있도록 노출.
+        self.embed_thumbnail_checkbox = QCheckBox("영상 파일에 썸네일 포함 (탐색기·플레이어 미리보기)")
+        self.embed_thumbnail_checkbox.setChecked(self.config.get("embed_thumbnail", False))
+        self.embed_thumbnail_checkbox.setToolTip(
+            "yt-dlp에 --embed-thumbnail 옵션을 전달해 표지 그림을 mp4 안에 넣습니다.\n"
+            "앱 목록의 썸네일과 달리 탐색기와 외부 플레이어에서도 미리보기가 보입니다.\n"
+            "포함에 실패해도 영상 다운로드 자체는 그대로 완료됩니다."
+        )
+        layout.addWidget(self.embed_thumbnail_checkbox)
+
         self.ignore_ssl_checkbox = QCheckBox("SSL 인증서 검증 건너뛰기 (연결 오류 시에만 사용)")
         self.ignore_ssl_checkbox.setChecked(self.config.get("ignore_ssl_errors", False))
         self.ignore_ssl_checkbox.setToolTip(
@@ -439,18 +529,28 @@ class SettingsDialog(QDialog):
         if folder: self.folder_path_edit.setText(folder)
 
     def _save_settings(self):
+        shortcut_table = self._shortcut_table()
+        if shortcuts.conflicts(shortcut_table):
+            self.nav.setCurrentRow(self._shortcut_page_row)
+            self._sync_shortcut_warning()
+            QMessageBox.warning(self, "단축키 충돌",
+                                "같은 조합을 두 동작이 나눠 쓰고 있습니다.\n"
+                                "겹치는 조합을 고친 뒤 다시 저장해 주세요.")
+            return
+        self.config[shortcuts.CONFIG_KEY] = shortcut_table
         self.config["download_folder"] = self.folder_path_edit.text()
         self.config["max_concurrent_downloads"] = self.concurrent_spinbox.value()
         if self.close_action_group.checkedButton():
             self.config["close_action"] = self.close_action_group.checkedButton().property("config_value")
+        self.config["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
-        
+
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
-        self.config["preferred_codec"] = self.codec_combo.currentData()  # 수정: 콤보박스에서 값 읽기
+        self.config["preferred_codec"] = self.codec_combo.currentData()
         self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
         self.config["quality_cpu_h264_crf"] = self.q_cpu_h264_crf.value()
         self.config["quality_cpu_h265_crf"] = self.q_cpu_h265_crf.value()
@@ -465,11 +565,11 @@ class SettingsDialog(QDialog):
 
         if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
         self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
+        self.config["embed_thumbnail"] = self.embed_thumbnail_checkbox.isChecked()
         self.config["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()
         keywords_str = self.exclude_keywords_edit.text()
         self.config["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
-        
-        # 수정: 저장 실패를 조용히 넘기지 않고 사용자에게 알림
+
         if not save_config(self.config):
             QMessageBox.warning(
                 self, "설정 저장 실패",

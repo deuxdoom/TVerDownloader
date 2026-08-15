@@ -1,10 +1,3 @@
-# src/favorites_store.py
-# 수정:
-# - 데이터 구조에 "title" 필드 추가
-# - add: title을 빈 문자열로 초기화
-# - load: title 필드를 로드 (없을 경우 빈 문자열)
-# - touch_last_check: series_title을 선택적으로 받아 업데이트
-
 from __future__ import annotations
 
 import json
@@ -18,9 +11,8 @@ def _now_str() -> str:
 
 
 class FavoritesStore:
-    def __init__(self, path: str, *, related_history_path: Optional[str] = None):
+    def __init__(self, path: str):
         self.path = path
-        self.related_history_path = related_history_path
         self._data: Dict[str, Dict[str, str]] = {}
 
     def load(self) -> None:
@@ -41,18 +33,16 @@ class FavoritesStore:
                     continue
                 added = ""
                 last = ""
-                title = "" # ✅ title 변수
+                title = ""
                 if isinstance(meta, dict):
                     a = meta.get("added") or meta.get("added_at") or meta.get("created") or ""
                     l = meta.get("last_check") or meta.get("checked_at") or ""
-                    t = meta.get("title", "") # ✅ title 로드
+                    t = meta.get("title", "")
                     added = str(a) if isinstance(a, (str, int, float)) else ""
                     last = str(l) if isinstance(l, (str, int, float)) else ""
                     title = str(t) if isinstance(t, str) else ""
-                # ✅ title 포함하여 저장
                 out[url] = {"added": added or _now_str(), "last_check": last, "title": title}
         elif isinstance(raw, list):
-            # (하위 호환성)
             for item in raw:
                 if isinstance(item, dict):
                     url = item.get("url") or item.get("href") or item.get("link")
@@ -60,7 +50,7 @@ class FavoritesStore:
                         out[url] = {
                             "added": item.get("added") or _now_str(),
                             "last_check": item.get("last_check") or "",
-                            "title": item.get("title", "") # ✅ title 로드
+                            "title": item.get("title", ""),
                         }
         self._data = out
 
@@ -105,7 +95,6 @@ class FavoritesStore:
         if not u:
             return
         if u not in self._data:
-            # ✅ title을 빈 문자열로 초기화
             self._data[u] = {"added": _now_str(), "last_check": "", "title": ""}
             self.save()
 
@@ -129,20 +118,16 @@ class FavoritesStore:
             return (meta.get("added") or "", url)
         return sorted(self._data.items(), key=key, reverse=False)
 
-    # ✅ series_title 인자 추가
     def touch_last_check(self, series_url: str, series_title: Optional[str] = None) -> None:
         u = (series_url or "").strip()
         if not u:
             return
-            
+
         now = _now_str()
         if u not in self._data:
-            # 존재하지 않으면 자동으로 추가 후 기록
             self._data[u] = {"added": now, "last_check": now, "title": series_title or ""}
         else:
-            # 존재하면 업데이트
             self._data[u]["last_check"] = now
-            # ✅ 전달된 시리즈 제목이 있고, 기존 제목과 다를 경우에만 업데이트
             if series_title and self._data[u].get("title") != series_title:
                 self._data[u]["title"] = series_title
         self.save()

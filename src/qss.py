@@ -1,8 +1,24 @@
-# src/qss.py
-# UI_REDESIGN.md 1단계: 컬러 토큰 정리 + 버튼 위계 3단계 축소
-# UI_REDESIGN.md 2단계: 타입 스케일 (15/13/13/12/11px) + 수치용 고정폭
-
 from src.indicators import indicator_images
+
+UI_FONT_BUNDLED = ("Pretendard Variable", "Pretendard JP")
+"""assets/fonts에서 등록하는 번들 서체의 패밀리명."""
+
+UI_FONT_FALLBACKS = ("Yu Gothic UI", "Malgun Gothic", "Segoe UI")
+"""번들 등록이 실패해도 글자가 읽히도록 남겨 두는 시스템 서체."""
+
+UI_FONT_FAMILIES = UI_FONT_BUNDLED + UI_FONT_FALLBACKS
+"""본문 서체 스택. QApplication.setFont()와 같은 순서를 유지한다.
+
+setFont()로 지정한 폴백 목록은 위젯이 polish될 때 한 개로 뭉개진다. 그러면
+Pretendard JP가 빠져 일본어 한자가 맑은 고딕으로 그려진다. QListWidget처럼
+항목을 델리게이트가 직접 그리는 위젯에서 특히 눈에 띈다. QSS에 이름을 적어 두면
+polish 이후에도 스택이 그대로 남는다.
+"""
+
+UI_FONT_STACK = ", ".join(f'"{name}"' for name in UI_FONT_FAMILIES)
+
+SCROLLBAR_WIDTH = 10
+"""스크롤바 두께. 목록의 칸 폭 계산이 이 값을 통해 뷰포트 폭에 반영된다."""
 
 
 def blend(fg: str, bg: str, ratio: float) -> str:
@@ -19,33 +35,30 @@ def palette(theme: str = "dark") -> dict:
     """
     if theme == "light":
         colors = {
-            "bg": "#F2F4F7",            # 앱 배경
-            "bg_alt": "#E7ECF2",        # hover, 살짝 눌린 면
-            "surface": "#FFFFFF",       # 카드·패널 표면
+            "bg": "#F2F4F7",
+            "bg_alt": "#E7ECF2",
+            "surface": "#FFFFFF",
             "border": "#DDE3EA",
-            "border_strong": "#C4CDD8", # 입력창처럼 존재감이 필요한 테두리
+            "border_strong": "#C4CDD8",
             "text": "#1B2430",
             "text_dim": "#66748A",
-            "accent": "#00808F",        # 浅葱(아사기) — 포커스, 체크, 링크 등 일반 상호작용
+            "accent": "#00808F",
             "accent_hover": "#00707D",
-            "accent_press": "#005F6A",
             "accent_soft": "#B9D6DB",
-            "accent_dim": "#4D9CA6",
-            # 1차 동작(다운로드·저장) 전용. 여기만 밝은 파랑을 쓴다.
             "primary": "#0FB0E6",
             "primary_hover": "#0C9AC9",
             "primary_press": "#0A83AB",
-            "primary_fg": "#FFFFFF",    # 라이트에서는 흰 글자
-            "log_success": "#00808F",   # 로그의 완료/성공 문구 (浅葱 계열)
-            "progress": "#6E5FA8",      # 藤(후지) — 진행 중. 선택 하이라이트와 색 계열을 분리한다
-            # 탭별 포인트 컬러. 서로 다른 화면에만 나타나 한 번에 둘 이상 보이지 않는다.
-            "ctx_download": "#6E5FA8",   # 藤 — 다운로드
-            "ctx_history": "#9A7A15",    # 기록 (다크의 #FFF3C5를 라이트용으로 낮춘 값)
-            "ctx_favorites": "#D24A44",  # 즐겨찾기 (다크의 #FF6F69 대응)
-            "ctx_settings": "#3F8F72",   # 설정 (다크의 #96CEB4 대응)
-            "accent_fg": "#FFFFFF",     # accent 채움 위 글자색
-            "warn": "#B8860B",          # 黄檗(키하다) — 4단계 편성 스트립에서 사용 예정
-            "danger": "#9B3B47",        # 蘇芳(스오)
+            "primary_fg": "#FFFFFF",
+            "log_success": "#00808F",
+            "notice": "#A94442",
+            "warn": "#B8860B",
+            "progress": "#6E5FA8",
+            "ctx_download": "#6E5FA8",
+            "ctx_history": "#9A7A15",
+            "ctx_favorites": "#D24A44",
+            "ctx_settings": "#3F8F72",
+            "accent_fg": "#FFFFFF",
+            "danger": "#9B3B47",
             "danger_hover": "#8A343F",
             "danger_fg": "#FFFFFF",
         }
@@ -60,21 +73,20 @@ def palette(theme: str = "dark") -> dict:
             "text_dim": "#8A97AA",
             "accent": "#2AB8C6",
             "accent_hover": "#45C6D2",
-            "accent_press": "#1F9AA6",
             "accent_soft": "#1B3A42",
-            "accent_dim": "#1E7C86",
             "primary": "#25C8FF",
             "primary_hover": "#52D6FF",
             "primary_press": "#0FA9DE",
             "primary_fg": "#04202B",
             "log_success": "#3FC9D6",
-            "progress": "#9B8BE0",      # 藤(후지) — 진행 중
-            "ctx_download": "#9B8BE0",   # 藤
+            "notice": "#FF9A94",
+            "warn": "#E0A93B",
+            "progress": "#9B8BE0",
+            "ctx_download": "#9B8BE0",
             "ctx_history": "#FFF3C5",
             "ctx_favorites": "#FF6F69",
             "ctx_settings": "#96CEB4",
-            "accent_fg": "#0E1620",     # 밝은 청록 위에는 어두운 글자가 대비를 확보한다
-            "warn": "#D9A22B",
+            "accent_fg": "#0E1620",
             "danger": "#D9636F",
             "danger_hover": "#E4808A",
             "danger_fg": "#10161F",
@@ -87,25 +99,18 @@ def build_qss(theme: str = "dark") -> str:
     colors = palette(theme)
     ind = indicator_images(theme, colors)
 
-    # 선택된 카드 배경. 원색으로 덮으면 글자가 묻히므로 표면 위에 옅게 섞는다.
     tint_dl = blend(colors["ctx_download"], colors["surface"], 0.18)
     tint_hi = blend(colors["ctx_history"], colors["surface"], 0.18)
     tint_fa = blend(colors["ctx_favorites"], colors["surface"], 0.18)
 
-    # 타입 스케일. UI_REDESIGN.md §2 기준값 + SCALE_BUMP.
-    # 문서 기준값(15/13/13/12/11)이 고해상도 모니터에서 작게 읽혀 한 단계 올렸다.
-    # 전체 크기를 조절하려면 SCALE_BUMP 하나만 바꾸면 위계는 그대로 유지된다.
     bump = 1
-    fs_title = 15 + bump   # 앱 헤더
-    fs_pane = 13 + bump    # 패널 제목
-    fs_card = 13 + bump    # 카드 제목
-    fs_body = 12 + bump    # 본문·라벨
-    fs_sub = 11 + bump     # 보조 정보
-    fs_num = 11 + bump     # 수치
+    fs_title = 15 + bump
+    fs_pane = 13 + bump
+    fs_card = 13 + bump
+    fs_body = 12 + bump
+    fs_sub = 11 + bump
+    fs_num = 11 + bump
 
-    # 수치(진행률·용량·속도)용 고정폭. JetBrains Mono를 번들하고, 등록에 실패하면
-    # Windows 기본 고정폭으로 내려간다.
-    # 뒤쪽 본문 서체는 같은 라벨에 섞이는 한글·한자용이다 — 고정폭 서체에는 없는 글자다.
     mono = '"JetBrains Mono", "Consolas", "Cascadia Mono", "Pretendard Variable", "Pretendard JP", "Malgun Gothic"'
 
     return f"""
@@ -113,6 +118,7 @@ def build_qss(theme: str = "dark") -> str:
     QWidget {{
         background: {colors["bg"]};
         color: {colors["text"]};
+        font-family: {UI_FONT_STACK};
         font-size: {fs_body}px;
     }}
     QMainWindow, QDialog {{ background: {colors["bg"]}; }}
@@ -316,6 +322,11 @@ def build_qss(theme: str = "dark") -> str:
     /* 설정창 우측 상단의 현재 섹션 이름 */
     #SectionTitle {{ font-size: {fs_title + 2}px; font-weight: 600; color: {colors["text"]}; }}
 
+    /* 단축키 설정 — 조합은 글자가 아니라 키라서, 로그·수치와 같은 고정폭으로 적는다.
+       'Ctrl+I'와 'Ctrl+L'이 같은 폭으로 보여야 목록을 훑을 때 줄이 흔들리지 않는다. */
+    QKeySequenceEdit QLineEdit {{ font-family: {mono}; font-size: {fs_body}px; }}
+    #ShortcutWarning {{ color: {colors["danger"]}; font-size: {fs_sub}px; }}
+
     /* 세그먼트 컨트롤 — 알약 배경 안에서 선택된 항목만 떠오른다 (UI_REDESIGN.md 4항).
        QTabWidget 구조는 그대로 두고 탭 바 모양만 다시 그린다. */
     #MainTabs::pane {{ border: none; }}
@@ -392,10 +403,48 @@ def build_qss(theme: str = "dark") -> str:
     QProgressBar#Progress::chunk {{ border-radius: 2px; background: {colors["progress"]}; }}
     QProgressBar#Progress[state="done"]::chunk {{ background: {blend(colors["ctx_download"], colors["surface"], 0.55)}; }}
     QProgressBar#Progress[state="error"]::chunk {{ background: {colors["danger"]}; }}
+    QProgressBar#Progress[state="warn"]::chunk {{ background: {colors["warn"]}; }}
 
     /* 구분선 */
     #Separator {{ background: {colors["border"]}; border: none; }}
 
     /* 로그 */
     #LogOutput {{ background: {colors["bg_alt"]}; border: 1px solid {colors["border"]}; border-radius: 8px; padding: 8px; }}
+
+    /* 스크롤바 — 기본 스크롤바는 화살표 버튼까지 달려 투박하다.
+       손잡이만 남긴 얇은 막대로 바꿔 어느 목록에서든 같은 모양으로 보이게 한다.
+       즐겨찾기 목록은 칸 폭을 일정하게 유지하려고 스크롤바를 늘 띄워 두므로,
+       스크롤할 것이 없을 때(손잡이가 홈을 꽉 채울 때)는 손잡이를 감춘다. */
+    QScrollBar:vertical {{
+        background: transparent;
+        width: {SCROLLBAR_WIDTH}px;
+        margin: 0px;
+    }}
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: {SCROLLBAR_WIDTH}px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {colors["border_strong"]};
+        border-radius: {SCROLLBAR_WIDTH // 2}px;
+        min-height: 36px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {colors["border_strong"]};
+        border-radius: {SCROLLBAR_WIDTH // 2}px;
+        min-width: 36px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
+        background: {colors["text_dim"]};
+    }}
+    QScrollBar::handle:vertical:disabled, QScrollBar::handle:horizontal:disabled {{
+        background: transparent;
+    }}
+    QScrollBar::add-line, QScrollBar::sub-line {{
+        width: 0px; height: 0px; border: none; background: none;
+    }}
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
     """

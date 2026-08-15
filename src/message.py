@@ -1,4 +1,3 @@
-# src/message.py
 """앱 팔레트를 따르는 확인 대화상자.
 
 QMessageBox.question() 같은 정적 함수는 버튼 문구를 바꿀 수 없어 Yes/No가 그대로
@@ -36,7 +35,6 @@ def confirm(parent: QWidget | None, title: str, text: str, *,
 
     yes_button = box.addButton(yes_text, QMessageBox.ButtonRole.YesRole)
     no_button = box.addButton(no_text, QMessageBox.ButtonRole.NoRole)
-    # 되돌릴 수 없는 동작은 '예'를 위험 버튼으로 보여 준다.
     yes_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(yes_button if default_yes else no_button)
 

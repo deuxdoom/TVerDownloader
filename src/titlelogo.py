@@ -1,4 +1,3 @@
-# src/titlelogo.py
 """헤더의 앱 이름을 그림 로고로 바꿔 준다.
 
 assets/logo/ 에는 언어 3종 × 테마 2종, 총 6개의 완성된 PNG가 들어 있다.
@@ -17,7 +16,6 @@ from typing import Dict, Optional, Tuple
 from PyQt6.QtCore import QLocale, Qt
 from PyQt6.QtGui import QImage, QPixmap
 
-# 헤더 높이(48px)에 맞춘 로고 높이. 원본 비율상 폭은 약 154px가 된다.
 LOGO_HEIGHT = 30
 
 LOGO_DIR = Path("assets") / "logo"
@@ -49,7 +47,7 @@ def build_logo(theme: str, height: int = LOGO_HEIGHT, dpr: float = 1.0,
     파일이 없거나 읽지 못하면 None을 돌려준다. 호출부는 글자 제목으로 되돌아가므로
     로고가 빠져도 앱은 그대로 쓸 수 있다.
     """
-    from src.utils import get_resource_path   # 순환 참조를 피해 지연 임포트
+    from src.utils import get_resource_path
 
     lang = language_code(language)
     key = (lang, theme, height, dpr)

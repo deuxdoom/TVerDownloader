@@ -1,4 +1,3 @@
-# tools/font_preview.py
 """글자 렌더링 옵션 조합을 한 화면에서 눈으로 비교한다.
 
     python tools/font_preview.py
@@ -28,7 +27,6 @@ from src.qss import build_qss, palette
 H = QFont.HintingPreference
 S = QFont.StyleStrategy
 
-# (표시 이름, 힌팅, 스타일 전략)  — 전략 None = Windows ClearType 설정을 그대로 따름
 COMBOS = [
     ("1. Full + Antialias|Quality  (현재 설정)", H.PreferFullHinting, S.PreferAntialias | S.PreferQuality),
     ("2. Full + 전략 미지정",                     H.PreferFullHinting, None),
@@ -39,7 +37,6 @@ COMBOS = [
     ("7. Default + 전략 미지정",                   H.PreferDefaultHinting, None),
 ]
 
-# 앱의 타입 스케일 (qss.py의 bump=1 기준)
 ROWS = [(13, 400, "본문 13/400"), (14, 500, "카드 14/500"), (16, 600, "헤더 16/600")]
 SAMPLE = "다운로드 완료  テスト番組 第3話  12.4MB/s"
 

@@ -1,25 +1,28 @@
-# src/about_dialog.py
-# QTextBrowser + 인라인 HTML 스타일을 걷어내고 일반 위젯으로 다시 구성했다.
-# 서체와 색은 전역 QSS를 그대로 따르고, 스크롤 없이 한 화면에 담긴다.
-
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialogButtonBox, QWidget, QFrame
 )
 from PyQt6.QtCore import Qt
-from src.icon import get_app_icon
+from src.appicon import get_app_icon
 from src.qss import palette
 from src.utils import open_developer_link, open_feedback_link, localized_app_name
 
-# 실제로 구현돼 있는 기능만 적는다.
 FEATURES = [
     "에피소드 · 시리즈 URL 분석과 다중 추가",
+    "주소 끌어다 놓기와 클립보드 자동 인식",
     "다운로드 대기열과 동시 다운로드 수 조절 (최대 20)",
     "즐겨찾기 시리즈 등록, 시작 시 신규 회차 자동 확인",
     "화질 선택, 코덱 재인코딩(GPU 가속), 자막 병합",
-    "사용자 정의 파일명 형식과 대역폭 제한",
+    "끌어놓기로 정렬하는 사용자 정의 파일명 형식",
+    "바꿔 쓸 수 있는 키보드 단축키",
     "썸네일 미리보기, 다운로드 기록, 트레이 최소화",
 ]
+"""정보 창에 한 줄씩 그대로 찍히는 목록.
+
+스크롤 영역이 없어서 줄이 늘면 창이 그만큼 길어진다. 항목을 더할 때는 줄 수와
+한 줄 길이를 함께 본다. 창 폭이 520px로 고정이라 여백을 뺀 478px를 넘는 문구는
+잘린다(줄바꿈하지 않는다).
+"""
 
 LINKS = [
     ("yt-dlp", "https://github.com/yt-dlp/yt-dlp"),
@@ -60,7 +63,6 @@ class AboutDialog(QDialog):
 
         root.addWidget(self._separator())
 
-        # QLabel 안의 <a>는 QSS로 색을 줄 수 없어 인라인으로 테마 색을 넣는다.
         anchor = f'color:{self._colors["accent"]}; text-decoration:none;'
         links_html = "  ·  ".join(
             f'<a href="{url}" style="{anchor}">{name}</a>' for name, url in LINKS
@@ -78,7 +80,6 @@ class AboutDialog(QDialog):
         root.addStretch(1)
         root.addLayout(self._build_buttons())
 
-    # ── 구성 요소 ─────────────────────────────────────────────────────────
     def _build_header(self, version: str) -> QHBoxLayout:
         header = QHBoxLayout()
         header.setSpacing(12)

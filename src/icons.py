@@ -1,8 +1,7 @@
-# src/icons.py
 """Fluent UI System Icons를 테마 색에 맞춰 QIcon으로 만들어 준다.
 
 원본 SVG는 fill="#212121"을 하드코딩하고 있어서, 이 값을 런타임에 테마 색으로
-치환한 뒤 렌더한다. 앱 아이콘(PNG)을 다루는 src/icon.py와는 별개 모듈이다.
+치환한 뒤 렌더한다. 앱 아이콘(PNG)을 다루는 src/appicon.py와는 별개 모듈이다.
 
 SVG 원문은 src/icons_data.py에 임베드돼 있다. 아이콘을 갈아끼우려면
 assets/icons/에 파일을 넣고 `python tools/gen_icons.py`를 다시 돌린다.
@@ -18,7 +17,6 @@ from PyQt6.QtWidgets import QApplication
 
 from src.icons_data import ICON_SVG
 
-# Fluent SVG가 하드코딩하는 fill 값. tools/gen_icons.py가 존재를 검사한다.
 FLUENT_FILL = "#212121"
 DEFAULT_SIZE = 18
 
@@ -61,15 +59,9 @@ def get_icon(name: str, color: str, size: int = DEFAULT_SIZE) -> QIcon:
     renderer = QSvgRenderer(QByteArray(recolor_svg(svg, color).encode("utf-8")))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    # 목표 사각형을 반드시 넘겨야 한다. 생략하면 아무것도 그려지지 않는다.
     renderer.render(painter, QRectF(0, 0, size, size))
     painter.end()
 
     icon = QIcon(pixmap)
     _cache[key] = icon
     return icon
-
-
-def clear_cache() -> None:
-    """테마 전환처럼 색이 바뀔 때 호출한다(캐시는 색을 키에 포함하므로 보통 불필요)."""
-    _cache.clear()

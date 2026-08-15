@@ -1,4 +1,3 @@
-# src/indicators.py
 """체크 표시, 라디오 점, 스핀박스 화살표를 그려 임시 PNG로 내보낸다.
 
 앱에 스타일시트가 걸리면 Qt는 QStyleSheetStyle로 넘어가고, 표시기(subcontrol)의
@@ -18,9 +17,7 @@ from typing import Dict
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
 
-# 표시기 한 변(논리 px). QSS의 indicator 크기와 맞춘다.
 BOX = 15
-# 스핀박스 화살표 크기(논리 px)
 ARROW_W, ARROW_H = 11, 7
 
 _dir: Path | None = None
@@ -117,7 +114,7 @@ def indicator_images(theme: str, colors: dict) -> Dict[str, str]:
             "arrow_up": _save(f"up_{theme}", _draw_chevron(1, arrow, True), _draw_chevron(2, arrow, True)),
             "arrow_down": _save(f"down_{theme}", _draw_chevron(1, arrow, False), _draw_chevron(2, arrow, False)),
         }
-    except Exception as e:  # 표시기가 없어도 앱은 돌아가야 한다
+    except Exception as e:
         print(f"WARNING: 표시기 이미지를 만들지 못했습니다: {e}")
         images = {"check": "", "dot": "", "arrow_up": "", "arrow_down": ""}
 

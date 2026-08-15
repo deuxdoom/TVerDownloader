@@ -1,7 +1,3 @@
-# src/threads/conversion_thread.py
-# 수정:
-# - _get_video_encoder_args: 로그 메시지에 실제 품질 값(CRF/CQ)을 표시하도록 변경
-
 import os
 import shutil
 import subprocess
@@ -18,7 +14,7 @@ class ConversionThread(QThread):
 
     def __init__(self, url: str, input_path: str, ffmpeg_path: str,
                  target_format: Optional[str], target_codec: Optional[str],
-                 delete_original: bool, hw_encoder_setting: str, 
+                 delete_original: bool, hw_encoder_setting: str,
                  quality_cfg: Dict[str, int], parent=None):
         super().__init__(parent)
         self.url = url
@@ -59,21 +55,20 @@ class ConversionThread(QThread):
             'vp9': (None, 'vp9_qsv', None, 'libvpx-vp9'),
             'av1': ('av1_nvenc', 'av1_qsv', 'av1_amf', 'libsvtav1')
         }
-        
+
         if self.target_codec not in codec_map:
             return ['-c:v', 'copy']
 
         encoders = codec_map[self.target_codec]
         args: List[str] = []
         encoder_name: Optional[str] = None
-        quality_val_str = "" # ✅ 로그 출력용 품질 값 문자열
-        
-        # 2. 설정에 따라 인코더 및 품질 옵션 선택
+        quality_val_str = ""
+
         if self.hw_encoder_setting == "nvidia" and encoders[0]:
             encoder_name = encoders[0]
             q_val = self.quality_cfg.get("gpu_cq", 30)
             quality_val_str = f"CQ={q_val}"
-            args = ['-c:v', encoder_name, '-cq', str(q_val), '-preset', 'p5'] # p5: medium
+            args = ['-c:v', encoder_name, '-cq', str(q_val), '-preset', 'p5']
 
         elif self.hw_encoder_setting == "intel" and encoders[1]:
             encoder_name = encoders[1]
@@ -86,31 +81,29 @@ class ConversionThread(QThread):
             q_val = self.quality_cfg.get("gpu_cq", 30)
             quality_val_str = f"CQP={q_val}"
             args = ['-c:v', encoder_name, '-rc', 'cqp', '-qp_i', str(q_val), '-qp_p', str(q_val), '-qp_b', str(q_val)]
-        
-        else: 
-            # 3. CPU 또는 Fallback
+
+        else:
             encoder_name = encoders[3]
             if not encoder_name:
                 return ['-c:v', 'copy']
-            
-            if encoder_name == 'libsvtav1': # AV1 (CPU)
+
+            if encoder_name == 'libsvtav1':
                 q_val = self.quality_cfg.get("cpu_av1_crf", 41)
                 quality_val_str = f"CRF={q_val}"
                 args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', '8']
-            elif encoder_name == 'libvpx-vp9': # VP9 (CPU)
+            elif encoder_name == 'libvpx-vp9':
                 q_val = self.quality_cfg.get("cpu_vp9_crf", 36)
                 quality_val_str = f"CRF={q_val}"
                 args = ['-c:v', encoder_name, '-crf', str(q_val), '-b:v', '0']
-            elif encoder_name == 'libx265': # H.265 (CPU)
+            elif encoder_name == 'libx265':
                 q_val = self.quality_cfg.get("cpu_h265_crf", 31)
                 quality_val_str = f"CRF={q_val}"
                 args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', 'medium']
-            else: # H.264 (CPU)
+            else:
                 q_val = self.quality_cfg.get("cpu_h264_crf", 26)
                 quality_val_str = f"CRF={q_val}"
                 args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', 'medium']
 
-        # ✅ 로그 메시지에 실제 품질 값 표시
         self.log.emit(f"사용할 인코더: {encoder_name} (설정: {self.hw_encoder_setting}, 품질: {quality_val_str})")
         return args
 
@@ -133,7 +126,6 @@ class ConversionThread(QThread):
             return
 
         for sub in candidates:
-            # 'foo.ja.vtt' -> 'foo_h264.ja.vtt' (확장자 앞의 언어 코드 등 유지)
             target = sub.with_name(new_path.stem + sub.name[len(old_path.stem):])
             if target.exists():
                 continue
@@ -157,7 +149,7 @@ class ConversionThread(QThread):
             self.finished.emit(False, self.url, ""); return
 
         command = [self.ffmpeg_path, '-i', str(self.input_path), '-y']
-        
+
         if self.target_codec:
             encoder_args = self._get_video_encoder_args()
             command.extend(encoder_args)
@@ -166,14 +158,13 @@ class ConversionThread(QThread):
             command.extend(['-vn', '-c:a', 'libmp3lame', '-q:a', '2'])
         elif self.target_format in ['avi', 'mov']:
             command.extend(['-c', 'copy'])
-        
+
         command.append(str(output_path))
 
         try:
             self.log.emit(f"파일 변환 시작: '{self.input_path.name}' -> '{output_path.name}'")
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            
-            # Popen으로 띄워 핸들을 들고 있어야 중단 요청 때 끝낼 수 있다.
+
             self.process = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace",

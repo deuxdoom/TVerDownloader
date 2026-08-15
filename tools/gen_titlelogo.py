@@ -1,4 +1,3 @@
-# tools/gen_titlelogo.py
 """새 로고 이미지를 헤더용 PNG 6종(언어 3 × 테마 2)으로 변환한다.
 
     python tools/gen_titlelogo.py logo_ko.png logo_jp.png logo_en.png
@@ -33,11 +32,8 @@ from src.titlelogo import LOGO_DIR, LOGO_HEIGHT
 ROOT = Path(__file__).resolve().parent.parent
 THEMES = ("light", "dark")
 
-# 표시 높이의 몇 배로 내보낼지. 어떤 화면 배율에서도 축소만 하도록 넉넉히 잡는다.
 EXPORT_SCALE = 3
-# 이 값보다 채도가 낮으면 '무채색 글자'로 보고 테마 색으로 바꾼다.
 NEUTRAL_SATURATION = 60
-# 배경과 이만큼 떨어지면 잉크가 꽉 찬 것으로 본다(색 글자 가장자리 처리용).
 COLOR_EDGE_SPAN = 48.0
 
 LANG_TOKENS = {"ko": "ko", "kr": "ko", "jp": "jp", "ja": "jp", "en": "en", "us": "en"}
@@ -76,12 +72,11 @@ def extract_ink(image: QImage) -> QImage:
     """배경을 투명으로 만들고 잉크만 남긴 ARGB 이미지를 돌려준다."""
     out = image.convertToFormat(QImage.Format.Format_ARGB32)
     if has_real_transparency(out):
-        return out   # 이미 투명 배경이면 손대지 않는다
+        return out
 
     background = background_color(out)
     bg_lum = luminance(background)
 
-    # 무채색 잉크가 배경에서 가장 멀리 떨어진 정도. 이걸 완전 불투명으로 본다.
     neutral_span = 1.0
     for x in range(out.width()):
         for y in range(out.height()):
@@ -101,7 +96,6 @@ def extract_ink(image: QImage) -> QImage:
             if color.saturation() < NEUTRAL_SATURATION:
                 alpha = round(min(255.0, abs(luminance(color) - bg_lum) / neutral_span * 255.0))
             else:
-                # 색 글자는 배경과 맞닿은 가장자리에서만 알파를 낮춘다.
                 alpha = round(min(255.0, distance / COLOR_EDGE_SPAN * 255.0))
             out.setPixelColor(x, y, QColor(color.red(), color.green(), color.blue(), alpha))
     return out
@@ -130,7 +124,7 @@ def main() -> int:
                         help=f"내보낼 높이(px). 기본 {LOGO_HEIGHT * EXPORT_SCALE}")
     args = parser.parse_args()
 
-    app = QApplication([])   # QImage를 다루려면 필요하다  # noqa: F841
+    app = QApplication([])
     args.out.mkdir(parents=True, exist_ok=True)
 
     failures = 0
