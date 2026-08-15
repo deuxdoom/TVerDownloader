@@ -36,6 +36,12 @@
 
 ## ✨ 주요 기능
 
+### 주소 넣기
+- **입력창에 붙여넣기** 후 Enter 또는 다운로드 버튼
+- **끌어다 놓기** — 브라우저 주소창에서 창으로 직접. 여러 개를 놓으면 다중 추가 창이 채워진 채 열림
+- **클립보드 자동 인식** (기본 꺼짐, 설정 > 일반) — 복사한 TVer 주소를 입력창에 넣어 줌. 주소가 연달아 오면 다중 추가 창에 모아 줌
+- **다중 추가 창** — 여러 줄에 주소를 한꺼번에
+
 ### 다운로드
 - 최신 **yt-dlp** 및 **FFmpeg** 자동 다운로드 및 업데이트
 - **단일 및 다중 다운로드** (시리즈 URL 자동 분해 지원)
@@ -67,13 +73,27 @@
 - **썸네일 캐시 관리** 기능
 - OS 표시 언어(한국어 · 일본어 · 영어)에 맞춘 **타이틀 로고와 시스템 메뉴**
 
+### 키보드 단축키
+
+| 기본 조합 | 동작 | 언제 |
+|---|---|---|
+| `Ctrl` + `,` | 설정 열기 | 창 어디에서나 |
+| `Ctrl` + `L` | 로그 지우기 | 창 어디에서나 |
+| `Del` | 목록에서 선택 항목 삭제 | 다운로드 목록에 포커스가 있을 때 |
+| `Esc` | 검색어 지우기 | 기록 · 즐겨찾기 검색칸에 포커스가 있을 때 |
+| `Enter` | 다운로드 시작 | 주소 입력창에 포커스가 있을 때 |
+
+- 조합은 **설정 > 단축키**에서 바꿀 수 있습니다. 칸을 비우면 그 단축키는 사용하지 않습니다.
+- 같은 조합을 두 동작이 나눠 쓰면 저장 전에 알려 줍니다. 그대로 두면 Qt가 어느 쪽도 실행하지 않기 때문입니다.
+- `Ctrl` · `Alt` 없이 쓰는 조합은 글자를 입력하는 동안 자동으로 꺼집니다. 입력칸에서 `Del`이나 `Esc`를 눌러도 목록이나 다른 동작이 끼어들지 않습니다.
+
 ---
 
 ## 🚀 사용 방법
 
-1. TVer 영상 *URL*을 입력 창에 붙여넣기
+1. TVer 영상 *URL*을 입력창에 넣기 — 붙여넣기, 주소창에서 끌어다 놓기, 클립보드 자동 인식 중 편한 방법으로
 2. **설정** 메뉴에서 저장 폴더, 화질, 동시 다운로드 수, 파일명 규칙 등 조정
-3. **다운로드** 버튼 클릭
+3. **다운로드** 버튼 클릭 (또는 입력창에서 `Enter`)
 4. 진행률·로그·썸네일로 실시간 상태 확인
 5. 완료된 항목의 **재생 · 폴더 열기** 버튼으로 바로 접근
 
@@ -81,7 +101,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 일반 | 저장 폴더, 동시 다운로드 수, 닫기 버튼(X) 동작 |
+| 일반 | 저장 폴더, 동시 다운로드 수, 닫기 버튼(X) 동작, 클립보드 자동 인식 |
+| 단축키 | 동작별 키 조합 지정, 충돌 검사, 기본값 되돌리기 |
 | 파일명 | 구성 요소 선택 및 끌어놓기 정렬, 실제 예시 미리보기 |
 | 화질 | 다운로드 화질, 선호 코덱, 하드웨어 가속, 상세 품질(CRF/CQ) |
 | 자막 | 자막 다운로드 여부, 영상 포함/별도 저장, 자막 포맷 |
@@ -106,7 +127,7 @@
 
 - **GUI**: PyQt6
 - **다운로드 엔진**: yt-dlp + FFmpeg (자동 최신화 포함)
-- **설정 저장**: JSON 기반(config / history / favorites)
+- **설정 저장**: JSON 기반(config / history / favorites) — 단축키 조합도 `downloader_config.json`에 함께 보관
 - **서체**: Pretendard(본문) · Pretendard JP(한자) · JetBrains Mono(수치) 번들
 - **아이콘**: [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) (MIT) — SVG를 코드에 임베드해 외부 파일 의존 없음
 - **안정성**: 예외 발생 시 크래시 로그(`TVerDownloader_crash.log`) 저장
@@ -127,16 +148,6 @@ pyinstaller TVerDownloader.spec --noconfirm --clean
 
 결과물은 `dist/TVerDownloader/`에 생성됩니다. 빌드 설정(서체·로고·번역 번들, 미사용 Qt 모듈 제외)은 모두 `TVerDownloader.spec`에 있습니다.
 
-### 리소스 재생성
-
-`assets/`의 원본을 바꾼 뒤에만 실행하면 됩니다.
-
-```bash
-python tools/gen_icons.py        # assets/icons/*.svg  → src/icons_data.py
-python tools/gen_titlelogo.py <로고파일...>   # → assets/logo/logo_<lang>_<theme>.png
-python tools/font_preview.py     # 글자 렌더링 옵션 비교 (미리보기 전용)
-```
-
 ---
 
 ## 📁 프로젝트 트리구조
@@ -151,18 +162,19 @@ python tools/font_preview.py     # 글자 렌더링 옵션 비교 (미리보기 
 │  ├─ 📄 download_manager.py                 → 대기열 및 동시 실행 관리
 │  ├─ 📄 series_parser.py                    → 시리즈 URL 분석 코디네이터
 │  ├─ 📄 updater.py                          → GitHub releases/latest 확인
+│  ├─ 📄 shortcuts.py                         → 단축키 정의·기본값·범위·충돌 판정
 │  ├─ 📄 dialogs.py                          → SettingsDialog (좌측 내비게이션 + 스택)
 │  ├─ 📄 about_dialog.py                     → 정보 창
-│  ├─ 📄 bulk_dialog.py                      → 다중 URL 추가 대화상자
+│  ├─ 📄 bulk_dialog.py                      → 다중 URL 추가 대화상자 (초기 목록 · 한 줄씩 추가)
 │  ├─ 📄 series_dialog.py                    → 시리즈 회차 선택 (썸네일 미리보기)
 │  ├─ 📄 message.py                          → 팔레트를 따르는 예/아니오 확인 창
 │  ├─ 📄 widgets.py                          → 다운로드/기록/즐겨찾기 카드 + 색 띠 + 썸네일 캐시
 │  ├─ 📄 history_store.py                    → urlhistory.json + 롤링 백업
 │  ├─ 📄 favorites_store.py                  → favorites.json + 백업
 │  ├─ 📄 qss.py                              → 컬러 토큰(palette)과 라이트/다크 QSS 생성
-│  ├─ 📄 icon.py                             → 앱 아이콘 (Base64 → QIcon)
-│  ├─ 📄 icons.py                            → Fluent 아이콘을 테마 색으로 렌더
-│  ├─ 📄 icons_data.py                       → 임베드된 SVG 19종 (자동 생성)
+│  ├─ 📄 appicon.py                          → 앱 아이콘 — exe·창·트레이 (Base64 → QIcon)
+│  ├─ 📄 icons.py                            → UI 내부 Fluent 아이콘을 테마 색으로 렌더
+│  ├─ 📄 icons_data.py                       → 임베드된 SVG 20종 (자동 생성)
 │  ├─ 📄 indicators.py                       → 체크·라디오·스피너 화살표 이미지 생성
 │  ├─ 📄 titlelogo.py                        → 언어·테마별 헤더 로고 로드
 │  ├─ 📂 threads
@@ -176,13 +188,15 @@ python tools/font_preview.py     # 글자 렌더링 옵션 비교 (미리보기 
 │     └─ 📄 main_window_ui.py                → 메인 UI 구성 (헤더, 입력 바, 탭, 트레이)
 ├─ 📂 assets
 │  ├─ 📂 fonts                                → Pretendard Variable / Pretendard JP / JetBrains Mono
-│  ├─ 📂 icons                                → Fluent SVG 원본 19종 (빌드에는 미포함)
+│  ├─ 📂 icons                                → Fluent SVG 원본 (빌드에는 미포함)
 │  ├─ 📂 logo                                 → 헤더 로고 6종 (언어 3 × 테마 2)
 │  └─ 🖼️ tver.ico                             → exe 아이콘
 ├─ 📂 tools
 │  ├─ 📄 gen_icons.py                        → SVG → src/icons_data.py
 │  ├─ 📄 gen_titlelogo.py                    → 로고 이미지 → assets/logo/
-│  └─ 📄 font_preview.py                     → 글자 렌더링 옵션 비교 도구
+│  ├─ 📄 font_preview.py                     → 글자 렌더링 옵션 비교 도구
+│  ├─ 📄 capture_window.ps1                  → 빌드된 exe 창 캡처 (PrintWindow)
+│  └─ 📄 test_*.py                            → 회귀 검증 (단축키 · 클립보드 · 대기열 · 자막 · 설정 등)
 ├─ 🧾 실행 중 생성되는 항목
 │  ├─ 📂 bin/                                 → yt-dlp.exe, ffmpeg.exe, ffprobe.exe (자동 설치)
 │  ├─ 📄 downloader_config.json               → 사용자 설정
@@ -194,6 +208,7 @@ python tools/font_preview.py     # 글자 렌더링 옵션 비교 (미리보기 
 │  └─ 📄 TVerDownloader_crash.log             → 크래시 로그
 ├─ 📄 .gitignore
 ├─ 📄 README.md
+├─ 📄 CHANGES.md                              → 릴리즈별 변경 요약
 ├─ 🖼️ logo.png
 └─ 🖼️ main.png
 ```
