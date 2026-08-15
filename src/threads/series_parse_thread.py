@@ -1,10 +1,9 @@
-import subprocess
 import json
 from typing import List, Dict
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from src.utils import get_startupinfo
+from src.threads import ytdlp_run
 
 class SeriesParseThread(QThread):
     """시리즈 URL을 받아 하위 에피소드 정보(딕셔너리) 리스트를 반환하는 스레드."""
@@ -12,6 +11,12 @@ class SeriesParseThread(QThread):
     finished = pyqtSignal(str, list)
 
     TITLE_ONLY_TIMEOUT = 60
+    PARSE_TIMEOUT = 300
+    """전체 회차를 훑는 분석의 제한 시간. 72화 기준 61초라 넉넉히 잡는다.
+
+    없이 두면 yt-dlp가 응답을 기다리며 멈춰 있을 때 즐겨찾기 확인 대기열 전체가
+    그 자리에 선다. 한 시리즈가 막히더라도 나머지는 이어져야 한다.
+    """
 
     def __init__(self, series_url: str, ytdlp_exe_path: str, exclude_keywords: List[str],
                  title_only: bool = False, parent=None):
@@ -80,22 +85,10 @@ class SeriesParseThread(QThread):
         다음 실행 때 어차피 다시 훑는다.
         """
         self.log.emit(f"[시리즈] 제목 확인 중: {self.series_url}")
-        command = [self.ytdlp_exe_path, "--flat-playlist", "--playlist-items", "1",
-                   "-J", "--skip-download", "--no-warnings", self.series_url]
-        proc = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            startupinfo=get_startupinfo(), text=True, encoding="utf-8", errors="ignore"
-        )
-        try:
-            out, err = proc.communicate(timeout=self.TITLE_ONLY_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            self.log.emit("[오류] 시리즈 제목 확인이 시간을 초과했습니다.")
-            self.finished.emit("", [])
-            return
-
-        if proc.returncode != 0:
+        command = [self.ytdlp_exe_path, "--flat-playlist", "--playlist-items", "1", "-J", "--skip-download",
+                   *ytdlp_run.network_options(), self.series_url]
+        ok, out, err = ytdlp_run.run(command, self.TITLE_ONLY_TIMEOUT, "시리즈 제목 확인", self.log.emit)
+        if not ok:
             self.log.emit(f"[오류] 시리즈 제목 확인 실패:\n{(err or '').strip()}")
             self.finished.emit("", [])
             return
@@ -113,18 +106,14 @@ class SeriesParseThread(QThread):
                 self._run_title_only()
                 return
             self.log.emit(f"[시리즈] 분석 중 (1/2): {self.series_url}")
-            command1 = [self.ytdlp_exe_path, "-J", "--skip-download", "--no-warnings", self.series_url]
-            startupinfo = get_startupinfo()
-            proc1 = subprocess.Popen(
-                command1, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                startupinfo=startupinfo, text=True, encoding="utf-8", errors="ignore"
-            )
-            out1, err1 = proc1.communicate()
+            command1 = [self.ytdlp_exe_path, "-J", "--skip-download",
+                        *ytdlp_run.network_options(), self.series_url]
+            ok1, out1, err1 = ytdlp_run.run(command1, self.PARSE_TIMEOUT, "시리즈 1차 분석", self.log.emit)
 
             series_title = ""
             episodes = []
 
-            if proc1.returncode == 0:
+            if ok1:
                 try:
                     data = json.loads(out1)
                     series_title = data.get("playlist_title") or data.get("title", "")
@@ -137,14 +126,12 @@ class SeriesParseThread(QThread):
 
             if not episodes:
                 self.log.emit("[시리즈] 1차 분석 결과 없음. 2차 분석 시도...")
-                command2 = [self.ytdlp_exe_path, "--flat-playlist", "--print", "%(url)s\t%(title)s", "--skip-download", "--no-warnings", self.series_url]
-                proc2 = subprocess.Popen(
-                    command2, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    startupinfo=startupinfo, text=True, encoding="utf-8", errors="ignore"
-                )
-                out2, err2 = proc2.communicate()
+                command2 = [self.ytdlp_exe_path, "--flat-playlist",
+                            "--print", "%(url)s\t%(title)s", "--skip-download",
+                            *ytdlp_run.network_options(), self.series_url]
+                ok2, out2, err2 = ytdlp_run.run(command2, self.PARSE_TIMEOUT, "시리즈 2차 분석", self.log.emit)
 
-                if proc2.returncode != 0:
+                if not ok2:
                     self.log.emit(f"[오류] 시리즈 2차 분석 실패:\n{(err2 or '').strip()}");
                     self.finished.emit(series_title, []); return
 

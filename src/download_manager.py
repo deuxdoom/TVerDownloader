@@ -10,6 +10,12 @@ from src.utils import get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path
 
 class DownloadManager(QObject):
     log = pyqtSignal(str)
+    heading = pyqtSignal(str, str)
+    """구분선을 두른 제목과 그 아래 한 줄. (제목, 본문)
+
+    괘선을 몇 개 넣어야 한 줄로 떨어지는지는 로그 패널 폭과 글꼴을 재야 나온다.
+    여기서는 알 수 없는 값이라 그리는 일은 창에 맡기고 내용만 보낸다.
+    """
     item_added = pyqtSignal(str)
     progress_updated = pyqtSignal(str, dict)
     task_finished = pyqtSignal(str, bool, str, dict)
@@ -92,8 +98,7 @@ class DownloadManager(QObject):
     def _on_progress(self, url: str, payload: Dict[str, Any]):
         if url not in self._logged_start and 'log' in payload:
             self._logged_start.add(url)
-            rule = "─" * 12
-            self.log.emit(f"{rule} 다운로드 시작 {rule}\n{url}")
+            self.heading.emit("다운로드 시작", url)
         self.progress_updated.emit(url, payload)
 
     def _get_video_codec(self, filepath: str) -> Optional[str]:

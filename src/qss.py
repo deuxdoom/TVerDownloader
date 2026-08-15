@@ -94,6 +94,15 @@ def palette(theme: str = "dark") -> dict:
     return colors
 
 
+MENU_RADIUS = 10
+MENU_ITEM_RADIUS = 7
+"""메뉴 바깥 모서리와 항목 강조 모서리.
+
+항목 쪽을 더 작게 둔다. 같은 값이면 강조 사각형이 메뉴 테두리에 닿아 두 곡선이
+겹쳐 보인다. RoundedMenu가 창 배경을 투명으로 만들 때 이 값이 실제 모서리가 된다.
+"""
+
+
 def build_qss(theme: str = "dark") -> str:
     """선택된 테마에 맞는 QSS 문자열을 동적으로 생성합니다."""
     colors = palette(theme)
@@ -260,6 +269,28 @@ def build_qss(theme: str = "dark") -> str:
     }}
     QSpinBox#StepperSpinBox::up-arrow {{ image: url("{ind["arrow_up"]}"); width: 11px; height: 7px; }}
     QSpinBox#StepperSpinBox::down-arrow {{ image: url("{ind["arrow_down"]}"); width: 11px; height: 7px; }}
+
+    /* 메뉴 — 트레이 우클릭과 목록 우클릭이 같은 모양을 쓴다.
+       모서리를 둥글게 보이려면 QSS만으로는 안 되고 창 배경이 투명해야 한다.
+       그쪽은 RoundedMenu(src/widgets.py)가 맡는다. */
+    QMenu {{
+        background: {colors["surface"]};
+        border: 1px solid {colors["border"]};
+        border-radius: {MENU_RADIUS}px;
+        padding: 6px;
+    }}
+    QMenu::item {{
+        background: transparent;
+        color: {colors["text"]};
+        padding: 8px 18px 8px 34px;
+        border-radius: {MENU_ITEM_RADIUS}px;
+        margin: 1px 2px;
+    }}
+    QMenu::item:selected {{ background: {colors["bg_alt"]}; }}
+    QMenu::item:disabled {{ color: {colors["text_dim"]}; }}
+    QMenu::separator {{ height: 1px; background: {colors["border"]}; margin: 5px 10px; }}
+    QMenu::indicator {{ width: 16px; height: 16px; left: 11px; }}
+    QMenu::indicator:checked {{ image: url("{ind["check_menu"]}"); }}
 
     /* 5) 종료 확인 등 메시지 상자 가운데 정렬 */
     QMessageBox QLabel {{ qproperty-alignment: 'AlignCenter'; }}

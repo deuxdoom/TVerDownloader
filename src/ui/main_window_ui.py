@@ -1,18 +1,20 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QTextEdit,
-    QLabel, QListWidget, QFrame, QTabWidget, QToolButton, QMenu,
+    QLabel, QListWidget, QFrame, QTabWidget, QToolButton,
     QComboBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QFont
 
-from src import shortcuts
+import webbrowser
+
+from src import autostart, shortcuts
 from src.appicon import get_app_icon
 from src.titlelogo import LOGO_HEIGHT, build_logo
 from src.utils import localized_app_name
 from src.icons import get_icon
 from src.qss import palette
-from src.widgets import GridListWidget, FavoriteItemWidget
+from src.widgets import GridListWidget, FavoriteItemWidget, RoundedMenu
 
 class MainWindowUI:
     ICON_BUTTON_SIZE = 32
@@ -63,7 +65,7 @@ class MainWindowUI:
 
     SHORTCUT_HINT_BUTTONS = {
         "open_settings": "settings_button",
-        "clear_log": "clear_log_button",
+        "toggle_log": "log_toggle_btn",
     }
     """툴팁 끝에 지금 걸린 조합을 붙일 버튼.
 
@@ -103,6 +105,7 @@ class MainWindowUI:
         self._icon_colors = palette("light")
         self._log_visible = True
         self._shortcut_hint_bases = {}
+        self._shortcut_hints = {}
 
     def _register_icon(self, btn, icon_name, color_key="text"):
         """버튼에 아이콘 정보를 붙이고 테마 전환 대상으로 등록한다."""
@@ -167,20 +170,32 @@ class MainWindowUI:
         self.on_top_btn.setProperty("icon_name", "pin_on" if on else "pin")
         self._paint_icon(self.on_top_btn)
 
+    def _set_hinted_tooltip(self, attribute: str, base: str):
+        """원래 문구를 기억해 두고, 뒤에 지금 걸린 조합을 붙여 툴팁으로 넣는다.
+
+        이미 붙은 문자열에 다시 붙이면 설정을 열고 닫을 때마다 조합이 줄줄이
+        쌓인다. 문구와 조합을 따로 들고 있다가 불릴 때마다 새로 만든다.
+        """
+        self._shortcut_hint_bases[attribute] = base
+        hint = self._shortcut_hints.get(attribute, "")
+        getattr(self, attribute).setToolTip(f"{base} ({hint})" if hint else base)
+
     def apply_shortcut_hints(self, table: dict):
         """버튼 툴팁 끝에 지금 걸린 조합을 붙인다.
 
-        원래 문구는 처음 한 번만 따로 기억해 둔다. 이미 붙은 문자열에 다시 붙이면
-        설정을 열고 닫을 때마다 조합이 줄줄이 쌓인다. 조합을 비워 둔 동작은
-        붙일 것이 없으므로 원래 문구로 되돌린다.
+        조합만 따로 적어 두고 문구는 버튼이 지금 들고 있는 것을 그대로 쓴다. 로그
+        토글처럼 상태에 따라 문구가 바뀌는 버튼이 있어, 처음 문구를 고정으로 잡아
+        두면 바뀐 뒤에 엉뚝한 안내가 남는다. 조합을 비워 둔 동작은 붙일 것이 없으므로
+        원래 문구로 되돌린다.
         """
         for key, attribute in self.SHORTCUT_HINT_BUTTONS.items():
             button = getattr(self, attribute, None)
             if button is None:
                 continue
-            base = self._shortcut_hint_bases.setdefault(attribute, button.toolTip())
             text = table.get(key, "")
-            button.setToolTip(f"{base} ({shortcuts.display(text)})" if text else base)
+            self._shortcut_hints[attribute] = shortcuts.display(text) if text else ""
+            self._set_hinted_tooltip(
+                attribute, self._shortcut_hint_bases.get(attribute, button.toolTip()))
 
     def setup_ui(self):
         central = QWidget()
@@ -320,7 +335,8 @@ class MainWindowUI:
 
     def update_log_toggle_button(self, visible: bool):
         """지금 상태가 아니라 '누르면 일어날 일'을 알려 준다."""
-        self.log_toggle_btn.setToolTip("로그 숨기기" if visible else "로그 보기")
+        self._set_hinted_tooltip("log_toggle_btn",
+                                 "로그 숨기기" if visible else "로그 보기")
 
     def _create_history_tab(self):
         tab, layout = self._tab_page("HistoryTab")
@@ -365,11 +381,66 @@ class MainWindowUI:
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, "즐겨찾기")
 
+    TRAY_GITHUB_URL = "https://github.com/deuxdoom/TVerDownloader"
+
     def setup_tray(self, app_version):
+        """트레이 아이콘과 우클릭 메뉴를 만든다.
+
+        첫 항목은 '<앱 이름> 열기'이고 누르면 창이 돌아온다. 트레이 메뉴를 열었다는
+        것은 대개 창을 다시 보려던 것이라 가장 자주 쓰는 동작을 맨 위에 둔다. 이름만
+        적어 두면 제목처럼 읽혀 눌러도 되는 줄인지 알기 어려워서 '열기'를 붙인다.
+        굵게 표시해 기본 동작임을 함께 보인다.
+
+        구분선은 둘만 쓴다. 항목마다 그으면 다섯 줄짜리 메뉴가 선으로 더 채워져
+        오히려 읽기 어렵다. 창을 여는 일 / 설정에 해당하는 것들 / 끝내는 일, 이렇게
+        성격이 다른 세 덩이만 가른다. 종료를 따로 떼는 것은 되돌릴 수 없는 동작이라
+        위 항목을 누르려다 잘못 짚는 것을 막기 위해서다.
+
+        시작 프로그램 체크는 열 때마다 레지스트리를 다시 읽는다(aboutToShow).
+        다른 프로그램이나 작업 관리자에서 꺼 놓았을 수 있는데, 앱이 마지막으로 쓴
+        값을 기억해 두면 실제와 다른 상태를 보여 주게 된다.
+
+        설정은 창을 되살리지 않고 바로 연다. 트레이에 넣어 둔 채로 동시 다운로드 수만
+        바꾸고 싶은 경우가 있어서, 창까지 끌어내면 하던 일을 되돌려 놓아야 한다.
+        """
         tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
         tray_icon.setToolTip(f"{localized_app_name()} {app_version}")
-        tray_menu = QMenu()
-        restore_action = QAction("창 복원", self.main_window, triggered=self.main_window.bring_to_front)
-        quit_action = QAction("완전 종료", self.main_window, triggered=self.main_window.quit_application)
-        tray_menu.addAction(restore_action); tray_menu.addAction(quit_action)
+        tray_menu = RoundedMenu()
+
+        restore_action = QAction(f"{localized_app_name()} 열기", self.main_window,
+                                 triggered=self.main_window.bring_to_front)
+        bold = QFont(restore_action.font()); bold.setBold(True)
+        restore_action.setFont(bold)
+        tray_menu.addAction(restore_action)
+        tray_menu.addSeparator()
+
+        self.autostart_action = QAction("윈도우 시작 시 실행", self.main_window, checkable=True)
+        self.autostart_action.toggled.connect(self.main_window.set_autostart)
+        if not autostart.supported():
+            self.autostart_action.setEnabled(False)
+            self.autostart_action.setToolTip(
+                "빌드된 실행 파일에서만 켤 수 있습니다.")
+        tray_menu.addAction(self.autostart_action)
+
+        tray_menu.addAction(QAction("GitHub 페이지", self.main_window,
+                                    triggered=lambda: webbrowser.open(self.TRAY_GITHUB_URL)))
+
+        tray_menu.addAction(QAction("설정", self.main_window,
+                                    triggered=self.main_window.open_settings))
+        tray_menu.addSeparator()
+
+        tray_menu.addAction(QAction("프로그램 종료", self.main_window,
+                                    triggered=self.main_window.quit_application))
+
+        tray_menu.aboutToShow.connect(self.sync_autostart_check)
+        self.sync_autostart_check()
         tray_icon.setContextMenu(tray_menu); tray_icon.show()
+
+    def sync_autostart_check(self):
+        """레지스트리에 걸린 실제 상태로 체크 표시를 맞춘다.
+
+        toggled 신호가 다시 돌아 레지스트리를 또 쓰지 않도록 잠시 끊는다.
+        """
+        self.autostart_action.blockSignals(True)
+        self.autostart_action.setChecked(autostart.is_enabled())
+        self.autostart_action.blockSignals(False)

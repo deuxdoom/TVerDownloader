@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.utils import (get_startupinfo, FILENAME_TITLE_MAX_LENGTH,
                        NO_AUDIO_STATUS, resolve_ffprobe_path)
+from src.threads import ytdlp_run
 
 class DownloadThread(QThread):
     progress = pyqtSignal(str, dict)
@@ -223,15 +224,33 @@ class DownloadThread(QThread):
             f"저장 폴더를 더 짧은 경로로 옮기거나 설정 > 파일명에서 구성 요소를 줄인 뒤 "
             f"재다운로드해 주세요.")})
 
+    METADATA_TIMEOUT = 60
+    """제목·썸네일을 물어보는 데 주는 제한 시간.
+
+    예전에는 20초에 한 번 물어보고 끝이라, 시리즈 분석이 도는 중에 주소를 넣으면
+    회선을 나눠 쓰다가 여기서 떨어지고 '메타데이터를 가져올 수 없습니다'로 끝났다.
+    실제로 받기도 전에 실패하는 것이라 조회 쪽은 넉넉히 기다린다.
+    """
+
     def _get_metadata(self) -> Optional[Dict[str, Any]]:
+        """받기 전에 제목·썸네일을 미리 물어본다.
+
+        통신이 밀리는 순간에 걸리면 다시 건다(ytdlp_run). 여기서 한 번에 포기하면
+        다운로드가 시작조차 못 하고 오류 카드로 남는다.
+        """
+        cmd = [self.ytdlp_exe_path, "-J", "--skip-download", *ytdlp_run.network_options()]
+        if self.ignore_ssl_errors:
+            cmd.append("--no-check-certificate")
+        cmd.append(self.url)
+        ok, out, err = ytdlp_run.run(cmd, self.METADATA_TIMEOUT, "영상 정보 확인",
+                                     lambda msg: self.progress.emit(self.url, {"log": msg}))
+        if not ok:
+            self.progress.emit(self.url, {"log": f"[오류] 영상 정보 확인 실패: {(err or '').strip()}"})
+            return None
         try:
-            cmd = [self.ytdlp_exe_path, "-J", "--no-warnings"]
-            if self.ignore_ssl_errors:
-                cmd.append("--no-check-certificate")
-            cmd.append(self.url)
-            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", startupinfo=get_startupinfo(), timeout=20)
-            return json.loads(p.stdout) if p.returncode == 0 else None
-        except Exception: return None
+            return json.loads(out)
+        except json.JSONDecodeError:
+            return None
 
     def _build_final_filepath(self, metadata: Dict[str, Any]) -> str:
         template, ext = self.output_template.rsplit('.', 1)

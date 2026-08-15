@@ -110,6 +110,8 @@ def indicator_images(theme: str, colors: dict) -> Dict[str, str]:
         arrow = colors["text"]
         images = {
             "check": _save(f"check_{theme}", _draw_check(1, on_accent), _draw_check(2, on_accent)),
+            "check_menu": _save(f"checkmenu_{theme}", _draw_check(1, colors["accent"]),
+                                _draw_check(2, colors["accent"])),
             "dot": _save(f"dot_{theme}", _draw_dot(1, on_accent), _draw_dot(2, on_accent)),
             "arrow_up": _save(f"up_{theme}", _draw_chevron(1, arrow, True), _draw_chevron(2, arrow, True)),
             "arrow_down": _save(f"down_{theme}", _draw_chevron(1, arrow, False), _draw_chevron(2, arrow, False)),

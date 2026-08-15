@@ -65,6 +65,25 @@ def match_tver_url(text: str) -> Optional[str]:
     return candidate if TVER_URL_RE.match(candidate) else None
 
 
+MEDIA_URL_RE = re.compile(
+    r"^https?://[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?$", re.IGNORECASE)
+"""yt-dlp에 넘겨 볼 만한 주소인지 가르는 최소 조건.
+
+yt-dlp가 다루는 사이트는 천 곳이 넘어 목록으로 가릴 수 없다. 여기서 거르려는 것은
+'어느 사이트인가'가 아니라 '애초에 주소가 아닌 것'이다. 잘못 붙여넣은 문장이나
+낱말, 파일 경로가 그대로 넘어가면 카드가 하나 생겼다가 오류로 끝난다.
+
+체계(scheme)를 반드시 요구한다. 없이도 받아 주면 'memo.txt'나 '3.14' 같은 것까지
+점이 든 호스트로 보여 거르는 의미가 없어진다. 호스트에 점을 요구하는 것도 같은
+이유이고, 덕분에 사이트 판단은 여전히 yt-dlp가 한다.
+"""
+
+
+def is_media_url(text: str) -> bool:
+    """yt-dlp에 넘겨 볼 만한 주소인지."""
+    return bool(MEDIA_URL_RE.match((text or "").strip()))
+
+
 def resolve_ffprobe_path(ffmpeg_path: str):
     """ffmpeg 경로에서 짝이 되는 ffprobe 경로를 찾는다. 없으면 None.
 

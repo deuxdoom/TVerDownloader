@@ -44,8 +44,8 @@ class ShortcutDef(NamedTuple):
 SHORTCUT_DEFS: tuple[ShortcutDef, ...] = (
     ShortcutDef("open_settings", "설정 열기", "Ctrl+,", WINDOW,
                 "창 어디에서나 설정 창을 엽니다."),
-    ShortcutDef("clear_log", "로그 지우기", "Ctrl+L", WINDOW,
-                "오른쪽 로그 패널의 내용을 비웁니다."),
+    ShortcutDef("toggle_log", "로그 패널 열고 닫기", "Ctrl+L", WINDOW,
+                "오른쪽 로그 패널을 접거나 폽니다."),
     ShortcutDef("delete_selected", "목록에서 선택 항목 삭제", "Del", DOWNLOAD_LIST,
                 "다운로드 목록에 포커스가 있을 때만 동작합니다. 진행 중인 항목은 남습니다."),
     ShortcutDef("clear_search", "검색어 지우기", "Esc", SEARCH_INPUT,

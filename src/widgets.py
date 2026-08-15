@@ -27,6 +27,23 @@ THUMBNAIL_CACHE_DIR = Path("thumbnails")
 LIST_THUMB_W, LIST_THUMB_H = 128, 72
 
 
+class RoundedMenu(QMenu):
+    """모서리가 둥글게 보이는 메뉴.
+
+    QSS의 border-radius만으로는 둥글어지지 않는다. 메뉴는 자기 창을 가진 팝업이라
+    모서리 바깥을 창 배경색이 그대로 채우고, 둥근 테두리만 그 위에 얹혀 네 귀퉁이가
+    각진 채로 남는다. 창 배경을 투명으로 만들어야 QSS가 그린 모양이 곧 창 모양이 된다.
+
+    창 종류(FramelessWindowHint)는 건드리지 않는다. NoDropShadowWindowHint까지 붙이면
+    모서리는 둥글어지지만 Windows가 그려 주던 그림자가 사라져 메뉴가 배경에 붙어
+    보인다. 투명 배경만 켜면 그림자는 그대로 남는다.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+
 class ElidedLabel(QLabel):
     """폭이 모자라면 말줄임표로 줄여 보여 주는 라벨.
 

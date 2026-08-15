@@ -44,19 +44,19 @@ def settle():
 
 
 print("=== 1. 조합표 해석 ===")
-report("기본값 4개", set(S.defaults()) == {"open_settings", "clear_log",
+report("기본값 4개", set(S.defaults()) == {"open_settings", "toggle_log",
                                           "delete_selected", "clear_search"},
        f"{S.defaults()}")
 report("설정이 없으면 기본값", S.resolve({}) == S.defaults())
-partial = S.resolve({"shortcuts": {"clear_log": "ctrl+shift+k"}})
+partial = S.resolve({"shortcuts": {"toggle_log": "ctrl+shift+k"}})
 report("적어 둔 것만 갈아끼운다",
-       partial["clear_log"] == "Ctrl+Shift+K" and partial["open_settings"] == "Ctrl+,",
+       partial["toggle_log"] == "Ctrl+Shift+K" and partial["open_settings"] == "Ctrl+,",
        f"{partial}")
 report("대소문자를 가리지 않는다", S.normalize("ctrl+l") == S.normalize("CTRL+L") == "Ctrl+L")
 report("빈 값은 사용 안 함으로 남는다",
        S.resolve({"shortcuts": {"clear_search": ""}})["clear_search"] == "")
 report("해석 안 되는 값도 사용 안 함",
-       S.resolve({"shortcuts": {"clear_log": "zzz+q"}})["clear_log"] == "")
+       S.resolve({"shortcuts": {"toggle_log": "zzz+q"}})["toggle_log"] == "")
 
 report("Ctrl 조합은 입력 중에도 살린다", S.needs_typing_guard("Ctrl+L") is False)
 report("맨 키는 입력 중에 꺼야 한다", S.needs_typing_guard("D") is True)
@@ -64,19 +64,19 @@ report("Del·Esc도 맨 키", S.needs_typing_guard("Del") and S.needs_typing_gua
 report("기능키는 예외", S.needs_typing_guard("F5") is False)
 report("빈 조합은 판단 대상 아님", S.needs_typing_guard("") is False)
 
-same_window = S.conflicts({"open_settings": "Ctrl+L", "clear_log": "Ctrl+L",
+same_window = S.conflicts({"open_settings": "Ctrl+L", "toggle_log": "Ctrl+L",
                            "delete_selected": "Del", "clear_search": "Esc"})
 report("창 단축키끼리 겹치면 잡는다",
-       len(same_window) == 1 and set(same_window[0][1]) == {"open_settings", "clear_log"},
+       len(same_window) == 1 and set(same_window[0][1]) == {"open_settings", "toggle_log"},
        f"{same_window}")
-mixed = S.conflicts({"open_settings": "Del", "clear_log": "Ctrl+L",
+mixed = S.conflicts({"open_settings": "Del", "toggle_log": "Ctrl+L",
                      "delete_selected": "Del", "clear_search": "Esc"})
 report("창 단축키와 목록 단축키가 겹쳐도 잡는다", len(mixed) == 1, f"{mixed}")
-disjoint = S.conflicts({"open_settings": "Ctrl+,", "clear_log": "Ctrl+L",
+disjoint = S.conflicts({"open_settings": "Ctrl+,", "toggle_log": "Ctrl+L",
                         "delete_selected": "Del", "clear_search": "Del"})
 report("포커스가 겹치지 않는 범위끼리는 통과", disjoint == [], f"{disjoint}")
 report("빈 조합끼리는 겹친 것이 아니다",
-       S.conflicts({"open_settings": "", "clear_log": "",
+       S.conflicts({"open_settings": "", "toggle_log": "",
                     "delete_selected": "Del", "clear_search": "Esc"}) == [])
 
 
@@ -109,9 +109,9 @@ class Host(QMainWindow):
     def open_settings(self):
         self.calls.append("open_settings")
 
-    def clear_log(self):
-        self.calls.append("clear_log")
-        self.ui.log_output.clear()
+    def toggle_log_panel(self):
+        self.calls.append("toggle_log")
+        self.ui.set_log_visible(not self.ui.is_log_visible())
 
     def _delete_selected_download_items(self):
         self.calls.append("delete_selected")
@@ -231,11 +231,15 @@ settle()
 report("Ctrl+, 로 설정이 열린다", host.calls == ["open_settings"], f"{host.calls}")
 
 host.calls.clear()
-host.ui.log_output.setPlainText("남은 로그")
+was_visible = host.ui.is_log_visible()
 QTest.keyClick(host.ui.download_list, Qt.Key.Key_L, Qt.KeyboardModifier.ControlModifier)
 settle()
-report("Ctrl+L 로 로그가 비워진다",
-       host.calls == ["clear_log"] and host.ui.log_output.toPlainText() == "", f"{host.calls}")
+report("Ctrl+L 로 로그 패널이 접힌다",
+       host.calls == ["toggle_log"] and host.ui.is_log_visible() is not was_visible,
+       f"{host.calls} 보임={host.ui.is_log_visible()}")
+QTest.keyClick(host.ui.download_list, Qt.Key.Key_L, Qt.KeyboardModifier.ControlModifier)
+settle()
+report("한 번 더 누르면 다시 펴진다", host.ui.is_log_visible() is was_visible)
 
 host.calls.clear()
 QTest.keyClick(host.ui.download_list, Qt.Key.Key_Delete)
@@ -277,7 +281,7 @@ report("검색칸이 아닌 입력창은 Esc 로 지워지지 않는다",
 
 print()
 print("=== 5. 조합 변경과 입력 중 보호 ===")
-host.config["shortcuts"] = {"open_settings": "D", "clear_log": "F5",
+host.config["shortcuts"] = {"open_settings": "D", "toggle_log": "F5",
                             "delete_selected": "Del", "clear_search": ""}
 host.apply_shortcuts()
 settle()
@@ -304,7 +308,7 @@ report("입력 중에는 맨 키를 가로채지 않는다",
 host.calls.clear()
 QTest.keyClick(host.ui.url_input, Qt.Key.Key_F5)
 settle()
-report("기능키는 입력 중에도 듣는다", host.calls == ["clear_log"], f"{host.calls}")
+report("기능키는 입력 중에도 듣는다", host.calls == ["toggle_log"], f"{host.calls}")
 
 host.calls.clear()
 host.ui.download_list.setFocus()
@@ -373,7 +377,7 @@ for theme in ("light", "dark"):
            f"{editors['open_settings'].keySequence().toString()!r}")
     dialog.grab().save(f"{OUT}/shortcuts_settings_{theme}.png")
 
-    editors["clear_log"].setKeySequence(QKeySequence("Ctrl+,"))
+    editors["toggle_log"].setKeySequence(QKeySequence("Ctrl+,"))
     settle()
     report(f"[{theme}] 겹치면 그 자리에서 알린다", dialog.shortcut_warning.text() != "",
            f"{dialog.shortcut_warning.text()!r}")
@@ -386,20 +390,20 @@ for theme in ("light", "dark"):
     report(f"[{theme}] 충돌한 탭으로 옮겨 준다",
            dialog.nav.currentRow() == dialog._shortcut_page_row)
 
-    editors["clear_log"].setKeySequence(QKeySequence("Ctrl+Shift+K"))
+    editors["toggle_log"].setKeySequence(QKeySequence("Ctrl+Shift+K"))
     editors["clear_search"].clear()
     settle()
     report(f"[{theme}] 고치면 경고가 사라진다", dialog.shortcut_warning.text() == "")
     dialog._save_settings()
     saved = load_config()
     report(f"[{theme}] 바꾼 조합이 저장된다",
-           saved["shortcuts"]["clear_log"] == "Ctrl+Shift+K"
+           saved["shortcuts"]["toggle_log"] == "Ctrl+Shift+K"
            and saved["shortcuts"]["clear_search"] == "",
            f"{saved.get('shortcuts')}")
 
     reopened = SettingsDialog(load_config(), None)
     report(f"[{theme}] 다시 열면 그 값이 보인다",
-           reopened.shortcut_edits["clear_log"].keySequence().toString() == "Ctrl+Shift+K")
+           reopened.shortcut_edits["toggle_log"].keySequence().toString() == "Ctrl+Shift+K")
     reopened._reset_shortcuts()
     report(f"[{theme}] 기본값 되돌리기가 듣는다",
            reopened._shortcut_table() == S.defaults(), f"{reopened._shortcut_table()}")

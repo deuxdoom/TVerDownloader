@@ -3,34 +3,33 @@ from html import escape
 from typing import List, Dict, Optional
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QMenu, QWidget,
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidgetItem, QMessageBox, QSystemTrayIcon, QFileDialog, QWidget,
                              QAbstractSpinBox, QLineEdit, QTextEdit)
 from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QSize, QLocale, QTranslator, QLibraryInfo
 from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
-from src import shortcuts
+from src import autostart, shortcuts
 from src.utils import (load_config, save_config, handle_exception, open_file_location,
                        ERROR_STATUSES, localized_app_name, get_resource_path,
-                       match_tver_url)
+                       is_media_url, match_tver_url)
 from src.qss import build_qss, palette, UI_FONT_FALLBACKS
-from src.message import confirm
+from src.message import confirm, notify
 from src.about_dialog import AboutDialog
 from src.bulk_dialog import BulkAddDialog
 from src.dialogs import SettingsDialog
 from src.series_dialog import SeriesSelectionDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
-from src.widgets import DownloadItemWidget, FavoriteItemWidget, HistoryItemWidget
+from src.widgets import DownloadItemWidget, FavoriteItemWidget, HistoryItemWidget, RoundedMenu
 from src.updater import maybe_show_update
 from src.threads.setup_thread import SetupThread
 from src.ui.main_window_ui import MainWindowUI
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
-NOTICE_RULE = "─" * 12
 FAV_AUTO_ADD_LIMIT = 2
 
 class MainWindow(QMainWindow):
@@ -58,7 +57,14 @@ class MainWindow(QMainWindow):
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
 
     def open_settings(self):
+        """설정 창을 연다. 메인 창이 트레이에 들어가 있어도 뜬다.
+
+        자리를 잡는 일을 exec() 전에 할 수는 없다. 그 시점에는 창이 아직 만들어지지
+        않아 raise_()도 크기 계산도 할 것이 없다. 0ms 타이머로 exec()가 돌리는
+        이벤트 루프 안으로 미룬다.
+        """
         dialog = SettingsDialog(self.config, self)
+        QTimer.singleShot(0, lambda: self._place_dialog(dialog))
         if dialog.exec():
             self.config = load_config()
             self.download_manager.update_config(self.config)
@@ -146,15 +152,18 @@ class MainWindow(QMainWindow):
         self.ui.set_log_visible(visible)
         self.config["log_visible"] = visible
         save_config(self.config)
-        self.append_log("로그 패널을 폈습니다." if visible else "로그 패널을 접었습니다.")
 
     def toggle_theme(self):
         new_theme = "dark" if self.config.get("theme", "light") == "light" else "light"
         self.apply_theme(new_theme)
-        self.append_log(f"테마를 '{new_theme}'(으)로 전환했습니다.")
 
     TEXT_ENTRY_TYPES = (QLineEdit, QTextEdit, QAbstractSpinBox)
     """글자를 입력받는 위젯들. 이 중 하나에 포커스가 있으면 '입력 중'으로 본다."""
+
+    LOG_RULE_MAX = 12
+    """구분선 한쪽에 넣을 괘선의 최대 개수.
+
+    폭이 남는다고 끝까지 채우면 짧은 제목에서 괘선만 늘어져 정작 제목이 묻힌다."""
 
     def apply_shortcuts(self):
         """설정에 저장된 조합으로 단축키를 처음부터 다시 만든다.
@@ -201,7 +210,7 @@ class MainWindow(QMainWindow):
         """
         handlers = {
             "open_settings": self.open_settings,
-            "clear_log": self.clear_log,
+            "toggle_log": self.toggle_log_panel,
             "delete_selected": self._delete_selected_download_items,
             "clear_search": lambda: widget.clear(),
         }
@@ -330,6 +339,7 @@ class MainWindow(QMainWindow):
         self.ui.fav_add_btn.clicked.connect(self.add_favorite); self.ui.fav_del_btn.clicked.connect(self.remove_selected_favorite)
         self.ui.fav_chk_btn.clicked.connect(self.check_all_favorites); self.ui.fav_list.customContextMenuRequested.connect(self.show_fav_menu)
         self.download_manager.log.connect(self.append_log); self.download_manager.item_added.connect(self._add_item_widget)
+        self.download_manager.heading.connect(self.append_heading)
         self.download_manager.progress_updated.connect(self._update_item_widget); self.download_manager.task_finished.connect(self._on_task_finished)
         self.download_manager.queue_changed.connect(lambda q, a: self.ui.queue_count_label.setText(f"{q} 대기 / {a} 진행"))
         self.download_manager.all_tasks_completed.connect(self._on_all_downloads_finished)
@@ -372,7 +382,19 @@ class MainWindow(QMainWindow):
             self._request_add_task(url)
 
     def set_always_on_top(self, on: bool, init: bool = False):
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on); self.show()
+        """항상 위 설정을 켜고 끈다.
+
+        Windows에서는 창 플래그를 바꾸면 창이 숨겨져서 다시 show()를 불러야 한다.
+        다만 아직 한 번도 뜨지 않았을 때는 부르지 않는다. 시작 프로그램으로 켜져
+        트레이에만 있어야 할 실행이 이 자리에서 창을 띄워 버린다.
+
+        보이는지는 플래그를 바꾸기 전에 봐 둔다. 바꾸는 순간 창이 숨겨져서, 그
+        뒤에 물으면 떠 있던 창까지 '안 떠 있었다'고 나온다.
+        """
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
+        if was_visible or not init:
+            self.show()
         if not init: self.config["always_on_top"] = on; save_config(self.config)
         self.ui.on_top_btn.setChecked(on); self.ui.update_pin_button(on)
 
@@ -423,6 +445,46 @@ class MainWindow(QMainWindow):
         if isinstance(server, QLocalServer): server.nextPendingConnection().close()
         self.bring_to_front()
 
+    @staticmethod
+    def _pull_to_front(window):
+        """창을 다른 앱 앞으로 끌어낸다."""
+        window.raise_()
+        window.activateWindow()
+
+    def _place_dialog(self, dialog):
+        """대화상자를 앞으로 끌어내고, 메인 창이 없으면 화면 가운데로 옮긴다.
+
+        트레이 메뉴에서 부르면 다른 앱이 앞에 있을 수 있고, 대화상자에는 작업
+        표시줄 단추가 없어 뒤에 깔리면 되찾을 방법이 마땅치 않다. 그래서 끌어낸다.
+
+        메인 창이 트레이에 들어가 있으면 자리도 직접 잡는다. Qt는 대화상자를 부모
+        가운데에 놓는데, 최소화된 부모로는 그 계산이 되지 않아 화면 왼쪽 위
+        구석(0, 30)에 붙어 나온다. 부모가 보이는 동안에는 손대지 않는다 —
+        그때는 창 가운데가 눈이 가 있는 자리라 그대로가 낫다.
+        """
+        self._pull_to_front(dialog)
+        if self.isVisible() and not self.isMinimized():
+            return
+        self._center_on_cursor_screen(dialog)
+
+    @staticmethod
+    def _center_on_cursor_screen(window):
+        """작업 표시줄을 뺀 영역 안에서 가운데로 옮긴다.
+
+        availableGeometry라서 작업 표시줄과 겹치지 않는다. 마우스가 있는 화면을
+        고르는 것은 방금 트레이를 누른 자리가 그 화면이기 때문이다. 화면보다 큰
+        창이면 가운데 대신 영역 안쪽으로 밀어 넣어, 제목 표시줄이 잘리지 않게 한다.
+        """
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        frame = window.frameGeometry()
+        frame.moveCenter(area.center())
+        x = min(max(frame.x(), area.x()), max(area.x(), area.right() - frame.width() + 1))
+        y = min(max(frame.y(), area.y()), max(area.y(), area.bottom() - frame.height() + 1))
+        window.move(x, y)
+
     def bring_to_front(self):
         if self.isMinimized(): self.showNormal()
         elif not self.isVisible(): self.show()
@@ -440,9 +502,53 @@ class MainWindow(QMainWindow):
         if new_folder: self.config["download_folder"] = new_folder; save_config(self.config); self.download_manager.update_config(self.config); self.append_log(f"다운로드 폴더가 '{new_folder}'(으)로 설정되었습니다."); return True
         return False
 
+    BAD_URL_PREVIEW = 5
+    """알림 창에 그대로 보여 줄 잘못된 줄 수. 나머지는 개수로만 줄인다.
+
+    스무 줄을 통째로 붙여 놓으면 창이 화면을 넘고, 어차피 한 줄만 봐도 무엇을
+    잘못 넣었는지 알 수 있다.
+    """
+
+    BAD_URL_ELIDE = 42
+    """알림 창에 보여 줄 한 줄의 최대 길이. 넘으면 뒤를 줄인다."""
+
+    def _notify_bad_url(self, title: str, lead: str, rejected: List[str]):
+        """주소가 아닌 줄을 알린다.
+
+        어느 줄이 걸렸는지 보여 준다. '주소가 아닙니다'만으로는 여러 줄을 넣었을 때
+        어디를 고쳐야 할지 알 수 없다.
+        """
+        shown = [self._elide(text, self.BAD_URL_ELIDE)
+                 for text in rejected[:self.BAD_URL_PREVIEW]]
+        left = len(rejected) - len(shown)
+        if left:
+            shown.append(f"... 외 {left}개")
+        body = "\n".join([lead, "", *shown, "",
+                          "http:// 또는 https:// 로 시작하는",
+                          "영상 페이지 주소를 넣어주세요."])
+        notify(self, title, body, icon_name="info", color_key="warn",
+               theme=self.config.get("theme", "light"))
+
+    @staticmethod
+    def _elide(text: str, limit: int) -> str:
+        """긴 글을 앞부분만 남기고 줄인다."""
+        return text if len(text) <= limit else text[:limit - 1] + "…"
+
     def process_input_url(self):
+        """입력창의 주소를 받는다. 주소가 아니면 알리고 그대로 둔다.
+
+        예전에는 무엇이 들었든 yt-dlp에 넘겼다. 문장이나 낱말을 잘못 붙여넣으면
+        카드가 하나 생겼다가 오류로 끝나고, 왜 실패했는지는 로그를 봐야 알 수 있었다.
+
+        입력칸을 비우지 않는 이유는, 여기까지 온 글은 대개 고쳐서 다시 쓸 것이기
+        때문이다. 지워 버리면 붙여넣은 것을 다시 찾아와야 한다.
+        """
         url = self.ui.url_input.text().strip()
         if not url: return
+        if not is_media_url(url):
+            self._notify_bad_url("주소를 확인해주세요",
+                                 "다운로드할 수 있는 주소가 아닙니다.", [url])
+            return
         self._process_url(url); self.ui.url_input.clear()
 
     def _request_add_task(self, url: str) -> bool:
@@ -478,6 +584,12 @@ class MainWindow(QMainWindow):
             self._bulk_dialog = None
         if accepted:
             urls = dialog.get_urls()
+            rejected = [u for u in urls if not is_media_url(u)]
+            urls = [u for u in urls if is_media_url(u)]
+            if rejected:
+                self.append_log(f"[알림] 주소가 아닌 {len(rejected)}줄을 건너뜁니다.")
+                self._notify_bad_url("건너뛴 줄이 있습니다",
+                                     "주소가 아니어서 넣지 않은 줄입니다.", rejected)
             normal_urls = [u for u in urls if "/series/" not in u]
             series_urls = [u for u in urls if "/series/" in u]
             for url in normal_urls: self._request_add_task(url)
@@ -587,14 +699,14 @@ class MainWindow(QMainWindow):
         if not isinstance(widget, DownloadItemWidget): return
         selected = self.ui.download_list.selectedItems()
         if len(selected) > 1 and item in selected:
-            menu = QMenu()
+            menu = RoundedMenu()
             menu.addAction(f"선택한 {len(selected)}개 중지 · 대기열에서 제거",
                            self._cancel_selected_downloads)
             menu.addAction(f"선택한 {len(selected)}개 목록에서 삭제",
                            self._delete_selected_download_items)
             menu.exec(QCursor.pos())
             return
-        url = widget.url; menu = QMenu()
+        url = widget.url; menu = RoundedMenu()
         if url in self.download_manager._active_threads or url in self.download_manager._active_conversions:
             menu.addAction("중지", lambda: self.download_manager.stop_task(url))
         elif url in self.download_manager._task_queue:
@@ -610,6 +722,13 @@ class MainWindow(QMainWindow):
         menu.exec(QCursor.pos())
 
     def append_log(self, text: str):
+        """로그 한 줄을 붙인다.
+
+        넣을지 말지는 부르는 쪽이 정한다. 여기에 쌓을 것은 나중에 다시 보면서
+        무슨 일이 있었는지 따져볼 만한 것뿐이다. 파일·대기열·네트워크가 그쪽이고,
+        테마 전환이나 패널 접기처럼 누른 결과가 화면에 바로 보이는 조작은 적어 두어도
+        다시 읽을 일이 없으면서 정작 봐야 할 줄만 밀어낸다.
+        """
         colors = palette(self.config.get("theme", "light"))
         color_map = {
             "[오류]": colors["danger"], "[치명적 오류]": colors["danger"],
@@ -623,18 +742,55 @@ class MainWindow(QMainWindow):
             self.ui.log_output.append(text)
         self._scroll_log_to_end()
 
+    def append_heading(self, title: str, body: str):
+        """제목을 괘선으로 두르고 그 아래에 한 줄을 붙인다.
+
+        다운로드가 시작될 때처럼 로그가 길어진 뒤에도 구간을 눈으로 찾기 위한 줄이다.
+        """
+        self.append_log(f"{self._log_heading(title)}\n{body}")
+
     def append_notice(self, title: str, lines: List[str]):
         """가장 중요한 안내를 굵은 적색으로, 위아래 괘선 사이에 넣어 출력한다.
 
         색과 굵기만으로는 뒤이어 쌓이는 로그에 묻히기 쉬워서 블록을 괘선으로 닫는다.
         """
         colors = palette(self.config.get("theme", "light"))
-        head = f"{NOTICE_RULE} {title} {NOTICE_RULE}"
+        head = self._log_heading(title)
         block = "\n".join([head, *lines, self._rule_matching(head)])
         self.ui.log_output.append(
             f'<span style="color: {colors["notice"]}; font-weight: bold;">'
             f'{self._as_html(block)}</span>')
         self._scroll_log_to_end()
+
+    def _log_text_width(self) -> int:
+        """로그 한 줄이 접히지 않고 들어가는 폭.
+
+        폭의 근거를 위젯이 아니라 고정폭 상수에서 가져온다. 로그 패널을 접은 채로
+        시작하면 그 자리에 배치가 한 번도 돌지 않아 위젯이 창 절반쯤 되는 폭을 들고
+        있고, 그 값으로 괘선을 뽑으면 패널을 펴는 순간 줄이 접힌다.
+
+        세로 스크롤바 폭은 지금 떠 있지 않아도 미리 뺀다. 로그가 쌓여 스크롤바가
+        생기면 그만큼 좁아지면서 이미 찍혀 있던 줄까지 다시 접힌다.
+        """
+        log = self.ui.log_output
+        frame = log.width() - log.maximumViewportSize().width()
+        return int(self.ui.LOG_PANE_WIDTH - frame
+                   - 2 * log.document().documentMargin()
+                   - log.verticalScrollBar().sizeHint().width())
+
+    def _log_heading(self, title: str) -> str:
+        """제목 양옆을 괘선으로 채운 구분선. 로그 폭 안에서 한 줄로 떨어진다.
+
+        개수를 고정해 두면 제목이 긴 쪽이 넘친다. '다운로드 시작'은 양옆 12개일 때
+        389px이라 354px짜리 로그 폭에 들어가지 못하고 두 줄로 접혔다. 제목이 차지하는
+        폭도 글꼴을 재야 아는 값이라, 제목이 쓰고 남은 폭을 양쪽이 반씩 나눠 갖는다.
+        """
+        metrics = self.ui.log_output.fontMetrics()
+        dash_width = metrics.horizontalAdvance("─") or 1
+        available = self._log_text_width() - metrics.horizontalAdvance(f" {title} ")
+        count = min(self.LOG_RULE_MAX, max(1, int(available // dash_width) // 2))
+        rule = "─" * count
+        return f"{rule} {title} {rule}"
 
     def _rule_matching(self, head: str) -> str:
         """head와 같은 폭으로 보이는 괘선을 만든다.
@@ -663,13 +819,13 @@ class MainWindow(QMainWindow):
     def clear_log(self): self.ui.log_output.clear()
 
     def play_file(self, filepath: str):
-        try: os.startfile(filepath); self.append_log(f"영상 재생: {filepath}")
+        try: os.startfile(filepath)
         except Exception as e: self.append_log(f"[오류] 재생 실패: {e}")
 
     def show_history_menu(self, pos):
         item = self.ui.history_list.itemAt(pos);
         if not item: return
-        url = item.data(Qt.ItemDataRole.UserRole); menu = QMenu()
+        url = item.data(Qt.ItemDataRole.UserRole); menu = RoundedMenu()
         menu.addAction("URL 복사", lambda: QGuiApplication.clipboard().setText(url)); menu.addAction("다시 다운로드", lambda: self._request_add_task(url))
         menu.addAction("기록에서 제거", lambda: self.remove_from_history(url)); menu.exec(QCursor.pos())
 
@@ -742,7 +898,7 @@ class MainWindow(QMainWindow):
     def show_fav_menu(self, pos):
         item = self.ui.fav_list.itemAt(pos);
         if not item: return
-        url = item.data(Qt.ItemDataRole.UserRole); menu = QMenu()
+        url = item.data(Qt.ItemDataRole.UserRole); menu = RoundedMenu()
         def check_this_series(): self.series_parser.parse('fav-check', [url]); self.ui.tabs.setCurrentIndex(0)
         menu.addAction("이 시리즈 확인", check_this_series); menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url))
         menu.addAction("삭제", lambda: self.remove_favorite(url)); menu.exec(QCursor.pos())
@@ -770,6 +926,20 @@ class MainWindow(QMainWindow):
             self.quit_application(); event.accept()
         else:
             event.ignore()
+
+    def set_autostart(self, enabled: bool):
+        """시작 프로그램 등록을 켜거나 끈다.
+
+        레지스트리 쓰기가 막히면 체크만 켜진 채 실제로는 등록되지 않는다. 그러면
+        다음 로그인에 안 뜨는 이유를 알 길이 없으므로, 표시를 실제 상태로 되돌리고
+        로그에 남긴다.
+        """
+        if autostart.set_enabled(enabled):
+            self.append_log("[시작 프로그램] 윈도우 시작 시 실행: "
+                            + ("켜짐(트레이로 시작)" if enabled else "꺼짐"))
+        else:
+            self.append_log("[오류] 시작 프로그램 설정을 저장하지 못했습니다.")
+        self.ui.sync_autostart_check()
 
     def quit_application(self):
         self.append_log("프로그램을 종료합니다...")
@@ -911,7 +1081,9 @@ if __name__ == "__main__":
     socket = QLocalSocket()
     socket.connectToServer(SOCKET_NAME)
     if socket.waitForConnected(500):
-        socket.writeData(b'show'); socket.flush(); socket.waitForBytesWritten(1000); socket.close()
+        if not autostart.launched_for_tray():
+            socket.writeData(b'show'); socket.flush(); socket.waitForBytesWritten(1000)
+        socket.close()
         sys.exit(0)
     else:
         QLocalServer.removeServer(SOCKET_NAME)
@@ -921,5 +1093,6 @@ if __name__ == "__main__":
         app.setStyle("Fusion")
         window = MainWindow()
         server.newConnection.connect(window._handle_new_instance)
-        window.show()
+        if not autostart.launched_for_tray():
+            window.show()
         sys.exit(app.exec())
