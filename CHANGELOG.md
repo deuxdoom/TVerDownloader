@@ -40,7 +40,7 @@ TVer Downloader v3.0.0 이후 버전별 변경 사항을 모아 둔 파일입니
 - **주소 입력창의 오른쪽 클릭 메뉴에만 그림자가 지던 문제**
 - **밝은 테마에서 붙여넣기 · 전체 선택 아이콘이 보이지 않던 문제**
 
-[3.3.0]: https://github.com/deuxdoom/TVerDownloader/compare/v3.2.0...HEAD
+[3.3.0]: https://github.com/deuxdoom/TVerDownloader/compare/v3.2.0...v3.3.0
 
 ---
 
