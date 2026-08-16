@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -27,6 +28,7 @@ class ConversionThread(QThread):
         self.quality_cfg = quality_cfg
         self.process = None
         self._stop_flag = False
+        self._process_lock = threading.Lock()
 
     def stop(self):
         """변환을 중단한다.
@@ -34,15 +36,53 @@ class ConversionThread(QThread):
         QThread.terminate()는 실행 중인 스레드를 임의 지점에서 죽여 프로세스를
         통째로 날릴 수 있고, ffmpeg는 고아로 남는다. 자식 프로세스를 끝내서
         run()이 스스로 빠져나오게 한다.
+
+        플래그를 세우는 일과 프로세스를 읽는 일을 자물쇠로 묶는다. 시작 직후에
+        들어온 중단은 ffmpeg가 아직 뜨지 않아 죽일 대상이 없는데, 그 사이에
+        _spawn이 프로세스를 띄우면 플래그만 선 채로 변환이 끝까지 돌아간다.
         """
-        self._stop_flag = True
-        proc = self.process
+        with self._process_lock:
+            self._stop_flag = True
+            proc = self.process
         if proc is None or proc.poll() is not None:
             return
         try:
             proc.kill()
         except Exception:
             pass
+
+    def _spawn(self, command: List[str]) -> Optional[subprocess.Popen]:
+        """중단 요청과 겹치지 않게 ffmpeg를 띄운다. 이미 멈추라고 했으면 뜨지 않는다.
+
+        stop()과 같은 자물쇠를 쓰므로 둘 중 어느 쪽이 먼저 들어와도 결과가 하나다.
+        먼저면 여기서 뜨지 않고, 나중이면 이미 self.process가 채워져 있어 죽는다.
+        """
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        with self._process_lock:
+            if self._stop_flag:
+                return None
+            self.process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace",
+                startupinfo=get_startupinfo(), creationflags=flags)
+            return self.process
+
+    def _discard_output(self, output_path: Path) -> None:
+        """쓰다 만 출력 파일을 지운다.
+
+        ffmpeg는 첫 프레임부터 목적지에 직접 쓴다. 중간에 끊기면 재생되지 않는
+        파일이 이름만 멀쩡하게 남아, 나중에 폴더를 열었을 때 제대로 받아 둔
+        영상과 구별되지 않는다.
+
+        지우지 못했으면 조용히 넘기지 않는다. 파일이 남았다는 것을 알아야
+        손으로 지울 수 있다.
+        """
+        if not output_path.exists():
+            return
+        try:
+            output_path.unlink()
+        except OSError as e:
+            self.log.emit(f"[오류] 중단된 파일을 지우지 못했습니다 ('{output_path.name}'): {e}")
 
     def _get_video_encoder_args(self) -> List[str]:
         """선호 코덱과 GPU/CPU 설정에 맞는 FFmpeg 인코더 및 품질 인자를 반환합니다."""
@@ -163,20 +203,17 @@ class ConversionThread(QThread):
 
         try:
             self.log.emit(f"파일 변환 시작: '{self.input_path.name}' -> '{output_path.name}'")
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            proc = self._spawn(command)
+            if proc is None:
+                self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
+                self.finished.emit(False, self.url, ""); return
 
-            self.process = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace",
-                startupinfo=get_startupinfo(), creationflags=flags)
-            _, stderr_text = self.process.communicate()
-            returncode = self.process.returncode
+            _, stderr_text = proc.communicate()
+            returncode = proc.returncode
 
             if self._stop_flag:
                 self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
-                if output_path.exists():
-                    try: output_path.unlink()
-                    except OSError: pass
+                self._discard_output(output_path)
                 self.finished.emit(False, self.url, ""); return
 
             if returncode == 0:
@@ -191,8 +228,9 @@ class ConversionThread(QThread):
                 self.finished.emit(True, self.url, str(output_path))
             else:
                 self.log.emit(f"[오류] 파일 변환 실패: {stderr_text}")
-                if output_path.exists(): output_path.unlink()
+                self._discard_output(output_path)
                 self.finished.emit(False, self.url, "")
         except Exception as e:
             self.log.emit(f"[오류] 파일 변환 중 예외 발생: {e}")
+            self._discard_output(output_path)
             self.finished.emit(False, self.url, "")

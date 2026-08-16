@@ -43,6 +43,28 @@ NO_AUDIO_STATUS = "음성 없음"
 대상으로 삼으려고 ERROR_STATUSES에 넣지만, 색만은 따로 구분한다.
 """
 
+def item_percent(percent, previous: int) -> int:
+    """항목 하나의 진행률(0~100)을 정리한다. 값이 없으면 이전 값을 지킨다.
+
+    **여기 오는 percent는 이미 항목 전체 기준이다.** yt-dlp는 영상과 소리를 따로
+    받으면서 조각마다 0->100을 새로 세는데, 그 환산은 조각 수를 아는
+    DownloadThread가 끝내고 보낸다. 사이트마다 조각 수가 달라(유튜브는 하나로
+    주기도 한다) 화면 쪽에서는 알 수 없는 값이다.
+
+    진행률이 없는 알림(상태만 바뀐 경우)에 이전 값을 돌려주는 이유는, 그때마다
+    0으로 떨어지면 받는 중에 눈금이 깜빡이기 때문이다.
+
+    카드와 트레이가 같은 값을 보여야 하므로 이 정리는 여기 한 곳에서만 한다.
+    """
+    if percent is None:
+        return previous
+    try:
+        value = float(percent)
+    except (TypeError, ValueError):
+        return previous
+    return int(max(0.0, min(100.0, value)))
+
+
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류", NO_AUDIO_STATUS}
 
 FINISHED_STATUSES = {"완료", NO_AUDIO_STATUS}
@@ -167,6 +189,7 @@ def load_config() -> Dict[str, Any]:
         "quality": "bv*+ba/b",
         "preferred_codec": "original",
         "auto_check_favorites_on_start": True,
+        "auto_update_check": True,
         "always_on_top": False,
         "log_visible": True,
         "clipboard_watch": False,

@@ -9,12 +9,13 @@ from PyQt6.QtGui import QAction, QFont
 import webbrowser
 
 from src import autostart, shortcuts
-from src.appicon import get_app_icon
+from src.appicon import get_app_icon, app_icon_with_progress
 from src.titlelogo import LOGO_HEIGHT, build_logo
 from src.utils import localized_app_name
 from src.icons import get_icon
 from src.qss import palette
-from src.widgets import GridListWidget, FavoriteItemWidget, RoundedMenu
+from src.widgets import (GridListWidget, FavoriteItemWidget, RoundedMenu,
+                         EmptyStateOverlay, NoFocusDelegate)
 
 class MainWindowUI:
     ICON_BUTTON_SIZE = 32
@@ -31,9 +32,14 @@ class MainWindowUI:
     로그를 접으면 MIN_WIDTH로 돌아가 좁은 화면에서도 쓸 수 있다.
     """
     MIN_HEIGHT = 620
-    TAB_ICONS = (("download", "ctx_download"),
-                 ("tab_history", "ctx_history"),
-                 ("tab_favorites", "ctx_favorites"))
+    DEFAULT_WIDTH = 1100
+    DEFAULT_HEIGHT = 700
+    """처음 뜰 때의 크기. 화면이 이보다 좁으면 `_apply_initial_geometry`가 줄인다."""
+    TAB_ICONS = (("download", "ctx_download", "받는 중인 영상 목록"),
+                 ("tab_history", "ctx_history", "지금까지 받은 영상"),
+                 ("tab_favorites", "ctx_favorites", "새 회차를 챙길 시리즈"))
+    """탭마다 (아이콘, 강조색, 툴팁). 탭 이름만으로는 무엇이 담기는지 애매해서
+    한 줄 설명을 붙인다. 이름 옆에 늘 붙여 두기에는 탭 줄이 길어진다."""
     FAV_COLUMNS = 2
     FAV_MIN_CARD_WIDTH = 340
     LOG_PANE_WIDTH = 390
@@ -88,6 +94,22 @@ class MainWindowUI:
         label.setMinimumHeight(self.HEADER_ROW_HEIGHT)
         return label
 
+    def _hide_focus_rect(self, list_widget):
+        """고른 행에 사각 초점 선이 그려지지 않게 한다(`NoFocusDelegate`).
+
+        델리게이트를 목록의 자식으로 두어 목록과 수명을 같이하게 한다.
+        """
+        list_widget.setItemDelegate(NoFocusDelegate(list_widget))
+
+    def _add_empty_state(self, list_widget, icon_name, title, description,
+                         filtered_title="", filtered_description=""):
+        """목록에 빈 상태 안내를 얹고 테마 전환 대상으로 등록한다."""
+        overlay = EmptyStateOverlay(list_widget, icon_name, title, description,
+                                    filtered_title, filtered_description,
+                                    theme=self._theme)
+        self._empty_states.append(overlay)
+        return overlay
+
     def _make_search_input(self, placeholder: str = "검색...") -> QLineEdit:
         """탭 제목 줄 오른쪽에 놓는 검색칸. 세 탭이 같은 모양을 쓴다."""
         box = QLineEdit(placeholderText=placeholder)
@@ -99,8 +121,9 @@ class MainWindowUI:
         self.main_window = main_window
         main_window.setWindowIcon(get_app_icon())
         main_window.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
-        main_window.resize(1100, 700)
+        main_window.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
         self._icon_buttons = []
+        self._empty_states = []
         self._theme = "light"
         self._icon_colors = palette("light")
         self._log_visible = True
@@ -136,6 +159,8 @@ class MainWindowUI:
         self.update_pin_button(self.on_top_btn.isChecked())
         for btn in self._icon_buttons:
             self._paint_icon(btn)
+        for overlay in self._empty_states:
+            overlay.apply_theme(theme)
         self.refresh_tab_icons()
 
     def update_theme_button(self, theme):
@@ -250,6 +275,7 @@ class MainWindowUI:
         self._create_favorites_tab()
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self.refresh_tab_icons()
+        self._apply_tab_tooltips()
         root_layout.addWidget(self.tabs, 1)
 
     def _on_tab_changed(self, _index):
@@ -262,11 +288,17 @@ class MainWindowUI:
         해당 색으로 새로 만들어 넣어야 한다.
         """
         current = self.tabs.currentIndex()
-        for index, (name, ctx_key) in enumerate(self.TAB_ICONS):
+        for index, (name, ctx_key, _tooltip) in enumerate(self.TAB_ICONS):
             if index >= self.tabs.count():
                 break
             color_key = ctx_key if index == current else "text_dim"
             self.tabs.setTabIcon(index, get_icon(name, self._icon_colors[color_key], self.ICON_SIZE))
+
+    def _apply_tab_tooltips(self):
+        for index, (_name, _ctx_key, tooltip) in enumerate(self.TAB_ICONS):
+            if index >= self.tabs.count():
+                break
+            self.tabs.setTabToolTip(index, tooltip)
 
     def _create_download_tab(self):
         """다운로드 목록과 로그를 좌우로 놓는다.
@@ -300,6 +332,11 @@ class MainWindowUI:
         self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.download_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.download_list.setSpacing(6)
+        self._hide_focus_rect(self.download_list)
+        self.download_empty = self._add_empty_state(
+            self.download_list, "download", "다운로드 중인 영상이 없습니다",
+            "위 다운로드 주소창에 TVer 주소를 붙여넣고 다운로드를 누르면 "
+            "여기에서 다운로드가 진행됩니다.")
         left_layout.addWidget(self.download_list, 1)
 
         right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
@@ -352,7 +389,12 @@ class MainWindowUI:
         layout.addLayout(top_controls)
         self.history_list = QListWidget(objectName="HistoryList")
         self.history_list.setSpacing(6)
+        self._hide_focus_rect(self.history_list)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_empty = self._add_empty_state(
+            self.history_list, "tab_history", "받은 영상이 아직 없습니다",
+            "다운로드가 끝난 영상이 여기에 차례로 남습니다.",
+            "찾는 기록이 없습니다", "다른 낱말로 찾아보세요.")
         layout.addWidget(self.history_list, 1)
         self.tabs.addTab(tab, "기록")
 
@@ -376,9 +418,15 @@ class MainWindowUI:
                                        min_item_width=self.FAV_MIN_CARD_WIDTH)
         self.fav_list.setObjectName("FavoritesList")
         self.fav_list.setSpacing(6)
+        self._hide_focus_rect(self.fav_list)
         self.fav_list.set_item_height(FavoriteItemWidget.CARD_HEIGHT)
         self.fav_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.fav_empty = self._add_empty_state(
+            self.fav_list, "tab_favorites", "담아 둔 시리즈가 없습니다",
+            "시리즈 주소를 담아 두면 프로그램을 켤 때 새 회차를 찾아 줍니다. "
+            "설정 > 일반에서 끌 수 있습니다.",
+            "찾는 시리즈가 없습니다", "다른 낱말로 찾아보세요.")
         layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, "즐겨찾기")
 
     TRAY_GITHUB_URL = "https://github.com/deuxdoom/TVerDownloader"
@@ -404,7 +452,8 @@ class MainWindowUI:
         바꾸고 싶은 경우가 있어서, 창까지 끌어내면 하던 일을 되돌려 놓아야 한다.
         """
         tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
-        tray_icon.setToolTip(f"{localized_app_name()} {app_version}")
+        self._tray_name = f"{localized_app_name()} {app_version}"
+        self.update_tray_status(0, 0, None)
         tray_menu = RoundedMenu()
 
         restore_action = QAction(f"{localized_app_name()} 열기", self.main_window,
@@ -435,6 +484,29 @@ class MainWindowUI:
         tray_menu.aboutToShow.connect(self.sync_autostart_check)
         self.sync_autostart_check()
         tray_icon.setContextMenu(tray_menu); tray_icon.show()
+
+    def update_tray_status(self, queued: int, active: int, percent=None):
+        """트레이 툴팁을 지금 상태로 바꾼다.
+
+        커서를 올려야 보이는 자리라, 평소에는 앱 이름만 두고 받는 중일 때만 줄을
+        늘린다. 아무것도 안 하는데 '0 대기 / 0 진행'이 붙어 있으면 읽을 것이
+        늘기만 하고 알려 주는 것은 없다.
+
+        진행률은 실제로 도는 것이 있을 때만 붙는다(percent가 None이면 뺀다).
+        줄만 서 있고 아직 아무것도 시작하지 않았으면 '0 진행'이 이미 그 말을 하고
+        있어서, 뒤에 붙는 '0%'는 더 알려 주는 것 없이 읽을 것만 늘린다. 준비가
+        끝나지 않았거나 폴더가 없어서 대기열이 그대로 서 있는 동안 계속 보이는
+        줄이기도 하다.
+
+        고리도 같은 값으로 함께 바꾼다. 커서를 올려야 보이는 툴팁과 늘 보이는
+        고리가 다른 숫자를 말하면 어느 쪽을 믿어야 할지 알 수 없다.
+        """
+        lines = [self._tray_name]
+        if queued or active:
+            head = f"{queued} 대기 / {active} 진행"
+            lines.append(f"{head} · {percent}%" if percent is not None else head)
+        self.main_window.tray_icon.setToolTip("\n".join(lines))
+        self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))
 
     def sync_autostart_check(self):
         """레지스트리에 걸린 실제 상태로 체크 표시를 맞춘다.

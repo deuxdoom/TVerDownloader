@@ -1,12 +1,12 @@
 import os
 import subprocess
 from typing import List, Dict, Optional, Any
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QDeadlineTimer, pyqtSignal
 
 from src.threads.download_thread import DownloadThread
 from src.threads.conversion_thread import ConversionThread
 from src.history_store import HistoryStore
-from src.utils import get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path
+from src.utils import get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path, item_percent
 
 class DownloadManager(QObject):
     log = pyqtSignal(str)
@@ -31,6 +31,96 @@ class DownloadManager(QObject):
         self._active_urls: set[str] = set(); self._logged_start: set[str] = set()
         self._conversion_meta_cache: Dict[str, Dict] = {}
         self._concurrency_logged = False
+        self._shutting_down = False
+        self._item_percent: Dict[str, int] = {}
+
+    def overall_progress(self) -> Optional[int]:
+        """이번 묶음 전체의 진행률(0~100). 아무것도 걸려 있지 않으면 None.
+
+        분모는 '지금 돌고 있는 것'이 아니라 **묶음 전체**다(_active_urls). 진행
+        중인 것만 세면 항목이 끝나 빠질 때마다 진행률이 뒤로 간다 — 90%짜리와
+        20%짜리가 있을 때 앞의 것이 끝나면 55%에서 20%로 떨어진다. 다 끝나
+        _active_urls가 비워질 때 묶음도 함께 끝난다.
+
+        차례를 기다리는 항목은 0으로 센다. 하나를 받는 동안 열 개가 대기 중이면
+        전체로는 이제 시작한 것이 맞다.
+
+        변환 중인 항목은 받기를 마쳤으므로 100으로 남는다. 변환은 진행률을
+        내주지 않아 더 잘게 나눌 수가 없다. 그래서 변환만 남은 구간에서는 링이
+        가득 찬 채로 멈춰 있고, 몇 개가 남았는지는 툴팁의 '진행' 수가 알려 준다.
+        """
+        total = len(self._active_urls)
+        if not total:
+            return None
+        done = 0
+        for url in self._active_urls:
+            if self.is_queued(url):
+                continue
+            if self.is_busy(url):
+                done += self._item_percent.get(url, 0)
+            else:
+                done += 100
+        return min(100, done // total)
+
+    STOP_WAIT_MS = 3000
+    """stop_all()이 스레드들의 뒷정리를 기다리는 전체 시간.
+
+    프로세스를 죽이는 것과 쓰다 만 파일을 지우는 것은 다른 곳에서 일어난다.
+    kill은 부르는 자리에서 끝나지만, 지우는 일은 스레드가 run()에서 빠져나오며
+    한다. 스레드마다 따로 세지 않고 전체에 한 번 거는 값이다 — 종료를 누른 뒤
+    창이 몇 초씩 붙잡혀 있으면 멈춘 것으로 보인다.
+    """
+
+    def is_busy(self, url: str) -> bool:
+        """받는 중이거나 변환 중. 밖에서 프로세스가 돌고 있다는 뜻이다.
+
+        변환은 다운로드가 끝난 뒤 도는 별도 스레드라 _active_threads에 없다.
+        진행 여부를 물으면서 다운로드만 보면 변환 중인 항목이 '아무것도 하지 않는
+        항목'으로 새어 나가, 목록에서 지워도 ffmpeg는 계속 돈다.
+        """
+        return url in self._active_threads or url in self._active_conversions
+
+    def is_queued(self, url: str) -> bool:
+        """차례를 기다리는 중. 아직 아무 프로세스도 뜨지 않았다."""
+        return url in self._task_queue
+
+    def is_pending(self, url: str) -> bool:
+        """아직 끝나지 않았다. 진행 중이거나 기다리는 중."""
+        return self.is_busy(url) or self.is_queued(url)
+
+    def pending_count(self) -> int:
+        """아직 끝나지 않은 항목 수(받는 중 + 변환 중 + 대기 중).
+
+        업데이트처럼 앱을 껐다 켜는 일을 하기 전에 물어보려고 쓴다. 자료구조를
+        밖에서 세지 않도록 여기 둔다 — 변환만 남은 항목을 빠뜨리는 실수가
+        예전에 아홉 군데에서 났다.
+        """
+        return len(self._task_queue) + len(self._active_threads) + len(self._active_conversions)
+
+    def stop_all(self) -> int:
+        """진행 중인 다운로드와 변환을 모두 멈추고, 멈춘 개수를 돌려준다.
+
+        대기열을 먼저 비운다. 멈춘 작업이 끝났다고 알려 오는 순간
+        check_queue_and_start가 다음 것을 새로 띄우는데, 종료 직전에 뜬
+        프로세스는 거둘 사람이 없어 그대로 남는다.
+
+        멈춘 뒤 기다리는 것은 뒷정리가 스레드 쪽에 있기 때문이다. 기다리지 않고
+        프로세스를 끝내면 쓰다 만 파일을 지우는 코드에 차례가 오지 않는다.
+        기다림은 전체 STOP_WAIT_MS 하나로 묶어, 작업이 많아도 종료가 늘어지지 않게 한다.
+        """
+        self._shutting_down = True
+        self._task_queue.clear()
+        self._item_percent.clear()
+        threads = list(self._active_threads.values()) + list(self._active_conversions.values())
+        for thread in threads:
+            thread.stop()
+        deadline = QDeadlineTimer(self.STOP_WAIT_MS)
+        for thread in threads:
+            if not thread.wait(deadline):
+                self.log.emit("[알림] 정리가 끝나기 전에 종료합니다. 받다 만 파일이 남을 수 있습니다.")
+                break
+        self._update_queue_counter()
+        return len(threads)
 
     def set_paths(self, ytdlp_path: str, ffmpeg_path: str):
         self.ytdlp_path = ytdlp_path; self.ffmpeg_path = ffmpeg_path
@@ -60,6 +150,7 @@ class DownloadManager(QObject):
         return False
 
     def check_queue_and_start(self):
+        if self._shutting_down: return
         if not self.ytdlp_path or not self.ffmpeg_path: return
         max_concurrent = self.config.get("max_concurrent_downloads", DEFAULT_PARALLEL)
         if self._task_queue and not self._concurrency_logged:
@@ -99,6 +190,8 @@ class DownloadManager(QObject):
         if url not in self._logged_start and 'log' in payload:
             self._logged_start.add(url)
             self.heading.emit("다운로드 시작", url)
+        self._item_percent[url] = item_percent(payload.get("percent"),
+                                               self._item_percent.get(url, 0))
         self.progress_updated.emit(url, payload)
 
     def _get_video_codec(self, filepath: str) -> Optional[str]:
@@ -206,12 +299,14 @@ class DownloadManager(QObject):
         self._check_completion()
 
     def _check_completion(self):
+        if self._shutting_down: return
         self._update_queue_counter()
 
         self.check_queue_and_start()
 
         if not self._task_queue and not self._active_threads and not self._active_conversions:
             self._active_urls.clear(); self._logged_start.clear()
+            self._item_percent.clear()
             self._concurrency_logged = False
             self.all_tasks_completed.emit()
 
@@ -227,4 +322,5 @@ class DownloadManager(QObject):
         except ValueError: pass
         self._active_urls.discard(url)
         self._logged_start.discard(url)
+        self._item_percent.pop(url, None)
         self._conversion_meta_cache.pop(url, None)

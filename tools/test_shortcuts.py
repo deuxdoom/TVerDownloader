@@ -19,6 +19,8 @@ from src.dialogs import SettingsDialog
 from src.qss import build_qss
 from src.ui.main_window_ui import MainWindowUI
 from src.utils import load_config
+from types import SimpleNamespace
+from src.input_sources import InputSources
 
 T.setup_app_font(app)
 T.setup_translations(app)
@@ -36,6 +38,18 @@ def report(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}")
     if detail:
         print(f"        {detail}")
+
+
+def teardown(*windows):
+    """app이 살아 있는 동안 창을 정리한다(test_log.teardown과 같은 이유).
+
+    파이썬이 끝난 뒤 Qt가 위젯 그물을 헐면 이따금 access violation으로 끝난다.
+    검사는 모두 통과한 뒤에 벌어지는 일이지만 종료 코드가 139가 되어 결과를 가린다.
+    """
+    for window in windows:
+        window.close()
+        window.deleteLater()
+    settle()
 
 
 def settle():
@@ -80,6 +94,13 @@ report("빈 조합끼리는 겹친 것이 아니다",
                     "delete_selected": "Del", "clear_search": "Esc"}) == [])
 
 
+class ProbeInput(InputSources):
+    """진짜 다중 추가 창은 exec()로 멈춰 서므로, 불렸다는 것만 받아 둔다."""
+
+    def open_bulk_add(self, initial_urls=None):
+        self.window.calls.append(("bulk", list(initial_urls or [])))
+
+
 class Host(QMainWindow):
     """MainWindow에서 단축키·드롭 부분만 떼어 붙인 시험대.
 
@@ -98,6 +119,9 @@ class Host(QMainWindow):
         self.config = config
         self.logs = []
         self.calls = []
+        self.download_list = SimpleNamespace(
+            delete_selected=lambda: self.calls.append("delete_selected"))
+        self.input_sources = ProbeInput(self)
         self._shortcuts = []
         self._guarded_shortcuts = []
         self.setAcceptDrops(True)
@@ -113,17 +137,9 @@ class Host(QMainWindow):
         self.calls.append("toggle_log")
         self.ui.set_log_visible(not self.ui.is_log_visible())
 
-    def _delete_selected_download_items(self):
-        self.calls.append("delete_selected")
-
-    def open_bulk_add(self, initial_urls=None):
-        self.calls.append(("bulk", list(initial_urls or [])))
-
     apply_shortcuts = T.MainWindow.apply_shortcuts
     _shortcut_handler = T.MainWindow._shortcut_handler
     _sync_shortcut_guard = T.MainWindow._sync_shortcut_guard
-    _urls_from_mime = T.MainWindow._urls_from_mime
-    _accept_dropped_urls = T.MainWindow._accept_dropped_urls
     dragEnterEvent = T.MainWindow.dragEnterEvent
     dragMoveEvent = T.MainWindow.dragMoveEvent
     dropEvent = T.MainWindow.dropEvent
@@ -165,20 +181,20 @@ host.apply_shortcuts()
 
 print()
 print("=== 2. 드롭 판별 ===")
-report("uri-list에서 골라낸다", host._urls_from_mime(mime(urls=[EP])) == [EP])
-report("텍스트만 있어도 골라낸다", host._urls_from_mime(mime(text=EP)) == [EP])
-report("둘 다 실려 와도 한 번만", host._urls_from_mime(mime(urls=[EP], text=EP)) == [EP],
-       f"{host._urls_from_mime(mime(urls=[EP], text=EP))}")
+report("uri-list에서 골라낸다", host.input_sources.urls_from_mime(mime(urls=[EP])) == [EP])
+report("텍스트만 있어도 골라낸다", host.input_sources.urls_from_mime(mime(text=EP)) == [EP])
+report("둘 다 실려 와도 한 번만", host.input_sources.urls_from_mime(mime(urls=[EP], text=EP)) == [EP],
+       f"{host.input_sources.urls_from_mime(mime(urls=[EP], text=EP))}")
 report("여러 줄 텍스트를 순서대로",
-       host._urls_from_mime(mime(text="\n".join([EP, SR, EP2]))) == [EP, SR, EP2])
+       host.input_sources.urls_from_mime(mime(text="\n".join([EP, SR, EP2]))) == [EP, SR, EP2])
 report("TVer가 아니면 버린다",
-       host._urls_from_mime(mime(urls=["https://www.youtube.com/watch?v=abc"])) == [])
+       host.input_sources.urls_from_mime(mime(urls=["https://www.youtube.com/watch?v=abc"])) == [])
 report("섞여 오면 TVer만 남긴다",
-       host._urls_from_mime(mime(text="\n".join(["https://example.com", EP, "메모"]))) == [EP])
+       host.input_sources.urls_from_mime(mime(text="\n".join(["https://example.com", EP, "메모"]))) == [EP])
 report("파일을 끌어다 놓으면 무시",
-       host._urls_from_mime(mime(urls=["file:///C:/video.mp4"])) == [])
+       host.input_sources.urls_from_mime(mime(urls=["file:///C:/video.mp4"])) == [])
 report("사칭 주소는 거른다",
-       host._urls_from_mime(mime(text="https://tver.jp.evil.com/episodes/ep1")) == [])
+       host.input_sources.urls_from_mime(mime(text="https://tver.jp.evil.com/episodes/ep1")) == [])
 
 print()
 print("=== 3. 드롭 흐름 ===")
@@ -330,7 +346,7 @@ print()
 print("=== 6. 입력창 Enter ===")
 source = (_bootstrap.ROOT / "TVerDownloader.py").read_text(encoding="utf-8")
 report("Enter가 다운로드에 연결돼 있다",
-       "self.ui.url_input.returnPressed.connect(self.process_input_url)" in source)
+       "self.ui.url_input.returnPressed.connect(self.input_sources.process_input_url)" in source)
 entered = []
 host.ui.url_input.returnPressed.connect(lambda: entered.append(1))
 host.ui.url_input.setText(EP)
@@ -411,7 +427,9 @@ for theme in ("light", "dark"):
     report(f"[{theme}] 되돌린 값이 저장된다", load_config()["shortcuts"] == S.defaults())
     reopened.close()
     dialog.close()
+    teardown(reopened, dialog)
 
+teardown(host)
 dialogs_module.QMessageBox = real_box
 if os.path.exists("downloader_config.json"):
     os.remove("downloader_config.json")

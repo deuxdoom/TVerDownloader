@@ -8,40 +8,83 @@ from collections import deque
 
 from PyQt6 import sip
 from PyQt6.QtCore import (
-    QObject, Qt, QThread, pyqtSignal, QSize, QTimer, QRectF,
+    QObject, Qt, QThread, pyqtSignal, QSize, QTimer, QRectF, QEvent,
     QPropertyAnimation, QEasingCurve, pyqtProperty,
 )
-from PyQt6.QtGui import QPixmap, QAction, QColor, QPainter, QPainterPath
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout, QProgressBar, QDialog,
-    QScrollArea, QMenu, QFileDialog, QToolButton, QListWidget, QListView,
-    QSizePolicy
+    QScrollArea, QMenu, QToolButton, QListWidget, QListView,
+    QSizePolicy, QStyledItemDelegate, QStyle
 )
 
 from src.icons import get_icon
 from src.qss import blend, palette
-from src.utils import ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS
+from src.utils import ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS, item_percent
 
 THUMBNAIL_CACHE_DIR = Path("thumbnails")
 
 LIST_THUMB_W, LIST_THUMB_H = 128, 72
 
 
+def apply_menu_shape(menu: QMenu):
+    """메뉴를 '모서리가 둥글고 테두리만 있는' 모양으로 만드는 창 힌트 세 가지.
+
+    `RoundedMenu`가 쓰는 것과 같은 것을 이미 만들어진 메뉴에도 걸 수 있게 떼어
+    두었다. 입력칸 우클릭 메뉴는 Qt 안쪽에서 만들어져 우리가 클래스를 고를 수
+    없는데, 그 메뉴만 그림자가 지고 모양이 달랐다(`MenuShapeGuard`).
+
+    두 곳이 같은 함수를 부르게 해 둔 이유는, 한쪽만 고치면 우리 메뉴와 Qt 메뉴가
+    조금씩 달라 보이기 때문이다. 무엇을 왜 거는지는 `RoundedMenu` 설명에 있다.
+    """
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+
+
 class RoundedMenu(QMenu):
-    """모서리가 둥글게 보이는 메뉴.
+    """모서리가 둥글고 테두리만 있는 메뉴.
 
-    QSS의 border-radius만으로는 둥글어지지 않는다. 메뉴는 자기 창을 가진 팝업이라
-    모서리 바깥을 창 배경색이 그대로 채우고, 둥근 테두리만 그 위에 얹혀 네 귀퉁이가
-    각진 채로 남는다. 창 배경을 투명으로 만들어야 QSS가 그린 모양이 곧 창 모양이 된다.
+    세 가지를 함께 걸어야 한다. 하나라도 빠지면 눈에 보이는 결과가 달라진다.
 
-    창 종류(FramelessWindowHint)는 건드리지 않는다. NoDropShadowWindowHint까지 붙이면
-    모서리는 둥글어지지만 Windows가 그려 주던 그림자가 사라져 메뉴가 배경에 붙어
-    보인다. 투명 배경만 켜면 그림자는 그대로 남는다.
+    1. `WA_TranslucentBackground` — QSS의 border-radius만으로는 둥글어지지 않는다.
+       메뉴는 자기 창을 가진 팝업이라 모서리 바깥을 창 배경이 채우고, 둥근 테두리만
+       그 위에 얹혀 네 귀퉁이가 각진 채로 남는다.
+    2. `FramelessWindowHint` — **이것이 빠지면 모서리 바깥이 까맣게 찍힌다.**
+       투명 속성만 켜도 Qt는 창을 알파로 합성하지 않아, 둥근 모양 바깥이 검게 남는다.
+       화면을 직접 찍어 재 보면 모서리 밝기가 0이다(붙이면 226).
+    3. `NoDropShadowWindowHint` — 그림자를 끈다. 테두리만 있는 쪽이 깔끔하다.
+
+    예전 주석은 1번만으로 충분하고 2번을 붙이면 그림자가 사라진다고 적어 두었으나
+    잘못된 관찰이다. 그때 '그림자가 남았다'고 본 어두운 가장자리는 실은 이 검은
+    모서리였다. 그림자를 실제로 없애는 것은 3번뿐이다.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        apply_menu_shape(self)
+        self.setProperty("checkmarks", True)
+        self.aboutToShow.connect(self._sync_checkmark_space)
+
+    def _sync_checkmark_space(self):
+        """체크 표시를 쓰지 않는 메뉴는 글자 앞자리를 비워 두지 않는다.
+
+        메뉴 항목의 왼쪽 여백은 체크 표시가 들어갈 자리다. 체크할 것이 하나도 없는
+        메뉴에서는 그 자리가 그냥 빈칸으로 남아 글이 오른쪽으로 밀려 보인다.
+
+        기본값은 '자리 없음'이고 필요할 때만 넓힌다(QSS의 `QMenu[checkmarks="true"]`).
+        그래야 Qt가 직접 만드는 입력칸 우클릭 메뉴처럼 우리 손을 거치지 않는
+        메뉴도 빈칸 없이 나온다. 그쪽에도 체크 항목은 없다.
+
+        판단을 항목을 넣을 때가 아니라 열기 직전에 하는 이유는, 항목을 만든 뒤에
+        checkable을 켜는 경우가 있어서다. 그때는 넣는 시점에 물어봐야 답이 없다.
+        """
+        checkmarks = any(action.isCheckable() for action in self.actions())
+        if self.property("checkmarks") == checkmarks:
+            return
+        self.setProperty("checkmarks", checkmarks)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class ElidedLabel(QLabel):
@@ -77,6 +120,27 @@ class ElidedLabel(QLabel):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_elide()
+
+
+class NoFocusDelegate(QStyledItemDelegate):
+    """행에 그려지는 초점 사각형을 지운다.
+
+    행을 고르면(정확히는 그 행이 current가 될 때) 스타일이 행 상자를 그대로 두르는
+    각진 선을 그린다. 카드는 모서리가 둥글어서 그 선이 카드 밖으로 삐져나오고,
+    네 귀퉁이에 사각 자국이 남는다. 고르기 전에는 멀쩡하다가 고른 뒤에만 나타난다.
+
+    **QSS로는 지워지지 않는다.** `::item`에 `outline: none`을 넣어도 그대로 그려지고,
+    행 배경색을 투명으로 바꿔도 마찬가지다 — 그리는 것이 배경이 아니라 초점
+    사각형이라서다. 실측하면 카드 우상단 대각선에서 목록 배경(242,244,247)이어야 할
+    자리가 (213,214,219)로 바뀌고, 이 델리게이트를 끼우면 되돌아온다.
+
+    포커스 정책을 끄는 방법도 있지만 그러면 목록에서 방향키와 Del이 듣지 않는다.
+    그리는 순간에만 상태 비트를 떼는 편이 잃는 것이 없다.
+    """
+
+    def paint(self, painter, option, index):
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, option, index)
 
 
 class GridListWidget(QListWidget):
@@ -129,6 +193,163 @@ class GridListWidget(QListWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.relayout()
+
+
+class EmptyStateOverlay(QWidget):
+    """목록이 비었을 때 그 위에 겹쳐 보이는 안내. 아이콘 하나와 글 두 줄.
+
+    빈 목록은 아무 말도 하지 않는다. 처음 켠 사람에게는 고장 난 것인지 아직
+    할 일이 남은 것인지 구별할 단서가 없어서, 세 탭 모두 무엇을 하면 되는지
+    한 줄로 알려 준다.
+
+    **목록 안에 항목으로 넣지 않고 뷰포트 위에 겹친다.** 항목으로 넣으면 그것도
+    한 줄이라 선택되고 우클릭 메뉴가 뜨고 개수에 잡힌다. 지울 때를 놓치면 카드와
+    나란히 남기도 한다. 겹쳐 두면 목록은 비어 있는 그대로다.
+
+    **마우스는 통과시킨다**(`WA_TransparentForMouseEvents`). 뷰포트를 통째로
+    덮으므로, 그러지 않으면 빈 목록에서 우클릭이 막히고 창으로 끌어다 놓는
+    주소도 이 위젯이 가로챈다.
+
+    보일지 말지는 목록 모델이 알려 주는 대로 따라간다. 항목을 넣고 빼는 곳이
+    창 쪽 여러 군데라, 그때마다 갱신을 부르게 하면 언젠가 한 곳을 빠뜨린다.
+    """
+
+    ICON_SIZE = 44
+    MARGIN = 24
+    TEXT_MAX_WIDTH = 320
+    """설명 줄의 최대 폭. 창을 넓히면 한 줄이 끝없이 길어져 읽는 눈이 되돌아온다.
+    목록이 이보다 좁으면(최소 폭 창의 다운로드 칸) 그 폭에 맞춰 줄인다."""
+
+    def __init__(self, list_widget: QListWidget, icon_name: str,
+                 title: str, description: str,
+                 filtered_title: str = "", filtered_description: str = "",
+                 theme: str = "light"):
+        super().__init__(list_widget.viewport())
+        self._list = list_widget
+        self._icon_name = icon_name
+        self._filtered = False
+        self._messages = {
+            False: (title, description),
+            True: (filtered_title or title, filtered_description or description),
+        }
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        layout.setSpacing(10)
+        center = Qt.AlignmentFlag.AlignHCenter
+
+        self.icon_label = QLabel(alignment=Qt.AlignmentFlag.AlignCenter)
+        self.title_label = QLabel(title, objectName="EmptyStateTitle",
+                                  alignment=Qt.AlignmentFlag.AlignCenter)
+        self.description_label = QLabel(description, objectName="EmptyStateText",
+                                        alignment=Qt.AlignmentFlag.AlignCenter,
+                                        wordWrap=True)
+
+        layout.addStretch(1)
+        layout.addWidget(self.icon_label, 0, center)
+        layout.addWidget(self.title_label, 0, center)
+        layout.addWidget(self.description_label, 0, center)
+        layout.addStretch(1)
+
+        self._dead = False
+        list_widget.destroyed.connect(self._on_list_destroyed)
+        list_widget.viewport().installEventFilter(self)
+        model = list_widget.model()
+        for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset):
+            signal.connect(self.refresh)
+
+        self.apply_theme(theme)
+        self.refresh()
+
+    def _on_list_destroyed(self, *_):
+        self._dead = True
+
+    def _usable(self) -> bool:
+        """기대던 목록이 아직 살아 있는지.
+
+        이 위젯은 자기가 만들지 않은 목록의 모델 신호와 뷰포트 이벤트에 매달려
+        있다. 창을 닫으면 그 목록이 먼저 헐리는데 그 와중에도 행이 사라졌다는
+        신호는 나오므로, 이미 없어진 쪽을 만지면 RuntimeError가 난다. 슬롯 안에서
+        난 예외는 PyQt가 잡지 못하고 그대로 프로세스를 끝낸다.
+
+        `destroyed`만으로는 늦는 경우가 있어 sip 쪽도 함께 본다.
+        """
+        return (not self._dead and not sip.isdeleted(self)
+                and not sip.isdeleted(self._list))
+
+    def apply_theme(self, theme: str):
+        """아이콘을 지금 테마의 흐린 글자색으로 다시 그린다.
+
+        글자는 QSS가 맡지만 아이콘 색은 SVG를 그릴 때 정해지므로, 테마가 바뀌면
+        여기서 새로 만들어야 한다.
+        """
+        icon = get_icon(self._icon_name, palette(theme)["text_dim"], self.ICON_SIZE)
+        self.icon_label.setPixmap(icon.pixmap(QSize(self.ICON_SIZE, self.ICON_SIZE),
+                                              self.devicePixelRatioF()))
+
+    def set_filtered(self, filtered: bool):
+        """검색 때문에 빈 것인지 알려 준다.
+
+        기록·즐겨찾기는 검색할 때 목록을 새로 채우므로, 걸리는 것이 없으면 항목
+        수가 0이 된다. 그대로 두면 기록이 500개 있는 사람에게 '아직 받은 것이
+        없다'고 말하게 된다.
+        """
+        if self._filtered == filtered:
+            return
+        self._filtered = filtered
+        title, description = self._messages[filtered]
+        self.title_label.setText(title)
+        self.description_label.setText(description)
+        self._fit()
+
+    def refresh(self, *_):
+        if not self._usable():
+            return
+        visible = self._list.count() == 0
+        if visible:
+            self._fit()
+            self.raise_()
+        self.setVisible(visible)
+
+    def _fit(self):
+        """목록 크기에 맞춰 자리를 잡고, 접히는 설명 줄의 높이를 직접 먹인다.
+
+        QLabel은 wordWrap을 켜도 sizeHint가 한 줄 높이로 나온다. 가로 가운데
+        정렬까지 걸면 레이아웃이 그 값을 그대로 써서, 두 줄로 접힌 글이 한 줄
+        높이 상자에 겹쳐 그려진다(실측: 필요 64px에 받은 것은 16px, 폭도
+        320이 아니라 160으로 접혔다). 폭을 고정하고 그 폭에서 필요한 높이를
+        heightForWidth로 구해 넣어야 두 줄이 온전히 보인다.
+        """
+        if not self._usable():
+            return
+        rect = self._list.viewport().rect()
+        self.setGeometry(rect)
+        width = min(self.TEXT_MAX_WIDTH, max(1, rect.width() - 2 * self.MARGIN))
+        self.description_label.setFixedWidth(width)
+        self.description_label.setMinimumHeight(
+            self.description_label.heightForWidth(width))
+
+    def eventFilter(self, obj, event):
+        """뷰포트가 커지고 줄어드는 대로 따라간다.
+
+        보이는 동안만 따라가게 두면 안 된다. 다른 탭에 있는 목록은 그 탭을 고르기
+        전까지 숨어 있고, 배치는 그동안에도 돈다. 그 사이의 크기 변화를 흘려보내면
+        탭을 처음 열었을 때 안내가 엉뚱한 자리에 놓인 채로 나타난다.
+        """
+        if (event.type() == QEvent.Type.Resize and self._usable()
+                and obj is self._list.viewport()):
+            self._fit()
+        return False
+
+    def showEvent(self, event):
+        """탭이 열리며 처음 보일 때 자리를 다시 맞춘다.
+
+        숨어 있는 동안 뷰포트가 제 크기를 받지 못했을 수 있다. 그때는 Resize도
+        오지 않아 eventFilter만으로는 늦는다.
+        """
+        self._fit()
+        super().showEvent(event)
 
 
 def rounded_thumbnail(pixmap: QPixmap, width: int, height: int,
@@ -197,8 +418,19 @@ class _ThumbCoordinator(QObject):
     """
 
     def on_thread_finished(self):
+        """이미 지워진 스레드를 먼저 걷어낸다.
+
+        finished에는 큐 연결이 둘 걸려 있고 deleteLater가 먼저다. 둘 사이에
+        순서 보장이 없어, 이 슬롯의 호출이 아직 큐에 남아 있는 동안 C++ 객체가
+        먼저 파괴될 수 있다. 그러면 목록에는 껍데기만 남아 isFinished()가
+        RuntimeError를 낸다. 슬롯 안에서 난 예외는 PyQt6가 잡지 못해 앱이
+        그대로 죽는다.
+
+        sender()만 지우지 않고 전체를 훑는 것은 그대로 둔다. 지워진 항목은
+        어느 호출에서 발견하든 목록에서 빠져야 하고, 여기가 유일한 청소처다.
+        """
         for thread in list(_running_thumb_threads):
-            if thread.isFinished():
+            if sip.isdeleted(thread) or thread.isFinished():
                 _running_thumb_threads.discard(thread)
         _pump_thumb_queue()
 
@@ -245,6 +477,13 @@ def start_thumbnail_download(url: str, on_loaded):
     return None
 
 class ImagePreviewDialog(QDialog):
+    """썸네일을 크게 보여 주는 창. 보기만 한다.
+
+    예전에는 여기서 우클릭해 이미지를 저장할 수 있었다. 그 기능은 목록 우클릭
+    메뉴로 옮겼다 — 파일에 관한 일(재생·위치 열기·썸네일 저장)이 한자리에 모여야
+    어디서 무엇을 할 수 있는지 외우지 않아도 된다. 이 창은 크게 보는 일만 맡는다.
+    """
+
     def __init__(self, pixmap: QPixmap, parent=None):
         super().__init__(parent)
         self.setWindowTitle("썸네일 미리보기"); self.setMinimumSize(640, 360); self.setModal(True)
@@ -263,15 +502,6 @@ class ImagePreviewDialog(QDialog):
         self.image_label.setPixmap(scaled_pixmap)
     def _handle_mouse_press(self, event):
         if event.button() == Qt.MouseButton.LeftButton: self.accept()
-        elif event.button() == Qt.MouseButton.RightButton: self._show_context_menu(event.pos())
-    def _show_context_menu(self, position):
-        menu = QMenu(self); save_action = QAction("이미지 저장", self)
-        save_action.triggered.connect(self._save_image); menu.addAction(save_action)
-        global_position = self.image_label.mapToGlobal(position); menu.exec(global_position)
-    def _save_image(self):
-        if not self._original_pixmap or self._original_pixmap.isNull(): return
-        file_path, _ = QFileDialog.getSaveFileName(self, "이미지 저장", "thumbnail.png", "Image Files (*.png *.jpg *.jpeg)")
-        if file_path: self._original_pixmap.save(file_path)
 
 STRIP_WIDTH = 4
 THUMB_W, THUMB_H = 160, 90
@@ -487,6 +717,16 @@ class DownloadItemWidget(QWidget):
             self.play_requested.emit(self.final_filepath)
         super().mouseDoubleClickEvent(event)
 
+    def thumbnail_pixmap(self) -> Optional[QPixmap]:
+        """받아 둔 원본 썸네일. 아직 없으면 None.
+
+        카드가 화면에 그리는 것은 모서리를 둥글린 축소본이라, 저장에 쓸 원본을
+        따로 내준다.
+        """
+        if self._orig_thumb_pm is None or self._orig_thumb_pm.isNull():
+            return None
+        return self._orig_thumb_pm
+
     def _on_thumb_clicked(self, event):
         if self._orig_thumb_pm and not self._orig_thumb_pm.isNull():
             ImagePreviewDialog(self._orig_thumb_pm, self).exec()
@@ -529,14 +769,8 @@ class DownloadItemWidget(QWidget):
             self.final_filepath = payload["final_filepath"]
 
         component = payload.get("component")
-        percent = payload.get("percent", self.progress.value())
-        if component == "비디오":
-            progress_value = int(percent / 2)
-        elif component == "오디오":
-            progress_value = 50 + int(percent / 2)
-        else:
-            progress_value = self.progress.value()
-        self._animate_progress(progress_value)
+        self._animate_progress(item_percent(payload.get("percent"),
+                                            self.progress.value()))
 
         if "status" in payload:
             self.status = payload["status"]

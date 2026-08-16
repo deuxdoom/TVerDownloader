@@ -61,6 +61,9 @@ def palette(theme: str = "dark") -> dict:
             "danger": "#9B3B47",
             "danger_hover": "#8A343F",
             "danger_fg": "#FFFFFF",
+            "hover_red": "#D9534F",
+            "hover_yellow": "#D9A521",
+            "hover_green": "#3E9E6B",
         }
     else:
         colors = {
@@ -90,9 +93,26 @@ def palette(theme: str = "dark") -> dict:
             "danger": "#D9636F",
             "danger_hover": "#E4808A",
             "danger_fg": "#10161F",
+            "hover_red": "#FF7B74",
+            "hover_yellow": "#F0C05A",
+            "hover_green": "#6FD39B",
         }
     return colors
 
+
+ABOUT_HOVER_MIX = 0.22
+"""정보 창 단추에 마우스를 올렸을 때 섞는 색의 비율.
+
+창 배경에 섞어서 만든다. 고정 색을 박아 두면 밝은 테마에서는 옅고 어두운
+테마에서는 눈이 아프게 튄다. 0.22면 어느 쪽에서도 글자가 그대로 읽힌다.
+"""
+
+ABOUT_BUTTON_SCALE = 0.84
+"""닫기 단추 대비 정보 창 왼쪽 단추들의 크기 비율.
+
+닫기가 이 창을 끝내는 단추라 가장 크고, 나머지는 곁들이는 일이라 한 단계
+작게 둔다. 글꼴과 여백을 함께 줄여야 비율이 맞는다.
+"""
 
 MENU_RADIUS = 10
 MENU_ITEM_RADIUS = 7
@@ -111,6 +131,10 @@ def build_qss(theme: str = "dark") -> str:
     tint_dl = blend(colors["ctx_download"], colors["surface"], 0.18)
     tint_hi = blend(colors["ctx_history"], colors["surface"], 0.18)
     tint_fa = blend(colors["ctx_favorites"], colors["surface"], 0.18)
+
+    about_red = blend(colors["hover_red"], colors["bg"], ABOUT_HOVER_MIX)
+    about_yellow = blend(colors["hover_yellow"], colors["bg"], ABOUT_HOVER_MIX)
+    about_green = blend(colors["hover_green"], colors["bg"], ABOUT_HOVER_MIX)
 
     bump = 1
     fs_title = 15 + bump
@@ -172,6 +196,27 @@ def build_qss(theme: str = "dark") -> str:
     /* 링크 버튼 — 색 위계가 아니라 외부 링크임을 알리는 표시 */
     QPushButton#LinkButton {{ background: transparent; border: none; color: {colors["accent"]}; padding: 6px 4px; text-decoration: underline; }}
     QPushButton#LinkButton:hover {{ color: {colors["accent_hover"]}; background: transparent; }}
+
+    /* 정보 창 왼쪽 단추 셋 — 닫기보다 한 단계 작고, 올리면 각자의 색이 든다.
+       색을 달리하는 것은 세 단추가 하는 일이 서로 무관해서다. 나란히 같은
+       모양으로 있으면 어느 것이 무엇인지 매번 글자를 읽어야 한다. */
+    QPushButton#AboutYouTube, QPushButton#AboutContact, QPushButton#AboutUpdate {{
+        font-size: {fs_sub}px;
+        padding: 4px 11px;
+        border-radius: 7px;
+    }}
+    QPushButton#AboutYouTube:hover {{
+        background: {about_red}; border-color: {colors["hover_red"]};
+    }}
+    QPushButton#AboutContact:hover {{
+        background: {about_yellow}; border-color: {colors["hover_yellow"]};
+    }}
+    QPushButton#AboutUpdate:hover {{
+        background: {about_green}; border-color: {colors["hover_green"]};
+    }}
+    QPushButton#AboutUpdate:disabled {{
+        background: transparent; border-color: {colors["border"]};
+    }}
 
     /* 헤더 아이콘 버튼 — 클릭 영역 32x32, 아이콘 18px.
        hover 시 배경만 바뀐다(UI_REDESIGN.md 4항). 아이콘 색은 코드에서 칠한다. */
@@ -282,10 +327,11 @@ def build_qss(theme: str = "dark") -> str:
     QMenu::item {{
         background: transparent;
         color: {colors["text"]};
-        padding: 8px 18px 8px 34px;
+        padding: 8px 18px 8px 12px;
         border-radius: {MENU_ITEM_RADIUS}px;
         margin: 1px 2px;
     }}
+    QMenu[checkmarks="true"]::item {{ padding-left: 34px; }}
     QMenu::item:selected {{ background: {colors["bg_alt"]}; }}
     QMenu::item:disabled {{ color: {colors["text_dim"]}; }}
     QMenu::separator {{ height: 1px; background: {colors["border"]}; margin: 5px 10px; }}
@@ -390,6 +436,11 @@ def build_qss(theme: str = "dark") -> str:
     #PaneTitle {{ font-size: {fs_pane}px; font-weight: 600; color: {colors["text"]}; }}
     #PaneSubtitle {{ font-size: {fs_sub}px; font-weight: 400; color: {colors["text_dim"]}; }}
 
+    /* 빈 목록 안내 — 둘 다 흐린 글자색이라 배경에 묻히고, 굵기와 크기로만 갈린다.
+       목록에 카드가 하나라도 있으면 사라지는 글이라 눈길을 끌 이유가 없다. */
+    #EmptyStateTitle {{ font-size: {fs_card}px; font-weight: 600; color: {colors["text_dim"]}; }}
+    #EmptyStateText {{ font-size: {fs_sub}px; font-weight: 400; color: {colors["text_dim"]}; }}
+
     /* 리스트 */
     QListWidget#DownloadList, QListWidget#HistoryList, QListWidget#FavoritesList {{
         background: {colors["bg"]};
@@ -398,7 +449,11 @@ def build_qss(theme: str = "dark") -> str:
         padding: 4px;
     }}
     /* 카드가 자기 배경을 그리므로 행 자체는 거의 칠하지 않는다.
-       원색으로 덮으면 카드 위 글자가 전부 묻힌다. */
+       원색으로 덮으면 카드 위 글자가 전부 묻힌다.
+
+       고른 행에 생기던 사각 자국은 여기서 고칠 수 없다. 그것은 배경이 아니라
+       초점 사각형이고, `outline: none`을 넣어 봐야 그대로 그려진다(실측).
+       `NoFocusDelegate`(src/widgets.py)가 맡는다. */
     QListWidget#DownloadList::item, QListWidget#HistoryList::item,
     QListWidget#FavoritesList::item {{ background: transparent; border-radius: 10px; }}
     QListWidget#DownloadList::item:selected {{ background: {tint_dl}; }}

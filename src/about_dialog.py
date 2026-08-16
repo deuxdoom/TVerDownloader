@@ -1,9 +1,11 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialogButtonBox, QWidget, QFrame
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
+from src import updater
 from src.appicon import get_app_icon
+from src.message import notify
 from src.qss import palette
 from src.utils import open_developer_link, open_feedback_link, localized_app_name
 
@@ -36,6 +38,8 @@ class AboutDialog(QDialog):
     def __init__(self, version: str, parent: QWidget | None = None, theme: str = "light"):
         super().__init__(parent)
         self._colors = palette(theme)
+        self._theme = theme
+        self._version = version
         self.setWindowTitle("정보")
         self.setWindowIcon(get_app_icon())
         self.setModal(True)
@@ -97,13 +101,25 @@ class AboutDialog(QDialog):
         header.addStretch(1)
         return header
 
+    CHECK_LABEL = "업데이트 확인"
+    CHECKING_LABEL = "확인 중..."
+
     def _build_buttons(self) -> QHBoxLayout:
+        """왼쪽에 할 일 셋, 오른쪽에 닫기.
+
+        예전에는 밑줄만 있는 링크 모양(LinkButton)이라 눌러도 되는 것인지
+        분명하지 않았다. 기본 QPushButton 모양(테두리 + 라운드)으로 바꿔
+        나머지 창의 단추들과 같아 보이게 한다.
+        """
         row = QHBoxLayout()
-        row.setSpacing(4)
-        youtube_btn = QPushButton("제작자 유투브", objectName="LinkButton")
+        row.setSpacing(6)
+        youtube_btn = QPushButton("제작자 유투브", objectName="AboutYouTube")
         youtube_btn.clicked.connect(open_developer_link)
-        contact_btn = QPushButton("문의하기", objectName="LinkButton")
+        contact_btn = QPushButton("문의하기", objectName="AboutContact")
         contact_btn.clicked.connect(open_feedback_link)
+
+        self.check_btn = QPushButton(self.CHECK_LABEL, objectName="AboutUpdate")
+        self.check_btn.clicked.connect(self._check_update)
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close_box.button(QDialogButtonBox.StandardButton.Close).setText("닫기")
@@ -111,9 +127,73 @@ class AboutDialog(QDialog):
 
         row.addWidget(youtube_btn)
         row.addWidget(contact_btn)
+        row.addWidget(self.check_btn)
         row.addStretch(1)
         row.addWidget(close_box)
         return row
+
+    def _check_update(self):
+        """눌러서 하는 새 버전 확인.
+
+        **스레드를 쓰지 않는다.** 시작할 때 도는 확인도 이미 같은 조회를 메인
+        스레드에서 그대로 하고(updater.CHECK_TIMEOUT은 10초), 여기서만 따로
+        스레드를 두면 창이 먼저 닫혔을 때의 뒷정리를 관리해야 한다. 눌러서 하는
+        조회 한 번에 그만한 장치를 붙일 이유가 없다.
+
+        누르는 순간 단추를 잠그고 글을 바꾼 뒤, 그 변화가 화면에 실제로 찍히도록
+        한 번 처리하고 나서 물어본다. 안 그러면 굳은 동안 단추가 그대로 보여
+        눌리지 않은 것으로 오해된다.
+        """
+        self.check_btn.setEnabled(False)
+        self.check_btn.setText(self.CHECKING_LABEL)
+        QApplication.processEvents()
+        try:
+            release = updater.fetch_latest(self._log)
+        finally:
+            self.check_btn.setEnabled(True)
+            self.check_btn.setText(self.CHECK_LABEL)
+        self._on_checked(release is not None, release or {})
+
+    def _on_checked(self, ok: bool, release: dict):
+        """확인 결과를 알린다. **최신이어도 반드시 무언가 보여 준다.**
+
+        시작할 때 도는 확인은 새 버전이 없으면 조용히 지나가지만, 눌러서 하는
+        확인이 그러면 눌렀는데 아무 일도 안 일어난 것으로 보인다.
+        """
+        self.check_btn.setEnabled(True)
+        self.check_btn.setText(self.CHECK_LABEL)
+
+        if not ok:
+            notify(self, "업데이트 확인",
+                   "새 버전이 있는지 확인하지 못했습니다.\n\n"
+                   "인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+                   icon_name="info", color_key="warn", theme=self._theme)
+            return
+
+        if not updater.has_newer(release, self._version):
+            notify(self, "업데이트 확인",
+                   f"이미 최신 버전입니다. (v{self._version})",
+                   icon_name="info", theme=self._theme)
+            return
+
+        window = self.parent()
+        self.accept()
+        QTimer.singleShot(0, lambda: updater.prompt_and_update(
+            window, release, self._log,
+            pending_downloads=self._pending_downloads(window),
+            single_button=True))
+
+    @staticmethod
+    def _pending_downloads(window) -> int:
+        """받는 중이거나 기다리는 항목 수. 셀 수 없으면 0."""
+        manager = getattr(window, "download_manager", None)
+        return manager.pending_count() if manager is not None else 0
+
+    def _log(self, text: str):
+        """메인 창 로그로 흘려보낸다. 창이 없으면 버린다."""
+        append = getattr(self.parent(), "append_log", None)
+        if callable(append):
+            append(text)
 
     def _label(self, text: str, object_name: str = "", wrap: bool = False) -> QLabel:
         label = QLabel(text)

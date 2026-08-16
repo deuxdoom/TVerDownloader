@@ -11,6 +11,8 @@ _bootstrap.setup()
 
 import TVerDownloader as T
 import src.message as message
+import src.input_sources as input_sources_mod
+from src.input_sources import InputSources
 from src.qss import build_qss
 from src.ui.main_window_ui import MainWindowUI
 from src.utils import is_media_url, load_config
@@ -89,11 +91,18 @@ print()
 print("=== 3. 입력창에서 다운로드를 눌렀을 때 ===")
 
 
+class ProbeInput(InputSources):
+    """대기열까지 가지 않고, 넘어온 주소만 받아 두는 input_sources."""
+
+    def process_url(self, url):
+        self.window.processed.append(url)
+
+
 class Host(QMainWindow):
     """MainWindow에서 입력 처리 부분만 떼어 붙인 시험대."""
 
-    BAD_URL_PREVIEW = T.MainWindow.BAD_URL_PREVIEW
-    BAD_URL_ELIDE = T.MainWindow.BAD_URL_ELIDE
+    BAD_URL_PREVIEW = InputSources.BAD_URL_PREVIEW
+    BAD_URL_ELIDE = InputSources.BAD_URL_ELIDE
 
     def __init__(self, config):
         super().__init__()
@@ -103,16 +112,10 @@ class Host(QMainWindow):
         self.config = config
         self.logs = []
         self.processed = []
+        self.input_sources = ProbeInput(self)
 
     def append_log(self, text):
         self.logs.append(text)
-
-    def _process_url(self, url):
-        self.processed.append(url)
-
-    _elide = staticmethod(T.MainWindow._elide)
-    _notify_bad_url = T.MainWindow._notify_bad_url
-    process_input_url = T.MainWindow.process_input_url
 
 
 shown = []
@@ -123,7 +126,7 @@ def fake_notify(parent, title, text, **kwargs):
     shown.append((title, text, kwargs))
 
 
-T.notify = fake_notify
+input_sources_mod.notify = fake_notify
 
 config = load_config()
 config["theme"] = "light"
@@ -132,14 +135,14 @@ host.show()
 settle()
 
 host.ui.url_input.setText(EP)
-host.process_input_url()
+host.input_sources.process_input_url()
 report("주소는 그대로 넘어간다", host.processed == [EP], f"{host.processed}")
 report("넘어간 뒤에는 입력칸을 비운다", host.ui.url_input.text() == "")
 report("알림을 띄우지 않는다", shown == [])
 
 host.processed.clear()
 host.ui.url_input.setText("이 영상 좀 받아줘")
-host.process_input_url()
+host.input_sources.process_input_url()
 report("주소가 아니면 다운로드를 시도하지 않는다", host.processed == [], f"{host.processed}")
 report("알림을 한 번 띄운다", len(shown) == 1, f"{shown}")
 report("입력칸을 지우지 않는다", host.ui.url_input.text() == "이 영상 좀 받아줘",
@@ -150,7 +153,7 @@ report("어떻게 고칠지도 알려 준다", "https://" in shown[0][1])
 shown.clear()
 host.processed.clear()
 host.ui.url_input.setText("   ")
-host.process_input_url()
+host.input_sources.process_input_url()
 report("빈 칸은 조용히 넘어간다", host.processed == [] and shown == [])
 
 print()
@@ -158,7 +161,7 @@ print("=== 4. 긴 글은 줄여서 보여 준다 ===")
 long_text = "가" * 200
 shown.clear()
 host.ui.url_input.setText(long_text)
-host.process_input_url()
+host.input_sources.process_input_url()
 body_lines = shown[0][1].splitlines()
 longest = max(len(line) for line in body_lines)
 report("한 줄이 지나치게 길어지지 않는다", longest <= host.BAD_URL_ELIDE,
@@ -166,7 +169,7 @@ report("한 줄이 지나치게 길어지지 않는다", longest <= host.BAD_URL
 report("줄였다는 표시가 붙는다", any("…" in line for line in body_lines))
 
 shown.clear()
-host._notify_bad_url("t", "lead", [f"줄{i}" for i in range(9)])
+host.input_sources._notify_bad_url("t", "lead", [f"줄{i}" for i in range(9)])
 body = shown[0][1]
 report("다섯 줄까지만 보여 준다", body.count("줄") == host.BAD_URL_PREVIEW,
        f"{body!r}")
@@ -186,7 +189,6 @@ class BulkHost(Host):
         self.added = []
         self.parsed = []
         self.series_parser = self
-        self._bulk_dialog = None
 
     def _ensure_download_folder(self):
         return True
@@ -198,7 +200,6 @@ class BulkHost(Host):
     def parse(self, context, urls):
         self.parsed.append((context, list(urls)))
 
-    open_bulk_add = T.MainWindow.open_bulk_add
 
 
 class FakeDialog:
@@ -214,13 +215,13 @@ class FakeDialog:
         return self.urls
 
 
-real_dialog = T.BulkAddDialog
-T.BulkAddDialog = FakeDialog
+real_dialog = input_sources_mod.BulkAddDialog
+input_sources_mod.BulkAddDialog = FakeDialog
 
 FakeDialog.lines = [EP, "이건 주소가 아님", SR, "memo.txt", YT]
 shown.clear()
 bulk = BulkHost(config, FakeDialog.lines)
-bulk.open_bulk_add()
+bulk.input_sources.open_bulk_add()
 report("주소인 줄만 대기열로 간다", bulk.added == [EP, YT], f"{bulk.added}")
 report("시리즈도 주소인 것만", bulk.parsed == [("bulk", [SR])], f"{bulk.parsed}")
 report("걸러 낸 줄을 알린다", len(shown) == 1, f"{shown}")
@@ -231,11 +232,11 @@ report("로그에도 남긴다", any("2줄" in line for line in bulk.logs), f"{b
 FakeDialog.lines = [EP, SR]
 shown.clear()
 clean = BulkHost(config, FakeDialog.lines)
-clean.open_bulk_add()
+clean.input_sources.open_bulk_add()
 report("모두 주소면 알리지 않는다", shown == [] and clean.added == [EP], f"{shown}")
 
-T.BulkAddDialog = real_dialog
-T.notify = real_notify
+input_sources_mod.BulkAddDialog = real_dialog
+input_sources_mod.notify = real_notify
 
 print()
 print("=== 6. 알림 창 렌더 ===")

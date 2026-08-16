@@ -167,6 +167,33 @@ class SettingsDialog(QDialog):
         )
         clip_layout.addWidget(self.clipboard_watch_checkbox); layout.addWidget(clip_group)
 
+        fav_group = QWidget(); fav_layout = QVBoxLayout(fav_group); fav_layout.setContentsMargins(0, 0, 0, 0)
+        fav_layout.setSpacing(10)
+        fav_layout.addWidget(QLabel("즐겨찾기:"))
+        self.fav_autocheck_checkbox = QCheckBox("프로그램을 켤 때 새 회차를 확인하기")
+        self.fav_autocheck_checkbox.setChecked(self.config.get("auto_check_favorites_on_start", True))
+        self.fav_autocheck_checkbox.setToolTip(
+            "프로그램을 켠 뒤 잠시 있다가 즐겨찾기에 담긴 시리즈를 모두 확인합니다.\n"
+            "TVer는 일본 지역 제한이 있어, VPN을 켜기 전에 확인이 돌면 전부 실패로 끝납니다.\n"
+            "윈도우 시작과 함께 켜지도록 해 두었다면 꺼 두는 편이 낫습니다.\n"
+            "꺼도 즐겨찾기 탭의 '갱신'으로 언제든 직접 확인할 수 있습니다."
+        )
+        fav_layout.addWidget(self.fav_autocheck_checkbox); layout.addWidget(fav_group)
+
+        update_group = QWidget(); update_layout = QVBoxLayout(update_group)
+        update_layout.setContentsMargins(0, 0, 0, 0); update_layout.setSpacing(10)
+        update_layout.addWidget(QLabel("업데이트:"))
+        self.auto_update_checkbox = QCheckBox("프로그램을 켤 때 새 버전 확인하기")
+        self.auto_update_checkbox.setChecked(self.config.get("auto_update_check", True))
+        self.auto_update_checkbox.setToolTip(
+            "프로그램을 켠 뒤 새 버전이 나왔는지 확인하고, 있으면 알려 줍니다.\n"
+            "받을지 말지는 그때 고르면 되고, 저절로 받아지지는 않습니다.\n"
+            "'지금 업데이트'를 누르면 새 버전을 받아 그 자리에서 갈아 끼웁니다.\n"
+            "이때 설정·기록·즐겨찾기와 bin 폴더는 그대로 둡니다.\n"
+            "꺼 두면 확인 자체를 하지 않습니다."
+        )
+        update_layout.addWidget(self.auto_update_checkbox); layout.addWidget(update_group)
+
         layout.addStretch(1); self._add_page(tab, "일반", "settings")
 
     SHORTCUT_EDIT_WIDTH = 190
@@ -543,6 +570,8 @@ class SettingsDialog(QDialog):
         if self.close_action_group.checkedButton():
             self.config["close_action"] = self.close_action_group.checkedButton().property("config_value")
         self.config["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
+        self.config["auto_check_favorites_on_start"] = self.fav_autocheck_checkbox.isChecked()
+        self.config["auto_update_check"] = self.auto_update_checkbox.isChecked()
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)

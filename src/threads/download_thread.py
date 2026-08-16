@@ -6,6 +6,61 @@ from src.utils import (get_startupinfo, FILENAME_TITLE_MAX_LENGTH,
                        NO_AUDIO_STATUS, resolve_ffprobe_path)
 from src.threads import ytdlp_run
 
+MAX_PATH_LEN = 250
+"""저장 경로 전체에 허용하는 최대 길이.
+
+윈도우 기본 제한은 260자다. TVer는 영상과 음성을 따로 받아 합치는데 음성 쪽
+임시 파일명이 본편보다 길어서 먼저 걸리므로, 그만큼 여유를 두고 잘라 둔다.
+"""
+
+MIN_NAME_LEN = 10
+"""이름을 줄일 때 남겨 두는 최소 글자 수.
+
+여기까지 줄여도 길면 더 깎지 않는다. 두 글자짜리 이름은 어느 회차인지 알아볼
+수 없어서, 경로가 조금 넘치더라도 알아볼 수 있는 편이 낫다. 그래서 이 함수는
+'반드시 max_len 안에 넣는' 것이 아니라 '할 수 있는 만큼 줄이는' 것이다.
+"""
+
+
+def shorten_long_path(full_dir: str, path_without_ext: str, ext: str,
+                      max_len: int = MAX_PATH_LEN):
+    """경로가 너무 길면 이름을 줄인다. (전체 경로, 줄인 상대 경로)를 돌려준다.
+
+    줄이지 않았으면 둘째 값이 None이다. 부르는 쪽은 그걸로 안내 로그를 낼지 정한다.
+
+    **회차 이름부터 줄이고 시리즈 폴더는 마지막에 손댄다.** 폴더 이름을 먼저 깎으면
+    같은 시리즈가 서로 다른 폴더로 흩어진다. 회차 이름은 그 폴더 안에서만 다르면
+    되므로 잃는 것이 적다.
+
+    **폴더 구분자는 그대로 둔다.** rpartition의 sep을 다시 끼워 넣는 이유가 이것이다.
+    구분자를 잃으면 시리즈 폴더가 사라지고 파일이 최상위에 쏟아진다.
+
+    순수 함수로 떼어 둔 것은 이 계산이 파일 시스템도 yt-dlp도 건드리지 않기
+    때문이다. 원래는 _build_final_filepath 안에 묻혀 있어서 극단적으로 긴 이름을
+    넣어 보려면 다운로드를 통째로 돌려야 했다.
+    """
+    full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
+    if len(full_path) <= max_len:
+        return full_path, None
+
+    sub_dir, sep, base_name = path_without_ext.rpartition('/')
+
+    excess = len(full_path) - max_len
+    new_len = max(MIN_NAME_LEN, len(base_name) - excess)
+    base_name = base_name[:new_len].strip() or "video"
+    path_without_ext = f"{sub_dir}{sep}{base_name}" if sep else base_name
+    full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
+
+    if len(full_path) > max_len and sep:
+        excess = len(full_path) - max_len
+        new_dir_len = max(MIN_NAME_LEN, len(sub_dir) - excess)
+        sub_dir = sub_dir[:new_dir_len].strip() or "series"
+        path_without_ext = f"{sub_dir}{sep}{base_name}"
+        full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
+
+    return full_path, f"{path_without_ext}.{ext}"
+
+
 class DownloadThread(QThread):
     progress = pyqtSignal(str, dict)
     finished = pyqtSignal(str, bool, str, dict)
@@ -20,6 +75,38 @@ class DownloadThread(QThread):
     """
 
     THUMBNAIL_SIDECAR_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg")
+
+    FORMAT_COUNT_RE = re.compile(r"Downloading\s+\d+\s+format\(s\):\s*(\S+)")
+    """yt-dlp가 무엇을 받을지 알리는 줄. 받기 전에 한 번 나온다.
+
+    `Downloading 1 format(s): 401+251`이면 영상과 소리를 따로 받아 합치고,
+    `Downloading 1 format(s): 18`이면 소리까지 든 파일 하나를 받는다. 몇 조각을
+    받는지는 이 줄 말고는 미리 알 방법이 없다.
+    """
+
+    DEFAULT_PARTS = 2
+    """위 줄을 못 봤을 때 가정하는 조각 수.
+
+    TVer는 늘 영상과 소리를 따로 준다. 못 읽었을 때 1로 두면 영상만으로 100%가
+    찼다가 소리를 받으면서 0으로 떨어지므로, 안전한 쪽인 2로 둔다.
+    """
+
+    COMPONENT_NAMES = ("비디오", "오디오")
+    """조각을 둘로 나눠 받을 때 화면에 보일 이름. 하나로 받으면 붙이지 않는다."""
+
+    SIDECAR_WRITE_RE = re.compile(r"^\[info\]\s+Writing\s+.+?\s+to:\s*(.+)$")
+    """본편이 아닌 파일을 만들기 직전에 yt-dlp가 내는 줄. 그 경로를 잡아낸다.
+
+    자막은 본편보다 **먼저** 받는다. 그런데 자막도 `[download] Destination:`과
+    0->100% 진행률을 본편과 똑같이 내놓아서, Destination 줄 수만 세면 34KB짜리
+    자막이 영상 자리를 차지한다. 그러면 진행바가 눈 깜짝할 사이 50%까지 차오르고
+    정작 영상을 받는 내내 '오디오 다운로드 중'으로 보인다(자막 있는 TVer 드라마
+    실측). 표지 그림·설명·정보 JSON도 같은 줄을 쓰므로 함께 걸린다.
+
+    Destination 줄만 보고는 본편과 구별할 방법이 없다. 확장자로 가리는 것은
+    사이트마다 규칙이 달라 믿을 수 없고(유튜브는 소리를 .webm으로 준다),
+    그래서 yt-dlp가 스스로 알려 주는 이 줄을 쓴다.
+    """
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
                  output_template: str, quality_format: str,
@@ -42,7 +129,9 @@ class DownloadThread(QThread):
         self.embed_thumbnail = embed_thumbnail
 
         self.process: Optional[subprocess.Popen] = None
-        self._stop_flag = False; self._current_component: str = "비디오"; self._final_filepath: str = ""
+        self._stop_flag = False; self._current_component: str = ""; self._final_filepath: str = ""
+        self._parts = self.DEFAULT_PARTS; self._part_index = -1; self._aside = False
+        self._sidecar_paths: set = set()
         self._thumbnail_embed_failed = False
         self._metadata: Dict = {}
 
@@ -157,6 +246,44 @@ class DownloadThread(QThread):
 
         self.progress.emit(self.url, {"status": final_status, "percent": 100, "final_filepath": self._final_filepath})
         return success
+
+    def _begin_destination(self, path: str):
+        """Destination 한 줄을 받아, 지금부터 받는 것이 몇 번째 조각인지 정한다.
+
+        파일 이름으로 영상인지 소리인지 가리던 것을 순서 세기로 바꿨다. 이름
+        규칙이 사이트마다 달라서다 — 유튜브는 소리를 `.f251.webm`으로 내놓아
+        `.m4a`도 `audio`도 걸리지 않고 영상으로 잘못 잡혔다.
+
+        본편이 아닌 파일은 앞뒤 양쪽에서 끼어든다. 자막은 본편보다 **먼저**,
+        표지 그림은 뒤에 온다. 앞의 것을 세면 진행률이 절반을 건너뛰고 구간
+        이름까지 한 칸씩 밀리고, 뒤의 것을 세면 마지막 구간을 0부터 다시 그려
+        진행률이 되돌아간다. 어느 쪽이든 `_aside`를 세워 진행률 보고를 멈춘다.
+        """
+        if path in self._sidecar_paths or self._part_index >= self._parts - 1:
+            self._aside = True
+            return
+        self._aside = False
+        self._part_index += 1
+        self._current_component = (self.COMPONENT_NAMES[self._part_index]
+                                   if self._parts > 1 and self._part_index < len(self.COMPONENT_NAMES)
+                                   else "")
+
+    def _overall_percent(self, raw: float) -> Optional[float]:
+        """조각 하나의 진행률을 항목 전체 기준(0~100)으로 옮긴다.
+
+        yt-dlp는 조각마다 0->100을 새로 센다. 조각 수를 아는 곳이 여기뿐이라
+        환산도 여기서 한다. 화면 쪽은 이미 전체 기준인 값을 받으므로 사이트마다
+        다른 사정을 몰라도 된다.
+
+        본편이 아닌 파일에는 None을 준다. 부르는 쪽이 percent를 빼고 보내면
+        화면은 마지막 값을 그대로 지킨다. 아직 첫 조각도 시작하지 않았다면
+        (본편보다 먼저 오는 자막을 받는 중이다) 마찬가지로 알리지 않는다.
+        """
+        if self._aside or self._part_index < 0:
+            return None
+        span = 100.0 / self._parts
+        start = max(0, self._part_index) * span
+        return max(0.0, min(100.0, start + span * max(0.0, min(100.0, raw)) / 100.0))
 
     def _cleanup_thumbnail_sidecars(self):
         """임베드가 실패해 남은 표지 이미지를 지운다.
@@ -285,27 +412,9 @@ class DownloadThread(QThread):
 
         full_dir = os.path.abspath(self.download_folder)
         final_ext = metadata.get('ext', ext)
-        full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
-
-        MAX_PATH_LEN = 250
-
-        if len(full_path) > MAX_PATH_LEN:
-            sub_dir, sep, base_name = path_without_ext.rpartition('/')
-
-            excess = len(full_path) - MAX_PATH_LEN
-            new_len = max(10, len(base_name) - excess)
-            base_name = base_name[:new_len].strip() or "video"
-            path_without_ext = f"{sub_dir}{sep}{base_name}" if sep else base_name
-            full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
-
-            if len(full_path) > MAX_PATH_LEN and sep:
-                excess = len(full_path) - MAX_PATH_LEN
-                new_dir_len = max(10, len(sub_dir) - excess)
-                sub_dir = sub_dir[:new_dir_len].strip() or "series"
-                path_without_ext = f"{sub_dir}{sep}{base_name}"
-                full_path = os.path.join(full_dir, f"{path_without_ext}.{final_ext}")
-
-            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 이름을 축소했습니다: {path_without_ext}.{final_ext}"})
+        full_path, shortened = shorten_long_path(full_dir, path_without_ext, final_ext)
+        if shortened:
+            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 이름을 축소했습니다: {shortened}"})
 
         return full_path
 
@@ -368,19 +477,29 @@ class DownloadThread(QThread):
         if m_merger:
             self._final_filepath = m_merger.group(1)
 
-        if "[download] Destination:" in line:
-            if not self._final_filepath:
-                self._final_filepath = line.split("Destination:", 1)[1].strip()
+        m_sidecar = self.SIDECAR_WRITE_RE.match(line)
+        if m_sidecar:
+            self._sidecar_paths.add(m_sidecar.group(1).strip())
 
-            destination_path = line.split("Destination:", 1)[1].lower()
-            if ".m4a" in destination_path or "audio" in destination_path: self._current_component = "오디오"
-            else: self._current_component = "비디오"
+        m_formats = self.FORMAT_COUNT_RE.search(line)
+        if m_formats:
+            self._parts = max(1, len(m_formats.group(1).split("+")))
+            self._part_index = -1; self._aside = False
+
+        if "[download] Destination:" in line:
+            destination = line.split("Destination:", 1)[1].strip()
+            if not self._final_filepath and destination not in self._sidecar_paths:
+                self._final_filepath = destination
+            self._begin_destination(destination)
 
         m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
         if m_progress:
             eta = m_progress.group(3).split("(")[0].strip()
-            payload.update({"status": "다운로드 중", "percent": float(m_progress.group(1)), "speed": m_progress.group(2),
+            payload.update({"status": "다운로드 중", "speed": m_progress.group(2),
                             "eta": eta, "component": self._current_component})
+            overall = self._overall_percent(float(m_progress.group(1)))
+            if overall is not None:
+                payload["percent"] = overall
 
         if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"
         elif "Embedding subtitles" in line: payload["status"] = "후처리 중 (자막)"

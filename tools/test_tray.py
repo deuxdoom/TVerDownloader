@@ -1,7 +1,9 @@
+import pathlib
 import sys
 import winreg
 
 from PyQt6.QtCore import QEventLoop, Qt, QTimer
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon
 
 app = QApplication(sys.argv)
@@ -257,8 +259,17 @@ settings_host.hide()
 settle()
 report("메인 창이 트레이에 내려가 있다", not settings_host.isVisible())
 
-opened_dialog = settings_host.open_settings()
 area = QApplication.primaryScreen().availableGeometry()
+QCursor.setPos(area.center())
+settle()
+"""마우스를 주 화면 가운데에 놓고 잰다.
+
+`_center_on_cursor_screen`은 마우스가 있는 화면을 고르므로, 그대로 두면 결과가
+'검사를 돌릴 때 마우스가 어느 모니터에 있었나'에 달린다. 실제로 자동화가 마우스를
+보조 모니터에 두고 간 뒤 이 검사가 실패했다. 그 화면이 대화상자보다 작으면 가운데가
+아니라 안쪽으로 밀어 넣는 것이 맞는 동작이라 더 헷갈린다.
+"""
+opened_dialog = settings_host.open_settings()
 placed = opened_dialog["geometry"]
 report("설정 창이 떴다", opened_dialog["visible"], f"{opened_dialog}")
 report("앞으로 끌어냈다", opened_dialog["active"])
@@ -302,6 +313,167 @@ for theme in ("light", "dark"):
 
 host.close()
 host.deleteLater()
+settle()
+
+print()
+print("=== 둥근 메뉴 창 속성 ===")
+
+from PyQt6.QtGui import QAction as _QAction
+from src.widgets import RoundedMenu as _RoundedMenu
+
+probe = _RoundedMenu()
+flags = probe.windowFlags()
+report("투명 배경 — QSS가 그린 둥근 모양을 창 모양으로 삼는다",
+       probe.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+report("Frameless — 빠지면 모서리 바깥이 까맣게 찍힌다(화면 실측 밝기 0)",
+       bool(flags & Qt.WindowType.FramelessWindowHint))
+report("NoDropShadow — 그림자 없이 테두리만",
+       bool(flags & Qt.WindowType.NoDropShadowWindowHint))
+
+plain = _RoundedMenu()
+plain.addAction("목록에서 삭제")
+plain.addAction("파일 위치 열기")
+plain.aboutToShow.emit()
+report("체크할 것이 없으면 글자 앞자리를 비우지 않는다",
+       plain.property("checkmarks") is False, f"checkmarks={plain.property('checkmarks')}")
+
+checked = _RoundedMenu()
+checked.addAction("열기")
+_a = _QAction("윈도우 시작 시 실행", checked, checkable=True)
+checked.addAction(_a)
+checked.aboutToShow.emit()
+report("체크 항목이 있으면 자리를 지킨다",
+       checked.property("checkmarks") is True, f"checkmarks={checked.property('checkmarks')}")
+
+late = _RoundedMenu()
+_b = _QAction("나중에 켜는 항목", late)
+late.addAction(_b)
+late.aboutToShow.emit()
+before = late.property("checkmarks")
+_b.setCheckable(True)
+late.aboutToShow.emit()
+report("항목을 넣은 뒤 checkable을 켜도 열 때 다시 본다",
+       before is False and late.property("checkmarks") is True,
+       f"{before} -> {late.property('checkmarks')}")
+
+_qss = build_qss("light")
+report("기본 여백은 좁고, 체크 쓰는 메뉴만 넓힌다",
+       'QMenu[checkmarks="true"]::item' in _qss and "8px 18px 8px 34px" not in _qss)
+
+
+print()
+print("=== 입력칸 우클릭 메뉴 아이콘 ===")
+
+from PyQt6.QtWidgets import QLineEdit as _QLineEdit
+from PyQt6.QtGui import QColor as _QColor
+from src.icons import is_monochrome_white as _is_white
+from src.qss import palette as _palette
+
+
+def _icon_colors(action):
+    """아이콘에서 불투명한 화소들의 색을 모아 온다."""
+    img = action.icon().pixmap(16, 16).toImage()
+    return [img.pixelColor(x, y) for y in range(img.height()) for x in range(img.width())
+            if img.pixelColor(x, y).alpha() > 200]
+
+
+_probe_edit = _QLineEdit()
+_probe_edit.setText("샘플")
+
+_raw = _probe_edit.createStandardContextMenu()
+_white = [a.text().split("	")[0].replace("&", "") for a in _raw.actions()
+          if not a.isSeparator() and not a.icon().isNull() and _is_white(a.icon())]
+report("Qt가 주는 편집 아이콘은 흰색 단색이다(문제의 원인)",
+       len(_white) == 7, f"흰 아이콘 {len(_white)}개: {_white}")
+_raw.deleteLater()
+
+for _theme in ("light", "dark"):
+    _tinter = T.setup_menu_icons(app, _theme)
+    _menu = _probe_edit.createStandardContextMenu()
+    _tinter._tint(_menu)
+    _want = _QColor(_palette(_theme)["text"])
+    _checked = []
+    _bad = []
+    for _a in _menu.actions():
+        if _a.isSeparator() or _a.icon().isNull():
+            continue
+        _px = _icon_colors(_a)
+        _name = _a.text().split("	")[0].replace("&", "")
+        _checked.append(_name)
+        if not _px or not all(abs(c.red() - _want.red()) < 4
+                              and abs(c.green() - _want.green()) < 4
+                              and abs(c.blue() - _want.blue()) < 4 for c in _px):
+            _bad.append(_name)
+    report(f"[{_theme}] 아이콘이 테마 글자색으로 칠해진다",
+           len(_checked) == 7 and not _bad,
+           f"{len(_checked)}개 확인, 어긋남={_bad}")
+    _menu.deleteLater()
+    app.removeEventFilter(_tinter)
+
+_tinter = T.setup_menu_icons(app, "light")
+_menu = _probe_edit.createStandardContextMenu()
+_tinter._tint(_menu)
+_first = [a for a in _menu.actions() if not a.icon().isNull()][0]
+_key_before = _first.icon().cacheKey()
+_tinter._tint(_menu)
+report("이미 칠한 아이콘은 다시 칠하지 않는다",
+       _first.icon().cacheKey() == _key_before)
+
+_tinter.set_color(_palette("dark")["text"])
+_tinter._tint(_menu)
+_px = _icon_colors(_first)
+_want = _QColor(_palette("dark")["text"])
+report("테마가 바뀌면 색도 따라간다",
+       bool(_px) and abs(_px[0].red() - _want.red()) < 4,
+       f"#{_px[0].red():02X}{_px[0].green():02X}{_px[0].blue():02X}" if _px else "없음")
+
+from src.appicon import get_app_icon as _app_icon
+report("색이 든 아이콘은 건드리지 않는다", not _is_white(_app_icon()))
+
+_sizes_before = set((s.width(), s.height()) for s in _first.icon().availableSizes())
+report("칠한 뒤에도 크기 종류가 그대로다", len(_sizes_before) >= 2, f"{sorted(_sizes_before)}")
+
+_src = pathlib.Path("TVerDownloader.py").read_text(encoding="utf-8")
+report("실행 진입점에서 감시자를 건다", "setup_menu_icons(app, theme)" in _src)
+report("테마를 바꿀 때 색을 갱신한다", "tinter.set_color(palette(theme)" in _src)
+
+print()
+print("=== Qt가 만든 입력칸 메뉴도 우리 메뉴와 같은 모양 ===")
+
+_shape = T.MenuShapeGuard(app)
+app.installEventFilter(_shape)
+_qt_menu = _probe_edit.createStandardContextMenu()
+_qt_menu.ensurePolished()
+_ours = RoundedMenu()
+_ours.addAction("샘플")
+_ours.ensurePolished()
+
+HINTS = ((Qt.WindowType.FramelessWindowHint, "Frameless"),
+         (Qt.WindowType.NoDropShadowWindowHint, "NoDropShadow"))
+for _flag, _label in HINTS:
+    report(f"입력칸 메뉴에 {_label}가 걸린다", bool(_qt_menu.windowFlags() & _flag))
+report("입력칸 메뉴가 투명 배경을 쓴다",
+       _qt_menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+report("우리 메뉴와 창 힌트가 같다",
+       (_qt_menu.windowFlags() & (HINTS[0][0] | HINTS[1][0]))
+       == (_ours.windowFlags() & (HINTS[0][0] | HINTS[1][0])),
+       f"입력칸={int(_qt_menu.windowFlags()):#x} 우리={int(_ours.windowFlags()):#x}")
+report("항목은 Qt가 만든 그대로 남는다", len(_qt_menu.actions()) >= 6,
+       f"{[a.text() for a in _qt_menu.actions() if a.text()]}")
+report("Polish에서 건다(Show면 창이 숨겨져 메뉴가 뜨지 않는다)",
+       "QEvent.Type.Polish" in pathlib.Path("TVerDownloader.py").read_text(encoding="utf-8")
+       .split("class MenuShapeGuard")[1].split("def setup_menu_icons")[0])
+report("실행 진입점에서 모양 감시자도 건다", "MenuShapeGuard(app)" in _src)
+
+app.removeEventFilter(_shape)
+_qt_menu.deleteLater()
+_ours.deleteLater()
+
+_menu.deleteLater()
+_probe_edit.deleteLater()
+
+for _m in (probe, plain, checked, late):
+    _m.deleteLater()
 settle()
 
 print()
