@@ -83,7 +83,12 @@ class DownloadListController:
                 widget.set_selected(item.isSelected())
 
     def remove_row(self, row: int):
-        """카드를 목록에서 뺀다. 애니메이션과 콜백을 먼저 끊어야 리소스가 남지 않는다."""
+        """카드를 목록에서 뺀다. 애니메이션과 콜백을 먼저 끊어야 리소스가 남지 않는다.
+
+        takeItem이 카드를 지우기는 하지만 deleteLater로 미룬다. cleanup()을
+        먼저 부르는 것은 그 사이에 남는 것들 때문이다 — 걸어 둔 썸네일 요청과
+        진행 애니메이션은 카드가 실제로 사라질 때까지 그대로 돈다.
+        """
         item = self.window.ui.download_list.item(row)
         if item is None:
             return

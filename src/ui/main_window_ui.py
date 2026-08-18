@@ -314,6 +314,11 @@ class MainWindowUI:
         left_pane = QFrame(objectName="LeftPane"); left_layout = QVBoxLayout(left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(self.TAB_SPACING); row = QHBoxLayout()
+        self.queue_start_button = QPushButton("대기열 시작", objectName="PrimaryButton")
+        self.queue_start_button.setToolTip(
+            "지난 실행에서 남은 대기 항목을 지금부터 받습니다.\n"
+            "TVer는 일본 지역 제한이 있으니 VPN을 켠 뒤에 누르십시오.")
+        self.queue_start_button.setVisible(False)
         self.cancel_selected_button = QPushButton("선택 항목 취소")
         self.cancel_selected_button.setToolTip(
             "진행 중인 항목은 중지하고, 대기 중인 항목은 대기열에서 뺍니다.\n"
@@ -323,6 +328,7 @@ class MainWindowUI:
         self.queue_count_label = QLabel("0 대기 / 0 진행", objectName="PaneSubtitle")
         self.log_toggle_btn = self._make_icon_button("log", "로그 숨기기")
         row.addWidget(self._make_pane_title("다운로드 목록")); row.addStretch(1)
+        row.addWidget(self.queue_start_button)
         row.addWidget(self.cancel_selected_button)
         row.addWidget(self.clear_completed_button)
         row.addWidget(self.queue_count_label)
@@ -354,6 +360,22 @@ class MainWindowUI:
         left_pane.setMinimumWidth(self.LEFT_PANE_MIN_WIDTH)
         panes.addWidget(left_pane, 1); panes.addWidget(right_pane)
         layout.addLayout(panes, 1); self.tabs.addTab(tab, "다운로드")
+
+    def set_queue_start_visible(self, visible: bool):
+        """`대기열 시작`을 되살린 항목이 있을 때만 보인다.
+
+        늘 두면 제목 줄이 그만큼 넓어져 최소 폭 창에서 옆의 단추들이 눌린다.
+        되살린 것이 없을 때는 눌러도 할 일이 없는 단추라, 있어야 할 때만 자리를
+        차지하는 편이 낫다.
+
+        **이 단추만 아이콘이 없는 것도 폭 때문이다.** 최소 폭 창에서 왼쪽 목록에
+        돌아가는 폭은 548px이고, 제목 줄은 이 단추를 빼면 412px로 넉넉하다.
+        아이콘을 달면 단추가 110px이 되어 줄이 530px까지 차는데, 개수 라벨은
+        숫자가 늘면 함께 넓어진다 — `120 대기 / 20 진행`에서 550px이 되어 넘친다
+        (실측). 아이콘을 떼면 86px이라 `9999 대기 / 999 진행`에서도 543px로
+        들어간다. 같은 줄의 다른 두 단추도 아이콘이 없어 모양도 어긋나지 않는다.
+        """
+        self.queue_start_button.setVisible(visible)
 
     def set_log_visible(self, visible: bool):
         """로그 패널을 접거나 편다. 폭이 고정이라 되돌릴 상태가 없다.

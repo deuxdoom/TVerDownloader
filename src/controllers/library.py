@@ -27,7 +27,8 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QCursor, QGuiApplication
 
 from src.message import confirm
-from src.widgets import FavoriteItemWidget, HistoryItemWidget, RoundedMenu
+from src.widgets import (FavoriteItemWidget, HistoryItemWidget, RoundedMenu,
+                         clear_item_widgets)
 
 
 class LibraryController:
@@ -64,7 +65,7 @@ class LibraryController:
         display_entries = entries_to_show[:self.HISTORY_MAX_DISPLAY]
 
         window.ui.history_empty.set_filtered(bool(search_term))
-        window.ui.history_list.clear()
+        clear_item_widgets(window.ui.history_list)
         for url, meta in display_entries:
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
             if meta.get("series_id") or meta.get("thumbnail_url"):
@@ -101,7 +102,7 @@ class LibraryController:
         window = self.window
         search_term = window.ui.fav_search_input.text().strip().lower()
         window.ui.fav_empty.set_filtered(bool(search_term))
-        window.ui.fav_list.clear()
+        clear_item_widgets(window.ui.fav_list)
         column_width = window.ui.fav_list.column_width()
         for url, meta in window.fav_store.sorted_entries():
             if search_term and (search_term not in (meta.get("title") or "").lower()
@@ -188,7 +189,9 @@ class LibraryController:
         if len(new_episodes) <= self.FAV_AUTO_ADD_LIMIT:
             added_count = 0
             for episode in new_episodes:
-                if window._request_add_task(episode['url']): added_count += 1
+                if window._request_add_task(episode['url'], title=episode.get('title', ''),
+                                            thumbnail=episode.get('thumbnail_url', '')):
+                    added_count += 1
             if added_count:
                 window.append_log(f"[즐겨찾기] '{label}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
             return

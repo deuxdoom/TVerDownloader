@@ -27,42 +27,126 @@ THUMBNAIL_CACHE_DIR = Path("thumbnails")
 LIST_THUMB_W, LIST_THUMB_H = 128, 72
 
 
-def apply_menu_shape(menu: QMenu):
-    """메뉴를 '모서리가 둥글고 테두리만 있는' 모양으로 만드는 창 힌트 세 가지.
+def apply_popup_shape(popup: QWidget):
+    """제 창을 가진 팝업을 '모서리가 둥글고 테두리만 있는' 모양으로 만든다.
 
-    `RoundedMenu`가 쓰는 것과 같은 것을 이미 만들어진 메뉴에도 걸 수 있게 떼어
-    두었다. 입력칸 우클릭 메뉴는 Qt 안쪽에서 만들어져 우리가 클래스를 고를 수
-    없는데, 그 메뉴만 그림자가 지고 모양이 달랐다(`MenuShapeGuard`).
+    메뉴와 콤보박스 펼침 목록이 같은 것을 쓴다. 둘 다 위젯이 아니라 최상위
+    팝업 창이라 QSS의 border-radius만으로는 둥글어지지 않는다는 점이 같다.
+    **한 곳에 모아 둔 이유는 한쪽만 고치면 두 팝업이 조금씩 달라 보이기
+    때문이다** - 3.3.0에서 입력칸 우클릭 메뉴에만 그림자가 지던 것이 그 예다.
 
-    두 곳이 같은 함수를 부르게 해 둔 이유는, 한쪽만 고치면 우리 메뉴와 Qt 메뉴가
-    조금씩 달라 보이기 때문이다. 무엇을 왜 거는지는 `RoundedMenu` 설명에 있다.
+    세 가지를 함께 걸어야 한다. 하나라도 빠지면 눈에 보이는 결과가 달라진다.
+
+    1. `WA_TranslucentBackground` - 모서리 바깥을 창 배경이 채우지 않게 한다.
+    2. `FramelessWindowHint` - **이것이 빠지면 모서리 바깥이 까맣게 찍힌다.**
+       투명 속성만 켜도 Qt는 창을 알파로 합성하지 않는다(실측: 모서리 밝기 0).
+    3. `NoDropShadowWindowHint` - 그림자를 끈다. 테두리만 있는 쪽이 깔끔하다.
+
+    **`setWindowFlags`로 통째로 덮어쓰지 않는다.** 플래그 하나씩 켜는
+    `setWindowFlag`을 쓰는 것은 창 종류 비트(`Qt.WindowType.Popup`)를 지키기
+    위해서다. 통째로 덮으면 팝업이 보통 창처럼 되어 포커스를 잃어도 닫히지 않는다.
     """
-    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-    menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    popup.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    popup.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+
+
+COMBO_POPUP_OBJECT = "ComboPopup"
+"""콤보박스 펼침 목록을 감싸는 창에 붙이는 이름.
+
+앱 전역 QSS로는 이 창을 가리킬 수 없어서(아래 참고) 이름을 붙이는 쪽은 코드다.
+"""
+
+
+def apply_combo_popup_shape(combo) -> None:
+    """콤보박스를 펼쳤을 때 뜨는 창을 메뉴와 같은 모양으로 만든다.
+
+    펼침 목록은 두 겹이다. 안쪽의 `QAbstractItemView`는 QSS가 둥글게 그리는데,
+    그것을 담은 바깥 창(`QComboBoxPrivateContainer`)이 사각형 그대로 남아
+    **테두리가 이중으로 보였다.** 밝은 테마에서 특히 눈에 띈다.
+
+    **창 힌트만으로는 고쳐지지 않는다. 여기가 메뉴와 다른 점이다.** 앱 전역
+    스타일시트는 이 창에 닿지 않아서, 힌트를 걸어도 창이 제 기본 배경(흰색)을
+    그대로 칠한다. 스타일시트를 **이 창에 직접** 걸어 주어야 Qt가 그리기를
+    스타일시트에 넘기고, 그제서야 투명 속성이 실제로 반영된다. 실측 결과다.
+
+    | 건 것 | 모서리 |
+    |---|---|
+    | 아무것도 안 함 | 흰 사각형 |
+    | 창 힌트 셋만 | 흰 사각형 (그대로) |
+    | 직접 스타일시트만 | **검음** |
+    | 창 힌트 셋 + 직접 스타일시트 | 깨끗 |
+
+    **규칙을 이름으로 좁히는 것도 필요하다.** 선택자 없이 `background:
+    transparent`만 주면 그 값이 자식에게까지 내려가 안쪽 목록까지 투명해진다
+    (실측: 팝업 한가운데가 뒤 창 배경색으로 나왔다). 이름으로 좁히면 이 창
+    하나만 투명해지고 안쪽 목록은 제 배경을 그대로 그린다.
+
+    창 힌트는 한 번만 건다. Polish는 테마를 바꿀 때마다 다시 오는데, 그때마다
+    창 힌트를 다시 걸면 Qt가 창을 새로 만들어 팝업이 깜빡인다.
+
+    여백을 누르는 일은 여기서 하지 않는다. 여기서 해 봐야 Qt가 창을 띄우기 전에
+    되돌려 놓는다(실측). `flatten_combo_popup_margins`가 창이 뜰 때마다 맞추며,
+    이름을 여기서 붙여 두는 덕분에 그때 이 창을 알아볼 수 있다.
+    """
+    container = combo.view().window()
+    if container.objectName() == COMBO_POPUP_OBJECT:
+        return
+    container.setObjectName(COMBO_POPUP_OBJECT)
+    apply_popup_shape(container)
+    container.setStyleSheet(f"#{COMBO_POPUP_OBJECT} {{ background: transparent; }}")
+
+
+def flatten_combo_popup_margins(container) -> None:
+    """펼침 창이 안쪽 목록보다 위아래로 커지지 않게 여백을 없앤다.
+
+    Qt는 펼침 창 배치의 맨 위와 맨 아래에 **6px짜리 빈 칸을 하나씩** 넣어 둔다
+    (스타일이 정하는 값이고 우리 QSS와는 무관하다 - 메뉴 여백을 0으로 바꿔도
+    그대로 6이었다). 창이 불투명하던 시절에는 그 자리도 같은 색으로 칠해져
+    티가 나지 않았지만, 투명해지고 나면 **거기로 뒤가 비친다.**
+
+    비치는 것이 하필 콤보박스 자신이라 눈에 띈다. Qt는 지금 고른 항목이 콤보박스
+    자리에 오도록 창을 놓는데, 첫 항목을 고른 상태면 창 위쪽이 콤보박스 위쪽과
+    겹친다. 그러면 그 6px 사이로 콤보박스 테두리가 삐져나와, **아래로 열릴 때만
+    상자가 겹쳐 보이고 위나 가운데로 열릴 때는 멀쩡한** 들쭉날쭉한 모양이 된다
+    (실측: 첫 항목 6px 드러남, 가운데·마지막 항목 0px).
+
+    **부르는 시점은 창이 뜨는 순간(Show)이다.** 더 이르게 걸면 Qt가 되돌려
+    놓는다 - Polish에서도 LayoutRequest에서도 창이 뜰 때는 다시 6이었고, Show만
+    남았다(실측). 테마를 바꿔도 되살아나므로 한 번 걸고 마는 것으로는 안 된다.
+
+    눌러 없앤 12px는 목록이 가져가 아래쪽 여백이 그만큼 넉넉해진다. 그 자리를
+    목록 여백을 키워 되찾아 볼 수도 있지만, 그러면 창 높이를 정하는 계산과
+    얽혀 **첫 번째 펼침만 목록이 잘리는** 현상이 났다(실측: 창 103에 필요
+    112). 창 크기는 Qt가 먼저 정하고 우리 손은 그 뒤에 닿기 때문이라, 건드리지
+    않는 편이 안전하다.
+    """
+    layout = container.layout()
+    if layout is None:
+        return
+    for index in range(layout.count()):
+        spacer = layout.itemAt(index).spacerItem()
+        if spacer is not None:
+            spacer.changeSize(0, 0)
+    layout.invalidate()
 
 
 class RoundedMenu(QMenu):
     """모서리가 둥글고 테두리만 있는 메뉴.
 
-    세 가지를 함께 걸어야 한다. 하나라도 빠지면 눈에 보이는 결과가 달라진다.
+    거는 것은 `apply_popup_shape`의 창 힌트 세 가지이고, 무엇을 왜 거는지는
+    그쪽 설명에 있다. 메뉴는 앱 전역 QSS가 그대로 닿아서 콤보박스 펼침 목록과
+    달리 창에 직접 스타일시트를 걸 필요가 없다.
 
-    1. `WA_TranslucentBackground` — QSS의 border-radius만으로는 둥글어지지 않는다.
-       메뉴는 자기 창을 가진 팝업이라 모서리 바깥을 창 배경이 채우고, 둥근 테두리만
-       그 위에 얹혀 네 귀퉁이가 각진 채로 남는다.
-    2. `FramelessWindowHint` — **이것이 빠지면 모서리 바깥이 까맣게 찍힌다.**
-       투명 속성만 켜도 Qt는 창을 알파로 합성하지 않아, 둥근 모양 바깥이 검게 남는다.
-       화면을 직접 찍어 재 보면 모서리 밝기가 0이다(붙이면 226).
-    3. `NoDropShadowWindowHint` — 그림자를 끈다. 테두리만 있는 쪽이 깔끔하다.
-
-    예전 주석은 1번만으로 충분하고 2번을 붙이면 그림자가 사라진다고 적어 두었으나
-    잘못된 관찰이다. 그때 '그림자가 남았다'고 본 어두운 가장자리는 실은 이 검은
-    모서리였다. 그림자를 실제로 없애는 것은 3번뿐이다.
+    예전 주석은 투명 속성만으로 충분하고 `FramelessWindowHint`를 붙이면 그림자가
+    사라진다고 적어 두었으나 잘못된 관찰이다. 그때 '그림자가 남았다'고 본 어두운
+    가장자리는 실은 합성되지 않은 검은 모서리였다. 그림자를 실제로 없애는 것은
+    `NoDropShadowWindowHint`뿐이다.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        apply_menu_shape(self)
+        apply_popup_shape(self)
         self.setProperty("checkmarks", True)
         self.aboutToShow.connect(self._sync_checkmark_space)
 
@@ -470,11 +554,85 @@ def start_thumbnail_download(url: str, on_loaded):
 
     on_loaded는 반드시 QObject의 바운드 메서드여야 한다. 람다를 넘기면 수신자가
     사라져도 Qt가 연결을 끊지 못해, 삭제된 위젯을 건드리며 죽는다.
+
+    주소가 없으면 아무것도 하지 않는다. 표지 그림이 없는 영상은 메타데이터에서
+    thumbnail이 None으로 오는데, 그대로 넘기면 urlopen이 던지는 예외를 받으려고
+    스레드 하나와 동시 실행 자리 하나를 쓴다. 답이 정해져 있는 일이다.
     """
+    if not url or not isinstance(url, str):
+        return None
     if len(_running_thumb_threads) < MAX_CONCURRENT_THUMBS:
         return _spawn_thumb_thread(url, on_loaded)
     _pending_thumbs.append((url, on_loaded))
     return None
+
+
+def cached_thumbnail(path: Path) -> Optional[QPixmap]:
+    """캐시에 둔 그림을 읽는다. 그림으로 읽히지 않으면 그 파일을 지우고 None을 준다.
+
+    깨진 파일을 그냥 두면 '파일이 있다'는 이유로 다시 받지 않는다. 그 카드만
+    영영 빈칸으로 남고, 지울 방법은 설정의 캐시 비우기로 전부 날리는 것뿐이다.
+
+    이미 그런 파일을 들고 있는 사람이 있다. 예전에는 받아 온 것을 그림으로
+    읽어 보기 전에 적어 두어서, 사라진 영상 자리에 온 오류 쪽지가 그대로
+    캐시가 됐다(_on_thumb_finished 참고). 읽어 보고 지우면 그 사람들도 다음에
+    켤 때 저절로 낫는다.
+    """
+    if not path.exists():
+        return None
+    pixmap = QPixmap(str(path))
+    if not pixmap.isNull():
+        return pixmap
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return None
+
+
+def discard_thumbnail_requests(receiver) -> int:
+    """이 카드가 걸어 둔 '아직 시작 전' 썸네일 요청을 대기열에서 뺀다.
+
+    _pump_thumb_queue도 꺼낼 때 지워진 수신자를 걸러 낸다. 다만 '지워졌다'가
+    참이 되는 것은 deleteLater가 처리된 뒤라, 목록을 새로 그리는 그 순간에는
+    아직 아니다. 그 틈에 자리가 나면 이미 버린 카드의 요청이 실제로 나간다.
+    버릴 것이 정해진 시점에 바로 빼는 편이 확실하다.
+
+    되돌려주는 수는 검사용이다. 지운 것이 없으면 대기열을 건드리지 않는다.
+    """
+    if receiver is None:
+        return 0
+    remaining = [pair for pair in _pending_thumbs
+                 if getattr(pair[1], "__self__", None) is not receiver]
+    dropped = len(_pending_thumbs) - len(remaining)
+    if dropped:
+        _pending_thumbs.clear()
+        _pending_thumbs.extend(remaining)
+    return dropped
+
+
+def clear_item_widgets(view: QListWidget):
+    """목록을 비운다. 걸어 둔 카드에게 먼저 거둘 기회를 준다.
+
+    QListWidget.clear()도 카드 자체는 지운다. 다만 deleteLater로 미뤄 두어,
+    이벤트 루프가 그것을 처리하기 전까지는 살아 있다. 그동안 그 카드가 걸어
+    둔 썸네일 요청은 지금 보이는 카드의 것과 구별되지 않아, 자리가 나면
+    아무도 보지 않을 그림을 실제로 받으러 간다.
+
+    **사라진 영상에서 유독 아프다.** 없어진 표지 그림은 403이 돌아올 때까지
+    여섯 자리 중 하나를 붙잡는데, 그 자리를 이미 버린 카드가 차지하면 지금
+    눈앞의 목록이 그만큼 늦게 뜬다. 40개짜리 기록을 다섯 번 새로 그린 뒤
+    대기열을 세면 62개(그중 22개가 이미 버린 카드의 것)에서 22개(버린 것 0)로
+    줄었다.
+
+    기록 검색은 글자를 칠 때마다 다시 그려서 이 자리를 가장 자주 지난다.
+    """
+    for row in range(view.count()):
+        cleanup = getattr(view.itemWidget(view.item(row)), "cleanup", None)
+        if callable(cleanup):
+            cleanup()
+    view.clear()
+
 
 class ImagePreviewDialog(QDialog):
     """썸네일을 크게 보여 주는 창. 보기만 한다.
@@ -805,6 +963,7 @@ class DownloadItemWidget(QWidget):
         """목록에서 제거되기 전에 애니메이션과 콜백을 확실히 끊는다."""
         self.strip.stop_pulse()
         self._progress_anim.stop()
+        discard_thumbnail_requests(self)
         downloader = self._thumb_downloader
         self._thumb_downloader = None
         if downloader is None or sip.isdeleted(downloader):
@@ -897,22 +1056,48 @@ class FavoriteItemWidget(QWidget):
         try:
             series_id = self.url.strip('/').split('/')[-1]
             if not series_id.startswith('sr'): return
-            cache_path = THUMBNAIL_CACHE_DIR / f"{series_id}.jpg"
-            if cache_path.exists(): self._set_thumbnail_pixmap(QPixmap(str(cache_path)))
+            self._cache_path = THUMBNAIL_CACHE_DIR / f"{series_id}.jpg"
+            cached = cached_thumbnail(self._cache_path)
+            if cached is not None:
+                self._set_thumbnail_pixmap(cached)
             else:
                 thumb_url = f"https://statics.tver.jp/images/content/thumbnail/series/large/{series_id}.jpg"
-                self._cache_path = cache_path
                 self.downloader = start_thumbnail_download(thumb_url, self._on_thumb_finished)
         except Exception: pass
 
+    def cleanup(self):
+        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다.
+
+        받아 온 그림을 넣을 곳이 없어졌는데도 연결이 남아 있으면, 지워진 라벨을
+        건드렸다가 슬롯 안에서 예외가 난다. 그 예외는 PyQt6가 잡지 못한다.
+        """
+        discard_thumbnail_requests(self)
+        downloader = getattr(self, "downloader", None)
+        self.downloader = None
+        if downloader is None or sip.isdeleted(downloader):
+            return
+        try:
+            downloader.loaded.disconnect(self._on_thumb_finished)
+        except (TypeError, RuntimeError):
+            pass
+
     def _on_thumb_finished(self, result: tuple):
+        """받아 온 것을 그림으로 읽어 보고, 읽히는 것만 캐시에 남긴다.
+
+        순서가 뒤였을 때가 문제였다. 사라진 영상의 표지 그림 자리에 서버가
+        오류 쪽지를 200으로 돌려주는 일이 있는데(VPN 중간 페이지도 그렇다),
+        그걸 그대로 적어 두면 다음부터는 파일이 있다는 이유로 다시 받지 않는다.
+        빈 카드가 굳고, 지울 수도 없는 쓰레기가 캐시 용량에 잡힌다.
+        """
         try: url, data = result
         except (TypeError, ValueError): return
         if not data: return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            return
         try: self._cache_path.write_bytes(data)
         except (OSError, AttributeError): pass
-        pixmap = QPixmap()
-        if pixmap.loadFromData(data): self._set_thumbnail_pixmap(pixmap)
+        self._set_thumbnail_pixmap(pixmap)
 
     def _set_thumbnail_pixmap(self, pixmap: QPixmap):
         """썸네일을 안전하게 넣는다. 라벨이 이미 삭제됐을 수 있다."""
@@ -961,22 +1146,47 @@ class HistoryItemWidget(QWidget):
         if not episode_thumb_url: return
         try:
             episode_id = self.url.strip('/').split('/')[-1]
-            cache_path = THUMBNAIL_CACHE_DIR / f"{episode_id}.jpg"
-            if cache_path.exists():
-                self._set_thumbnail_pixmap(QPixmap(str(cache_path)))
+            self._cache_path = THUMBNAIL_CACHE_DIR / f"{episode_id}.jpg"
+            cached = cached_thumbnail(self._cache_path)
+            if cached is not None:
+                self._set_thumbnail_pixmap(cached)
             else:
-                self._cache_path = cache_path
                 self.downloader = start_thumbnail_download(episode_thumb_url, self._on_thumb_finished)
         except Exception: pass
 
+    def cleanup(self):
+        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다.
+
+        받아 온 그림을 넣을 곳이 없어졌는데도 연결이 남아 있으면, 지워진 라벨을
+        건드렸다가 슬롯 안에서 예외가 난다. 그 예외는 PyQt6가 잡지 못한다.
+        """
+        discard_thumbnail_requests(self)
+        downloader = getattr(self, "downloader", None)
+        self.downloader = None
+        if downloader is None or sip.isdeleted(downloader):
+            return
+        try:
+            downloader.loaded.disconnect(self._on_thumb_finished)
+        except (TypeError, RuntimeError):
+            pass
+
     def _on_thumb_finished(self, result: tuple):
+        """받아 온 것을 그림으로 읽어 보고, 읽히는 것만 캐시에 남긴다.
+
+        순서가 뒤였을 때가 문제였다. 사라진 영상의 표지 그림 자리에 서버가
+        오류 쪽지를 200으로 돌려주는 일이 있는데(VPN 중간 페이지도 그렇다),
+        그걸 그대로 적어 두면 다음부터는 파일이 있다는 이유로 다시 받지 않는다.
+        빈 카드가 굳고, 지울 수도 없는 쓰레기가 캐시 용량에 잡힌다.
+        """
         try: url, data = result
         except (TypeError, ValueError): return
         if not data: return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            return
         try: self._cache_path.write_bytes(data)
         except (OSError, AttributeError): pass
-        pixmap = QPixmap()
-        if pixmap.loadFromData(data): self._set_thumbnail_pixmap(pixmap)
+        self._set_thumbnail_pixmap(pixmap)
 
     def _set_thumbnail_pixmap(self, pixmap: QPixmap):
         """썸네일을 안전하게 넣는다. 라벨이 이미 삭제됐을 수 있다."""

@@ -153,7 +153,8 @@ def prompt_and_update(parent, release: dict, log=print, *,
             parent, "진행 중인 작업이 있습니다",
             f"받는 중이거나 기다리는 항목이 {pending_downloads}개 있습니다.\n\n"
             "업데이트하면 프로그램이 꺼지면서 이 작업들이 중단됩니다.\n"
-            "받다 만 파일은 지워집니다. 그래도 계속할까요?",
+            "받다 만 파일은 지워지지만, 목록은 다시 켤 때 대기 상태로 되살아납니다.\n"
+            "그래도 계속할까요?",
             icon_name="cancel", color_key="danger", theme=theme,
             yes_text="중단하고 업데이트", no_text="취소"):
         log("[업데이트] 진행 중인 작업이 있어 업데이트를 취소했습니다.")

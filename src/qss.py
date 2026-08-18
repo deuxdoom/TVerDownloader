@@ -100,6 +100,50 @@ def palette(theme: str = "dark") -> dict:
     return colors
 
 
+FILENAME_PART_COLORS = {
+    "light": {
+        "series": "#1F5FA9",
+        "upload_date": "#0B6B5A",
+        "episode_number": "#94500A",
+        "episode": "#6A3FA0",
+        "id": "#A83250",
+    },
+    "dark": {
+        "series": "#6EB6FF",
+        "upload_date": "#5FD9B0",
+        "episode_number": "#FFB35C",
+        "episode": "#C3A6FF",
+        "id": "#FF8DA8",
+    },
+}
+"""파일명 구성 요소마다 정해 둔 색.
+
+목록의 항목과 미리보기의 같은 부분이 같은 색으로 보여야, 어느 것을 빼고
+넣었을 때 파일명의 어디가 달라지는지 글을 읽지 않고 알 수 있다. 그래서
+두 곳이 같은 값을 쓰도록 여기 한 곳에만 둔다.
+
+색상환에서 고르게 떨어진 다섯 가지라 나란히 놓아도 서로 헷갈리지 않는다.
+밝은 테마 쪽은 배경(#F2F4F7)에 묻히지 않도록 어둡게, 어두운 테마 쪽은
+배경(#161C26)에 대비되도록 밝게 잡았다. 목록 배경과 미리보기 배경 어느
+쪽에 얹혀도 명암비가 5를 넘는다.
+"""
+
+FILENAME_ROW_SELECT_MIX = 0.16
+"""구성 요소 목록에서 고른 행에 까는 색의 비율. 창 배경에 accent를 섞는다.
+
+더 진하게 깔면 조각 색 중 어두운 쪽(#94500A)이 그 위에서 읽히지 않는다.
+0.16이면 다섯 색 모두 명암비 4.5를 넘기면서도 고른 행이 분명히 드러난다.
+"""
+
+FILENAME_PART_MUTED = 0.62
+"""체크를 푼 항목의 색을 배경에 섞는 비율.
+
+회색으로 바꾸지 않고 흐리게만 만든다. 색이 곧 그 항목의 이름표라, 회색이
+되면 다시 켤 때 어느 자리가 돌아오는지 알 수 없다. 0.62면 켠 것과 뚜렷이
+갈리면서 무슨 색이었는지는 남는다.
+"""
+
+
 ABOUT_HOVER_MIX = 0.22
 """정보 창 단추에 마우스를 올렸을 때 섞는 색의 비율.
 
@@ -122,6 +166,23 @@ MENU_ITEM_RADIUS = 7
 겹쳐 보인다. RoundedMenu가 창 배경을 투명으로 만들 때 이 값이 실제 모서리가 된다.
 """
 
+COMBO_POPUP_RADIUS = 10
+COMBO_ITEM_RADIUS = 7
+COMBO_POPUP_PADDING = 4
+"""콤보박스 펼침 목록의 모서리와 여백. 모서리는 메뉴와 같은 값이다.
+
+**여백을 창 높이에 맞춰 키우지 않는다.** 창 크기는 Qt가 먼저 정하고 우리 손은
+그 뒤에 닿아서, 여백을 키우면 첫 번째 펼침에서만 목록이 잘린다(실측).
+
+**같은 값을 쓰는 것이 요점이다.** 둘 다 제 창을 가진 팝업이고 하는 일도
+'목록에서 하나 고르기'로 같아서, 모서리가 다르면 같은 화면에서 두 가지 규칙이
+보인다. 메뉴 쪽을 고치면 이쪽도 함께 본다.
+
+항목 반지름을 더 작게 두는 이유도 메뉴와 같다. 같은 값이면 강조 사각형이 바깥
+테두리에 닿아 두 곡선이 겹쳐 보인다. 여백은 강조가 테두리에 닿지 않게 띄우는
+몫이라, 이것이 0이면 반지름을 아무리 줄여도 모서리에서 만난다.
+"""
+
 
 def build_qss(theme: str = "dark") -> str:
     """선택된 테마에 맞는 QSS 문자열을 동적으로 생성합니다."""
@@ -131,6 +192,8 @@ def build_qss(theme: str = "dark") -> str:
     tint_dl = blend(colors["ctx_download"], colors["surface"], 0.18)
     tint_hi = blend(colors["ctx_history"], colors["surface"], 0.18)
     tint_fa = blend(colors["ctx_favorites"], colors["surface"], 0.18)
+
+    order_sel = blend(colors["accent"], colors["bg"], FILENAME_ROW_SELECT_MIX)
 
     about_red = blend(colors["hover_red"], colors["bg"], ABOUT_HOVER_MIX)
     about_yellow = blend(colors["hover_yellow"], colors["bg"], ABOUT_HOVER_MIX)
@@ -248,7 +311,12 @@ def build_qss(theme: str = "dark") -> str:
     QLineEdit#PathDisplayEdit {{ padding: 6px 8px; color: {colors["text_dim"]}; }}
 
     /* 콤보박스. 펼쳐지는 목록(QAbstractItemView)은 팝업 최상위 위젯이라
-       본체 서체를 물려받지 않는다. 크기를 명시해야 설정창 안에서 일관되게 보인다. */
+       본체 서체를 물려받지 않는다. 크기를 명시해야 설정창 안에서 일관되게 보인다.
+
+       **여기서 그리는 둥근 상자가 실제로 보이는 팝업의 전부다.** 그것을 담은
+       바깥 창은 apply_combo_popup_shape(src/widgets.py)가 투명으로 만든다.
+       그 처리가 빠지면 이 둥근 상자 바깥에 사각형 창이 그대로 남아 테두리가
+       이중으로 보인다. 모서리 값은 메뉴와 같은 것을 쓴다. */
     QComboBox {{
         background: {colors["surface"]};
         border: 1px solid {colors["border"]};
@@ -263,13 +331,27 @@ def build_qss(theme: str = "dark") -> str:
         background: {colors["surface"]};
         color: {colors["text"]};
         border: 1px solid {colors["border"]};
-        border-radius: 8px;
-        padding: 4px;
+        border-radius: {COMBO_POPUP_RADIUS}px;
+        padding: {COMBO_POPUP_PADDING}px;
         font-size: {fs_body}px;
         outline: none;
-        selection-background-color: {colors["accent"]};
-        selection-color: {colors["accent_fg"]};
     }}
+    /* 강조를 selection-background-color가 아니라 ::item에서 칠한다.
+       그쪽은 행 상자를 통째로 채워서 둥근 모서리를 넘어 삐져나온다 - 목록에서
+       고른 행에 각진 자국이 남던 것과 같은 성격이다. ::item에 반지름과 여백을
+       주면 강조가 상자 안에 갇힌다. */
+    QComboBox QAbstractItemView::item {{
+        background: transparent;
+        color: {colors["text"]};
+        padding: 6px 10px;
+        border-radius: {COMBO_ITEM_RADIUS}px;
+        margin: 1px 2px;
+    }}
+    QComboBox QAbstractItemView::item:selected {{
+        background: {colors["accent"]};
+        color: {colors["accent_fg"]};
+    }}
+    QComboBox QAbstractItemView::item:disabled {{ color: {colors["text_dim"]}; }}
 
     /* 체크박스·라디오 표시기. 라이트 테마에서 기본 표시기가 배경에 묻혀
        체크하는 곳인지조차 알기 어려웠다. 채움 여부로 상태가 분명해지게 한다. */
@@ -341,6 +423,13 @@ def build_qss(theme: str = "dark") -> str:
     /* 5) 종료 확인 등 메시지 상자 가운데 정렬 */
     QMessageBox QLabel {{ qproperty-alignment: 'AlignCenter'; }}
     QMessageBox QDialogButtonBox {{ qproperty-centerButtons: true; }}
+
+    /* 파일명 구성 요소 목록 — 끌어서 차례를 바꾸는 곳이라 고른 행이 그대로 남는다.
+       강조색을 정해 두지 않으면 그 자리가 새까맣게 찍혀, 조각마다 정해 둔 글자색이
+       거기서만 묻힌다(PartColorDelegate가 색을 살려 놓아도 배경이 삼킨다). */
+    QListWidget#FilenameOrderList::item {{ padding: 6px 8px; border-radius: 6px; }}
+    QListWidget#FilenameOrderList::item:hover {{ background: {colors["bg_alt"]}; }}
+    QListWidget#FilenameOrderList::item:selected {{ background: {order_sel}; }}
 
     /* 파일명 미리보기 */
     #FilenamePreview {{

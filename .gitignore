@@ -16,11 +16,25 @@ pip-wheel-metadata/
 Thumbs.db
 .vscode/
 .idea/
+# .claude/CLAUDE.md 는 개발자용 작업 지침이라 커밋하지 않는다.
 .claude/
+
+# 개발·검증에만 쓰는 것들 - 배포본에 들어가지 않고 쓰는 사람이 볼 일도 없다.
+# 대신 이것들이 없으면 tools/gen_icons.py 로 만드는 src/icons_data.py 처럼
+# '생성물만 커밋되는' 파일을 다시 만들 수 없다. 로컬에 반드시 남겨 둘 것.
+pytest.ini
+tests/
+tools/
+requirements.txt
+requirements-dev.txt
 
 # Logs/temps
 *.log
 *.tmp
+
+# 릴리스 노트 초안 - 깃허브 릴리스 본문에 붙여 넣고 버리는 것이라 커밋하지 않는다.
+# 같은 내용을 자세히 적어 두는 곳은 CHANGELOG.md이고 그쪽이 커밋 대상이다.
+RELEASE.md
 
 # PyInstaller/빌드 산출물
 dist/
@@ -33,6 +47,11 @@ bin/
 thumbnails/
 downloader_config.json
 favorites.json
+urlhistory.json
+queue.json
+historybak/
+favoritbak/
+update-workspace/
 
 # 아래는 생성물이지만 반드시 커밋해야 한다. 실수로 무시되지 않도록 남겨 둔다.
 #   src/icons_data.py   : Fluent 아이콘 19종 임베드 (tools/gen_icons.py)

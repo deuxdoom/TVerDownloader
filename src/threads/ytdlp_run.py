@@ -89,8 +89,18 @@ def is_retriable(stderr: str) -> bool:
     return any(marker in text for marker in RETRIABLE_MARKERS)
 
 
+ABORTED = "중단했습니다."
+"""부르는 쪽이 그만두라고 해서 끝났을 때의 오류 문구.
+
+실패와 구별하려고 둔다. 이걸 받은 쪽은 아무것도 알리지 않고 조용히 물러난다 —
+그만두라고 한 것은 사용자나 앱 자신이라, 실패했다고 말할 일이 아니다.
+"""
+
+
 def run(command: List[str], timeout: int, label: str,
-        on_log: Optional[Callable[[str], None]] = None) -> Tuple[bool, str, str]:
+        on_log: Optional[Callable[[str], None]] = None,
+        on_spawn: Optional[Callable[[subprocess.Popen], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None) -> Tuple[bool, str, str]:
     """yt-dlp를 돌리고 (성공 여부, 표준 출력, 오류 문구)를 돌려준다.
 
     통신 문제로 보이면 지수 백오프로 다시 건다. 제한 시간을 넘긴 경우는 다시 걸지
@@ -98,9 +108,17 @@ def run(command: List[str], timeout: int, label: str,
     여기까지 왔다면 몇 분을 더 기다린다고 달라질 상황이 아니다.
 
     부르는 쪽이 모두 작업 스레드라 여기서 그냥 자도 화면은 멈추지 않는다.
+
+    **중간에 그만두려면 두 가지가 함께 필요하다.** on_spawn은 갓 띄운 프로세스를
+    부르는 쪽에 넘겨, 죽여서 communicate()의 붙잡힘을 풀 수 있게 한다.
+    should_stop은 다음 차례로 넘어가기 전에 물어보는 것이라, 죽인 뒤 오류 문구가
+    통신 문제처럼 보여 다시 걸리는 일과 백오프만큼 더 매달리는 일을 막는다.
+    하나만 있으면 어느 쪽이든 종료가 몇 초씩 늘어진다.
     """
     out = err = ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        if should_stop and should_stop():
+            return False, "", ABORTED
         try:
             proc = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -109,6 +127,8 @@ def run(command: List[str], timeout: int, label: str,
             )
         except OSError as e:
             return False, "", f"yt-dlp를 실행하지 못했습니다: {e}"
+        if on_spawn:
+            on_spawn(proc)
 
         try:
             out, err = proc.communicate(timeout=timeout)
@@ -119,6 +139,8 @@ def run(command: List[str], timeout: int, label: str,
 
         if proc.returncode == 0:
             return True, out, err
+        if should_stop and should_stop():
+            return False, "", ABORTED
         if attempt >= MAX_ATTEMPTS or not is_retriable(err):
             break
 

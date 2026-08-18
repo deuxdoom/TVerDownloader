@@ -3,20 +3,28 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from src.utils import get_startupinfo
+from src import encoding
+from src.utils import get_startupinfo, resolve_ffprobe_path
 
 class ConversionThread(QThread):
     finished = pyqtSignal(bool, str, str)
     log = pyqtSignal(str)
 
+    PROBE_TIMEOUT = 20
+    """ffprobe 한 번을 기다릴 시간(초).
+
+    읽기만 하는 호출이라 정상이면 0.1초 안에 끝난다(실측). 넉넉히 두는 것은
+    네트워크 드라이브에 받아 둔 경우를 위해서고, 그래도 안 오면 못 읽은 것으로
+    보고 넘어간다 - 속성을 하나 못 읽었다고 변환 자체를 접을 이유는 없다.
+    """
+
     def __init__(self, url: str, input_path: str, ffmpeg_path: str,
                  target_format: Optional[str], target_codec: Optional[str],
-                 delete_original: bool, hw_encoder_setting: str,
-                 quality_cfg: Dict[str, int], parent=None):
+                 delete_original: bool, hw_encoder_setting: str, parent=None):
         super().__init__(parent)
         self.url = url
         self.input_path = Path(input_path)
@@ -25,10 +33,17 @@ class ConversionThread(QThread):
         self.target_codec = target_codec
         self.delete_original = delete_original
         self.hw_encoder_setting = hw_encoder_setting
-        self.quality_cfg = quality_cfg
         self.process = None
         self._stop_flag = False
         self._process_lock = threading.Lock()
+        self.command_text = ""
+        self.plan_notes: List[str] = []
+        """어떤 인자로 무엇을 만들었는지. **성공하면 로그에 내보내지 않는다.**
+
+        잘 끝난 변환에서 이 줄들을 읽는 사람은 없고, 한 편 받을 때마다 로그를
+        서너 줄씩 밀어낸다. 실패했을 때는 반대로 이것이 없으면 짚을 것이 없어서,
+        그때만 명령줄과 함께 내보낸다. 검사도 로그를 훑지 않고 여기를 읽는다.
+        """
 
     def stop(self):
         """변환을 중단한다.
@@ -84,67 +99,127 @@ class ConversionThread(QThread):
         except OSError as e:
             self.log.emit(f"[오류] 중단된 파일을 지우지 못했습니다 ('{output_path.name}'): {e}")
 
-    def _get_video_encoder_args(self) -> List[str]:
-        """선호 코덱과 GPU/CPU 설정에 맞는 FFmpeg 인코더 및 품질 인자를 반환합니다."""
-        if not self.target_codec:
-            return []
+    def _run_ffprobe(self, args: List[str]) -> Optional[str]:
+        """ffprobe를 한 번 돌리고 표준 출력을 돌려준다. 실패하면 None.
 
-        codec_map = {
-            'h264': ('h264_nvenc', 'h264_qsv', 'h264_amf', 'libx264'),
-            'hevc': ('hevc_nvenc', 'hevc_qsv', 'hevc_amf', 'libx265'),
-            'vp9': (None, 'vp9_qsv', None, 'libvpx-vp9'),
-            'av1': ('av1_nvenc', 'av1_qsv', 'av1_amf', 'libsvtav1')
+        실패를 로그에 남기지 않는다. 부르는 쪽이 못 읽은 값마다 안전한 쪽으로
+        물러서게 되어 있어서, 사용자가 손댈 것이 없는 줄만 쌓인다.
+        """
+        ffprobe_path = resolve_ffprobe_path(self.ffmpeg_path)
+        if not ffprobe_path:
+            return None
+        command = [ffprobe_path, '-v', 'error'] + args + [str(self.input_path)]
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  startupinfo=get_startupinfo(),
+                                  timeout=self.PROBE_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return proc.stdout if proc.returncode == 0 else None
+
+    @staticmethod
+    def _parse_fields(text: Optional[str]) -> Dict[str, str]:
+        """ffprobe의 'key=value' 출력을 사전으로 바꾼다.
+
+        값이 'N/A'인 항목은 아예 담지 않는다. 담아 두면 부르는 쪽마다 그 문자열을
+        따로 걸러야 하는데, 한 곳에서 빠뜨리면 'N/A'가 숫자로 넘어간다.
+        """
+        fields: Dict[str, str] = {}
+        for line in (text or "").splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and value and value != "N/A":
+                fields[key] = value
+        return fields
+
+    def _probe_video(self) -> Dict[str, Any]:
+        """재인코딩에 필요한 영상 속성을 읽는다. 못 읽은 것은 None으로 남는다.
+
+        fps는 avg_frame_rate를 먼저 본다. r_frame_rate는 컨테이너가 적어 둔
+        기준 시간에서 나온 값이라 가변 프레임률 영상에서 실제보다 크게 나오고,
+        그러면 level이 한 단계 높게 잡힌다.
+        """
+        text = self._run_ffprobe([
+            '-select_streams', 'v:0', '-show_entries',
+            'stream=width,height,avg_frame_rate,r_frame_rate,'
+            'color_primaries,color_transfer,color_space',
+            '-of', 'default=noprint_wrappers=1'])
+        fields = self._parse_fields(text)
+        fps = (encoding.parse_fps(fields.get("avg_frame_rate"))
+               or encoding.parse_fps(fields.get("r_frame_rate")))
+        return {
+            "width": self._as_int(fields.get("width")),
+            "height": self._as_int(fields.get("height")),
+            "fps": fps,
+            "primaries": fields.get("color_primaries"),
+            "transfer": fields.get("color_transfer"),
+            "space": fields.get("color_space"),
         }
 
-        if self.target_codec not in codec_map:
-            return ['-c:v', 'copy']
+    def _probe_audio(self) -> Dict[str, Any]:
+        """오디오 코덱·비트레이트·채널 수를 읽는다.
 
-        encoders = codec_map[self.target_codec]
-        args: List[str] = []
-        encoder_name: Optional[str] = None
-        quality_val_str = ""
+        비트레이트가 안 나오면 패킷을 세어 직접 잰다. **mkv와 webm이 그 경우이고,
+        yt-dlp가 유튜브의 AV1+Opus를 병합하면 나오는 것이 바로 그 컨테이너다**
+        (실측: 같은 내용을 mp4에 담으면 120,080bps, mkv에 담으면 N/A).
+        여기서 물러서면 이 기능이 정작 필요한 파일에서만 어림값을 쓰게 된다.
+        """
+        text = self._run_ffprobe([
+            '-select_streams', 'a:0', '-show_entries',
+            'stream=codec_name,bit_rate,channels',
+            '-of', 'default=noprint_wrappers=1'])
+        fields = self._parse_fields(text)
+        codec_name = fields.get("codec_name")
+        raw_bps = self._as_int(fields.get("bit_rate"))
+        kbps = raw_bps / 1000.0 if raw_bps else None
+        if codec_name and kbps is None:
+            kbps = self._measure_audio_bitrate()
+        return {"codec_name": codec_name, "kbps": kbps,
+                "channels": self._as_int(fields.get("channels"))}
 
-        if self.hw_encoder_setting == "nvidia" and encoders[0]:
-            encoder_name = encoders[0]
-            q_val = self.quality_cfg.get("gpu_cq", 30)
-            quality_val_str = f"CQ={q_val}"
-            args = ['-c:v', encoder_name, '-cq', str(q_val), '-preset', 'p5']
+    def _measure_audio_bitrate(self) -> Optional[float]:
+        """컨테이너가 비트레이트를 안 적어 두었을 때 패킷을 세어 직접 잰다.
 
-        elif self.hw_encoder_setting == "intel" and encoders[1]:
-            encoder_name = encoders[1]
-            q_val = self.quality_cfg.get("gpu_cq", 30)
-            quality_val_str = f"CQ={q_val}"
-            args = ['-hwaccel', 'auto', '-c:v', encoder_name, '-cq', str(q_val), '-preset', 'medium']
+        앞부분만 읽는다. 전체를 훑어도 값은 거의 같은데 파일이 길수록 그만큼
+        기다리게 된다(실측: 20분짜리에서 전체 0.205초/패킷 60,001개 대 앞 2분
+        0.068초/6,000개, 값은 159,998bps로 같다).
+        """
+        text = self._run_ffprobe([
+            '-select_streams', 'a:0', '-show_entries', 'packet=pts_time,size',
+            '-read_intervals', f'%+{encoding.AUDIO_PROBE_WINDOW_SECONDS}',
+            '-of', 'csv=p=0'])
+        if not text:
+            return None
+        rows = [line.strip().rstrip(',').split(',')
+                for line in text.splitlines() if line.strip()]
+        return encoding.bitrate_from_packets(rows)
 
-        elif self.hw_encoder_setting == "amd" and encoders[2]:
-            encoder_name = encoders[2]
-            q_val = self.quality_cfg.get("gpu_cq", 30)
-            quality_val_str = f"CQP={q_val}"
-            args = ['-c:v', encoder_name, '-rc', 'cqp', '-qp_i', str(q_val), '-qp_p', str(q_val), '-qp_b', str(q_val)]
+    @staticmethod
+    def _as_int(text: Optional[str]) -> Optional[int]:
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return None
 
-        else:
-            encoder_name = encoders[3]
-            if not encoder_name:
-                return ['-c:v', 'copy']
+    def _reencode_args(self, output_path: Path) -> List[str]:
+        """영상을 다시 만들 때 붙일 인자 전부.
 
-            if encoder_name == 'libsvtav1':
-                q_val = self.quality_cfg.get("cpu_av1_crf", 41)
-                quality_val_str = f"CRF={q_val}"
-                args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', '8']
-            elif encoder_name == 'libvpx-vp9':
-                q_val = self.quality_cfg.get("cpu_vp9_crf", 36)
-                quality_val_str = f"CRF={q_val}"
-                args = ['-c:v', encoder_name, '-crf', str(q_val), '-b:v', '0']
-            elif encoder_name == 'libx265':
-                q_val = self.quality_cfg.get("cpu_h265_crf", 31)
-                quality_val_str = f"CRF={q_val}"
-                args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', 'medium']
-            else:
-                q_val = self.quality_cfg.get("cpu_h264_crf", 26)
-                quality_val_str = f"CRF={q_val}"
-                args = ['-c:v', encoder_name, '-crf', str(q_val), '-preset', 'medium']
-
-        self.log.emit(f"사용할 인코더: {encoder_name} (설정: {self.hw_encoder_setting}, 품질: {quality_val_str})")
+        **오디오를 여기서 함께 정하는 것이 이 함수의 요점이다.** 예전에는
+        영상 인자만 고르고 오디오는 부르는 쪽에서 -c:a copy 를 붙였는데,
+        그래서 AV1+Opus 원본을 AVC로 옮기면 영상만 h264가 되고 소리는 Opus로
+        남았다. 둘을 갈라 두면 한쪽만 고치는 일이 또 생긴다.
+        """
+        video = self._probe_video()
+        audio = self._probe_audio()
+        video_opts, video_summary = encoding.video_args(
+            self.target_codec, self.hw_encoder_setting, video, output_path.suffix)
+        audio_opts, audio_summary = encoding.audio_args(
+            audio["codec_name"], audio["kbps"], audio["channels"])
+        self.plan_notes = [f"영상 인코더: {video_summary}", f"오디오: {audio_summary}"]
+        args = ['-vf', encoding.color_filter(
+            video["primaries"], video["transfer"], video["space"])]
+        args.extend(video_opts)
+        args.extend(audio_opts)
         return args
 
     def _handle_sidecar_subtitles(self, old_path: Path, new_path: Path) -> None:
@@ -190,19 +265,16 @@ class ConversionThread(QThread):
 
         command = [self.ffmpeg_path, '-i', str(self.input_path), '-y']
 
-        if self.target_codec:
-            encoder_args = self._get_video_encoder_args()
-            command.extend(encoder_args)
-            command.extend(['-c:a', 'copy'])
-        elif self.target_format == 'mp3':
-            command.extend(['-vn', '-c:a', 'libmp3lame', '-q:a', '2'])
-        elif self.target_format in ['avi', 'mov']:
-            command.extend(['-c', 'copy'])
-
-        command.append(str(output_path))
-
         try:
-            self.log.emit(f"파일 변환 시작: '{self.input_path.name}' -> '{output_path.name}'")
+            if self.target_codec:
+                command.extend(self._reencode_args(output_path))
+            elif self.target_format == 'mp3':
+                command.extend(['-vn', '-c:a', 'libmp3lame', '-q:a', '2'])
+            elif self.target_format in ['avi', 'mov']:
+                command.extend(['-c', 'copy'])
+
+            command.append(str(output_path))
+            self.command_text = subprocess.list2cmdline(command)
             proc = self._spawn(command)
             if proc is None:
                 self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
@@ -217,20 +289,32 @@ class ConversionThread(QThread):
                 self.finished.emit(False, self.url, ""); return
 
             if returncode == 0:
-                self.log.emit(f"파일 변환 성공: '{output_path.name}'")
+                self.log.emit("파일 변환 성공")
                 self._handle_sidecar_subtitles(self.input_path, output_path)
                 if self.delete_original and self.input_path.exists():
                     try:
                         self.input_path.unlink()
-                        self.log.emit(f"원본 파일 삭제: '{self.input_path.name}'")
                     except OSError as e:
                         self.log.emit(f"[오류] 원본 파일 삭제 실패: {e}")
                 self.finished.emit(True, self.url, str(output_path))
             else:
                 self.log.emit(f"[오류] 파일 변환 실패: {stderr_text}")
+                self._log_plan()
                 self._discard_output(output_path)
                 self.finished.emit(False, self.url, "")
         except Exception as e:
             self.log.emit(f"[오류] 파일 변환 중 예외 발생: {e}")
+            self._log_plan()
             self._discard_output(output_path)
             self.finished.emit(False, self.url, "")
+
+    def _log_plan(self):
+        """무엇을 어떤 인자로 만들려 했는지 남긴다. 실패했을 때만 부른다.
+
+        실패한 변환은 인자가 원인인 경우가 많아서, 명령줄이 없으면 재현할 방법이
+        없다. 반대로 성공했을 때는 아무도 읽지 않는 줄이라 내보내지 않는다.
+        """
+        for note in self.plan_notes:
+            self.log.emit(note)
+        if self.command_text:
+            self.log.emit(f"ffmpeg 명령: {self.command_text}")

@@ -1,29 +1,75 @@
 from __future__ import annotations
+import html
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QKeySequence
+from PyQt6.QtGui import QIcon, QKeySequence, QColor, QPalette
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QStackedWidget, QWidget, QFileDialog, QDialogButtonBox,
-    QListWidget, QListWidgetItem, QAbstractItemView,
+    QListWidget, QListWidgetItem, QAbstractItemView, QStyledItemDelegate,
     QRadioButton, QButtonGroup, QCheckBox, QMessageBox, QFrame, QComboBox,
-    QFormLayout, QGroupBox, QGridLayout, QKeySequenceEdit
+    QGroupBox, QGridLayout, QKeySequenceEdit
 )
 from src import shortcuts
 from src.icons import get_icon
-from src.message import confirm
-from src.qss import palette
-from src.utils import save_config, PARALLEL_MAX
+from src.message import confirm, notify
+from src.qss import palette, blend, FILENAME_PART_COLORS, FILENAME_PART_MUTED
+from src.utils import (save_config, PARALLEL_MAX, FRAGMENTS_MIN, FRAGMENTS_MAX,
+                       MAX_TOTAL_CONNECTIONS, canonicalize_config_fragments,
+                       canonicalize_config_codec, canonicalize_config_encoder)
 from src.widgets import THUMBNAIL_CACHE_DIR
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
 PREVIEW_SAMPLES = {
-    "series": "アメトーーク！",
-    "upload_date": "20260807",
-    "episode_number": "1005",
-    "episode": "【粗品参戦】ダチョウ倶楽部を考えよう2026…有吉＆劇団＆出川",
-    "id": "[epi6hzy79h]",
+    "series": "ドラえもん",
+    "upload_date": "20260810",
+    "episode_number": "199",
+    "episode": "「のび太の惑星探査ミッション」",
+    "id": "[epo78piojx]",
 }
+"""미리보기에 넣는 본보기 값.
+
+짧은 것으로 골랐다. 예전에는 버라이어티 제목을 그대로 썼는데, 한 줄에
+들어가지 않아 미리보기가 두 줄로 접혔다. 체크 하나를 여닫을 때마다 줄 수가
+바뀌면 글 전체가 밀려서, 정작 어느 조각이 빠졌는지가 그 움직임에 묻힌다.
+
+확장자는 적지 않는다. 여기서 고르는 것은 이름을 이루는 조각들이고,
+확장자는 그 중 하나가 아니라 받고 나서 정해진다.
+"""
+
+
+def part_color(theme: str, key: str, on: bool) -> str:
+    """파일명 조각 하나에 쓸 글자색. 꺼 둔 것은 배경에 섞어 흐리게 만든다."""
+    colors = palette(theme)
+    base = FILENAME_PART_COLORS[theme].get(key, colors["text"])
+    return base if on else blend(base, colors["bg"], FILENAME_PART_MUTED)
+
+
+class PartColorDelegate(QStyledItemDelegate):
+    """구성 요소 목록의 글자를 조각마다 정해 둔 색으로 그린다.
+
+    색을 항목의 ForegroundRole에 적어 두는 방법도 있다. 그러면 체크를 여닫을
+    때마다 색을 다시 적어야 하고, 적는 일이 itemChanged를 다시 울려 같은 함수로
+    되돌아온다. 그릴 때 정하면 그런 되먹임이 생기지 않는다.
+
+    고른 행을 스타일이 HighlightedText로 그리는 것도 여기서 막는다. 끌어 자리를
+    바꾸는 동안 그 항목만 색을 잃으면, 지금 옮기는 것이 미리보기의 어느 덩어리인지를
+    짚을 수 없다.
+    """
+
+    def __init__(self, theme: str, parent=None):
+        super().__init__(parent)
+        self._theme = theme
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        color = QColor(part_color(
+            self._theme, index.data(ROLE_KEY),
+            option.checkState == Qt.CheckState.Checked,
+        ))
+        option.palette.setColor(QPalette.ColorRole.Text, color)
+        option.palette.setColor(QPalette.ColorRole.HighlightedText, color)
+
 
 class SettingsDialog(QDialog):
     def __init__(self, config: dict, parent: QWidget | None = None):
@@ -135,12 +181,31 @@ class SettingsDialog(QDialog):
         browse = QPushButton("찾아보기..."); browse.clicked.connect(self._browse_folder); row.addWidget(browse)
         folder_layout.addLayout(row); layout.addWidget(folder_group)
         dl_count_group = QWidget(); dl_count_layout = QHBoxLayout(dl_count_group); dl_count_layout.setContentsMargins(0,0,0,0)
-        dl_count_layout.addWidget(QLabel("최대 동시 다운로드 개수:"))
+        parallel_label = QLabel("최대 동시 다운로드 개수:")
+        dl_count_layout.addWidget(parallel_label)
         self.concurrent_spinbox = QSpinBox(objectName="StepperSpinBox")
         self.concurrent_spinbox.setRange(1, PARALLEL_MAX)
         self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 5))
         self.concurrent_spinbox.setMinimumSize(96, 36)
         dl_count_layout.addWidget(self.concurrent_spinbox); dl_count_layout.addStretch(1); layout.addWidget(dl_count_group)
+
+        frag_group = QWidget(); frag_layout = QHBoxLayout(frag_group); frag_layout.setContentsMargins(0, 0, 0, 0)
+        fragments_label = QLabel("한 영상에서 동시에 받을 조각 수:")
+        frag_layout.addWidget(fragments_label)
+        self.fragments_spinbox = QSpinBox(objectName="StepperSpinBox")
+        self.fragments_spinbox.setRange(FRAGMENTS_MIN, FRAGMENTS_MAX)
+        self.fragments_spinbox.setValue(canonicalize_config_fragments(self.config))
+        self.fragments_spinbox.setMinimumSize(96, 36)
+        self.fragments_spinbox.setToolTip(
+            "TVer 영상은 수백 개의 작은 조각으로 나뉘어 있습니다.\n"
+            "그것을 한 개씩 차례로 받으면 회선을 다 쓰지 못해 느립니다.\n"
+            "이 값을 올리면 여러 조각을 한꺼번에 받아 그만큼 빨라집니다.\n\n"
+            "위의 동시 다운로드 개수와 곱해집니다 — 둘 다 크게 올리면\n"
+            "연결이 너무 많아져 TVer이 접속을 막을 수 있습니다.\n"
+            "1로 두면 이 기능을 쓰지 않습니다."
+        )
+        frag_layout.addWidget(self.fragments_spinbox); frag_layout.addStretch(1); layout.addWidget(frag_group)
+        self._align_labels(parallel_label, fragments_label)
 
         close_group = QWidget(); close_layout = QVBoxLayout(close_group); close_layout.setContentsMargins(0, 0, 0, 0)
         close_layout.addWidget(QLabel("닫기 버튼(X)을 눌렀을 때:"))
@@ -195,6 +260,7 @@ class SettingsDialog(QDialog):
         update_layout.addWidget(self.auto_update_checkbox); layout.addWidget(update_group)
 
         layout.addStretch(1); self._add_page(tab, "일반", "settings")
+        self._general_page_row = self.nav.count() - 1
 
     SHORTCUT_EDIT_WIDTH = 190
     """조합 입력칸 폭. 'Ctrl+Shift+F12'까지 잘리지 않는다."""
@@ -285,13 +351,13 @@ class SettingsDialog(QDialog):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(8)
         layout.addWidget(QLabel("파일명 구성 요소 선택 및 순서 설정 (항목을 끌어서 순서 변경):"))
 
-        self.order_list = QListWidget()
+        self.order_list = QListWidget(objectName="FilenameOrderList")
         self.order_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.order_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.order_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.order_list.setDropIndicatorShown(True)
         self.order_list.setDragDropOverwriteMode(False)
-        self.order_list.setStyleSheet("QListWidget::item{ padding:6px 8px; }")
+        self.order_list.setItemDelegate(PartColorDelegate(self._theme, self.order_list))
         fm = self.order_list.fontMetrics(); row_h = max(28, fm.height() + 12)
 
         self.part_names: dict[str, str] = {"series": "시리즈명", "upload_date": "방송날짜", "episode_number": "회차번호", "episode": "타이틀", "id": "고유ID"}
@@ -328,14 +394,26 @@ class SettingsDialog(QDialog):
         self._add_page(tab, "파일명", "nav_filename")
 
     def _update_preview(self, *args):
-        parts = []
+        """고른 조각을 차례대로 이어 미리보기를 다시 적는다.
+
+        서식 있는 글로 적는 것은 조각마다 위 목록과 같은 색을 입힐 수 있어서다.
+        그 대신 본보기 값을 반드시 이스케이프해야 한다. 지금 값에는 꺾은괄호가 없지만,
+        그런 글자가 든 제목으로 바꾸는 날 그 대목이 통째로 사라진다.
+        """
+        spans = []
         for i in range(self.order_list.count()):
             item = self.order_list.item(i)
             if item.checkState() != Qt.CheckState.Checked:
                 continue
             key = item.data(ROLE_KEY)
-            parts.append(PREVIEW_SAMPLES.get(key, item.text()))
-        self.preview_label.setText((" ".join(parts) + ".mp4") if parts else "(선택된 항목이 없습니다)")
+            sample = html.escape(PREVIEW_SAMPLES.get(key, item.text()))
+            spans.append(
+                f'<span style="color:{part_color(self._theme, key, True)};">{sample}</span>'
+            )
+        if not spans:
+            dim = palette(self._theme)["text_dim"]
+            spans = [f'<span style="color:{dim};">(선택된 항목이 없습니다)</span>']
+        self.preview_label.setText(" ".join(spans))
 
     def _create_quality_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
@@ -357,10 +435,17 @@ class SettingsDialog(QDialog):
             "원본 유지 (재인코딩 없음, 기본값)": "original",
             "AVC/H.264 (최고 호환성)": "avc",
             "HEVC/H.265 (고효율)": "hevc",
-            "VP9 (웹 표준)": "vp9",
-            "AV1 (차세대)": "av1",
         }
-        current_codec = self.config.get("preferred_codec", "original")
+        self.codec_combo.setToolTip(
+            "받은 영상이 여기서 고른 코덱이 아니면 그 코덱으로 다시 만듭니다.\n"
+            "이때 소리도 AAC로 함께 다시 만듭니다 — Opus나 Vorbis로 남으면\n"
+            "편집 도구에서 오디오 트랙이 아예 잡히지 않기 때문입니다.\n"
+            "소리 비트레이트는 원본에 맞춰 정해지고, 원본이 이미 AAC면 그대로 둡니다.\n\n"
+            "품질은 정해진 값을 씁니다(AVC는 CRF 20, HEVC는 CRF 23, 각각 preset slow).\n"
+            "다시 만드는 데 시간이 걸리고 화질은 원본보다 조금 나빠지므로,\n"
+            "특별히 필요하지 않으면 '원본 유지'가 가장 좋습니다."
+        )
+        current_codec = canonicalize_config_codec(self.config)
         for text, key in self.codec_map.items():
             self.codec_combo.addItem(text, userData=key)
             if key == current_codec:
@@ -376,10 +461,13 @@ class SettingsDialog(QDialog):
         self.hw_encoder_map = {
             "CPU (기본값, 호환성)": "cpu",
             "NVIDIA (NVENC)": "nvidia",
-            "Intel (QSV)": "intel",
-            "AMD (AMF)": "amd"
         }
-        current_hw = self.config.get("hardware_encoder", "cpu")
+        self.hw_encoder_combo.setToolTip(
+            "다시 만드는 일을 그래픽카드에 맡깁니다. CPU보다 훨씬 빠릅니다.\n"
+            "대신 같은 품질 지수에서 압축 효율이 조금 떨어져 파일이 커집니다.\n"
+            "NVIDIA 그래픽카드가 없으면 변환이 실패하므로 CPU로 두십시오."
+        )
+        current_hw = canonicalize_config_encoder(self.config)
         for text, key in self.hw_encoder_map.items():
             self.hw_encoder_combo.addItem(text, userData=key)
             if key == current_hw:
@@ -388,39 +476,6 @@ class SettingsDialog(QDialog):
         layout.addWidget(hw_groupbox)
         self._hw_group = hw_groupbox
 
-        quality_group = QWidget()
-        quality_layout = QFormLayout(quality_group)
-        quality_layout.setContentsMargins(0, 5, 0, 5)
-        quality_layout.setSpacing(10)
-        quality_layout.addRow(QLabel("상세 품질 설정 (숫자가 낮을수록 고품질)"))
-
-        self.q_cpu_h264_crf = QSpinBox()
-        self.q_cpu_h264_crf.setRange(0, 51)
-        self.q_cpu_h264_crf.setValue(self.config.get("quality_cpu_h264_crf", 26))
-        quality_layout.addRow("CPU H.264 CRF (권장: 26):", self.q_cpu_h264_crf)
-
-        self.q_cpu_h265_crf = QSpinBox()
-        self.q_cpu_h265_crf.setRange(0, 51)
-        self.q_cpu_h265_crf.setValue(self.config.get("quality_cpu_h265_crf", 31))
-        quality_layout.addRow("CPU H.265 CRF (권장: 31):", self.q_cpu_h265_crf)
-
-        self.q_cpu_vp9_crf = QSpinBox()
-        self.q_cpu_vp9_crf.setRange(0, 63)
-        self.q_cpu_vp9_crf.setValue(self.config.get("quality_cpu_vp9_crf", 36))
-        quality_layout.addRow("CPU VP9 CRF (권장: 36):", self.q_cpu_vp9_crf)
-
-        self.q_cpu_av1_crf = QSpinBox()
-        self.q_cpu_av1_crf.setRange(0, 63)
-        self.q_cpu_av1_crf.setValue(self.config.get("quality_cpu_av1_crf", 41))
-        quality_layout.addRow("CPU AV1 CRF (권장: 41):", self.q_cpu_av1_crf)
-
-        self.q_gpu_cq = QSpinBox()
-        self.q_gpu_cq.setRange(0, 51)
-        self.q_gpu_cq.setValue(self.config.get("quality_gpu_cq", 30))
-        quality_layout.addRow("GPU CQ/CQP (권장: 30):", self.q_gpu_cq)
-
-        layout.addWidget(quality_group)
-        self._crf_group = quality_group
         self.codec_combo.currentIndexChanged.connect(self._sync_codec_dependent_state)
         self._sync_codec_dependent_state()
         layout.addStretch(1); self._add_page(tab, "화질", "nav_quality")
@@ -542,18 +597,56 @@ class SettingsDialog(QDialog):
         숨기지는 않는다. 사라지면 그런 설정이 있었는지조차 모르게 되지만,
         흐리게 남아 있으면 '지금은 해당 없음'이 전달된다. (UI_REDESIGN.md 6항)
         """
-        reencoding = self.codec_combo.currentData() != "original"
-        self._hw_group.setEnabled(reencoding)
-        self._crf_group.setEnabled(reencoding)
+        self._hw_group.setEnabled(self.codec_combo.currentData() != "original")
 
     def _toggle_delete_checkbox(self):
         selected_button = self.conversion_button_group.checkedButton()
         is_conversion_selected = selected_button is not None and selected_button.property("config_value") != "none"
         self.delete_original_checkbox.setEnabled(is_conversion_selected)
 
+    @staticmethod
+    def _align_labels(*labels: QLabel):
+        """나란히 놓인 설명들의 폭을 맞춰 뒤의 입력칸이 한 줄로 서게 한다.
+
+        두 줄은 성격이 같은 값(동시 다운로드 수 · 조각 수)이라 함께 읽는다. 글자
+        길이가 달라 칸이 어긋나 있으면 짝이라는 것이 눈에 들어오지 않는다.
+
+        폭을 숫자로 박아 두지 않고 sizeHint에서 가져온다. 서체와 배율에 따라
+        글자 폭이 달라져, 박아 두면 어느 환경에서는 글이 잘린다.
+        """
+        widest = max(label.sizeHint().width() for label in labels)
+        for label in labels:
+            label.setMinimumWidth(widest)
+
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "다운로드 폴더 선택", self.folder_path_edit.text())
         if folder: self.folder_path_edit.setText(folder)
+
+    def _check_connection_total(self) -> bool:
+        """동시 다운로드 수와 조각 수의 곱이 상한 안에 있는지 본다. 넘으면 알리고 막는다.
+
+        두 값이 각자 범위 안에 있어도 곱하면 얼마든지 커진다. 저장할 때 막는 것은
+        단축키 충돌과 같은 이유다 — 넘긴 채로 저장되면 다음 다운로드에서야 실패하고,
+        그때는 무엇 때문인지 짚기 어렵다.
+
+        고친 뒤 바로 다시 누를 수 있게 일반 탭으로 돌려놓는다.
+        """
+        parallel = self.concurrent_spinbox.value()
+        fragments = self.fragments_spinbox.value()
+        total = parallel * fragments
+        if total <= MAX_TOTAL_CONNECTIONS:
+            return True
+        self.nav.setCurrentRow(self._general_page_row)
+        notify(
+            self, "연결 수가 너무 많습니다",
+            f"동시 다운로드 {parallel}개 × 조각 {fragments}개 = 한꺼번에 {total}개 연결입니다.\n"
+            f"연결 안정성 때문에 두 값을 곱한 수는 {MAX_TOTAL_CONNECTIONS}개까지만 됩니다.\n\n"
+            "연결이 너무 많으면 TVer이 접속을 막고, 한번 막히면 값을 되돌려도\n"
+            "한동안 다운로드가 되지 않습니다.\n\n"
+            "둘 중 하나를 줄인 뒤 다시 저장해 주세요.",
+            icon_name="info", color_key="warn", theme=self._theme,
+        )
+        return False
 
     def _save_settings(self):
         shortcut_table = self._shortcut_table()
@@ -564,9 +657,12 @@ class SettingsDialog(QDialog):
                                 "같은 조합을 두 동작이 나눠 쓰고 있습니다.\n"
                                 "겹치는 조합을 고친 뒤 다시 저장해 주세요.")
             return
+        if not self._check_connection_total():
+            return
         self.config[shortcuts.CONFIG_KEY] = shortcut_table
         self.config["download_folder"] = self.folder_path_edit.text()
         self.config["max_concurrent_downloads"] = self.concurrent_spinbox.value()
+        self.config["concurrent_fragments"] = self.fragments_spinbox.value()
         if self.close_action_group.checkedButton():
             self.config["close_action"] = self.close_action_group.checkedButton().property("config_value")
         self.config["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
@@ -581,11 +677,6 @@ class SettingsDialog(QDialog):
         if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
         self.config["preferred_codec"] = self.codec_combo.currentData()
         self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
-        self.config["quality_cpu_h264_crf"] = self.q_cpu_h264_crf.value()
-        self.config["quality_cpu_h265_crf"] = self.q_cpu_h265_crf.value()
-        self.config["quality_cpu_vp9_crf"] = self.q_cpu_vp9_crf.value()
-        self.config["quality_cpu_av1_crf"] = self.q_cpu_av1_crf.value()
-        self.config["quality_gpu_cq"] = self.q_gpu_cq.value()
 
         self.config["download_subtitles"] = self.download_subs_checkbox.isChecked()
         self.config["embed_subtitles"] = self.embed_subs_checkbox.isChecked()

@@ -112,6 +112,8 @@ class DownloadThread(QThread):
                  output_template: str, quality_format: str,
                  download_subtitles: bool, embed_subtitles: bool, subtitle_format: str,
                  ignore_ssl_errors: bool = False, embed_thumbnail: bool = False,
+                 preloaded_metadata: Optional[Dict[str, Any]] = None,
+                 concurrent_fragments: int = 1,
                  parent=None):
         super().__init__(parent)
         self.url = url; self.download_folder = download_folder
@@ -127,6 +129,7 @@ class DownloadThread(QThread):
         self.subtitle_format = subtitle_format
         self.ignore_ssl_errors = ignore_ssl_errors
         self.embed_thumbnail = embed_thumbnail
+        self.concurrent_fragments = concurrent_fragments
 
         self.process: Optional[subprocess.Popen] = None
         self._stop_flag = False; self._current_component: str = ""; self._final_filepath: str = ""
@@ -134,6 +137,13 @@ class DownloadThread(QThread):
         self._sidecar_paths: set = set()
         self._thumbnail_embed_failed = False
         self._metadata: Dict = {}
+        self._preloaded_metadata: Dict = preloaded_metadata or {}
+        """대기열에서 기다리는 동안 미리 받아 둔 영상 정보.
+
+        있으면 다시 묻지 않는다. 같은 질의를 같은 조건으로 던져 얻은 것이라
+        결과가 다를 이유가 없고, 두 번 묻는 것은 받는 쪽과 회선을 나눠 쓰는
+        일만 늘린다. 못 받아 왔으면 비어 있고, 그때는 예전처럼 여기서 묻는다.
+        """
 
     def stop(self):
         if self._stop_flag: return
@@ -200,7 +210,7 @@ class DownloadThread(QThread):
             self.progress.emit(self.url, {"log": f"[오류] SRT 변환 중 예외 발생: {e}"})
 
     def _execute_download(self) -> bool:
-        self._metadata = self._get_metadata() or {}
+        self._metadata = self._preloaded_metadata or self._get_metadata() or {}
         if not self._metadata:
             self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."}); return False
 
@@ -428,6 +438,14 @@ class DownloadThread(QThread):
 
         --embed-thumbnail도 같은 규칙을 따른다. 단독으로 주면 썸네일을 받아 넣고
         파일은 지우므로, --write-thumbnail을 함께 붙이지 않는다.
+
+        **-N은 1보다 클 때만 붙인다.** 1은 yt-dlp 기본값이라 붙여도 달라지는 것이
+        없는데, 명령줄에만 남아 로그를 읽을 때 '무언가 켜 두었나' 하고 헷갈린다.
+
+        조각을 여러 개 받아도 **진행률 파싱은 그대로 동작한다.** yt-dlp가 조각별로
+        따로 알리지 않고 형식 하나당 Destination 한 줄과 합산 진행률만 내놓기
+        때문이다(-N 4로 실측: `Destination` 두 줄에 각각 0->100%가 한 번씩,
+        되돌아가는 값 없음). 조각 수를 세는 _begin_destination은 손댈 것이 없다.
         """
         command: List[str] = [
             self.ytdlp_exe_path, self.url,
@@ -439,6 +457,9 @@ class DownloadThread(QThread):
             "-f", self.quality_format,
             "--merge-output-format", "mp4",
         ]
+
+        if self.concurrent_fragments > 1:
+            command += ["-N", str(self.concurrent_fragments)]
 
         if self.ignore_ssl_errors:
             command.append("--no-check-certificate")

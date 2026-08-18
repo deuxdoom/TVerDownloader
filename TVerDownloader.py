@@ -4,14 +4,16 @@ from typing import List, Dict
 from pathlib import Path
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QMessageBox, QSystemTrayIcon, QFileDialog, QWidget,
-                             QAbstractSpinBox, QLineEdit, QMenu, QTextEdit)
+                             QAbstractSpinBox, QLineEdit, QMenu, QTextEdit, QComboBox)
 from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QLocale, QTranslator, QLibraryInfo
 from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from src import autostart, self_update, shortcuts
 from src.utils import (load_config, save_config, handle_exception,
-                       localized_app_name, get_resource_path)
+                       retired_option_notes,
+                       localized_app_name, get_resource_path,
+                       canonicalize_config_fragments)
 from src.qss import build_qss, palette, UI_FONT_FALLBACKS
 from src.icons import is_monochrome_white, tint_icon
 from src.message import confirm
@@ -20,7 +22,10 @@ from src.dialogs import SettingsDialog
 from src.series_dialog import SeriesSelectionDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
-from src.widgets import DownloadItemWidget, apply_menu_shape
+from src.queue_store import QueueStore
+from src.widgets import (DownloadItemWidget, apply_popup_shape,
+                         apply_combo_popup_shape, flatten_combo_popup_margins,
+                         COMBO_POPUP_OBJECT)
 from src.updater import maybe_show_update
 from src.threads.setup_thread import SetupThread
 from src.ui.main_window_ui import MainWindowUI
@@ -30,8 +35,8 @@ from src.controllers.download_list import DownloadListController
 from src.controllers.library import LibraryController
 from src.tray_controller import TrayController
 from src.input_sources import InputSources
+from versioninfo import APP_VERSION
 
-APP_VERSION = "3.3.0"
 SOCKET_NAME = "TVerDownloader_IPC_Socket"
 
 class MainWindow(QMainWindow):
@@ -43,9 +48,10 @@ class MainWindow(QMainWindow):
         self._shortcuts: List[QShortcut] = []; self._guarded_shortcuts: List[QShortcut] = []
         self.setAcceptDrops(True)
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
+        self.queue_store = QueueStore(); self._queue_file_ok = self.queue_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
         self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
-        self.download_manager = DownloadManager(self.config, self.history_store)
+        self.download_manager = DownloadManager(self.config, self.history_store, self.queue_store)
         self.download_list = DownloadListController(self)
         self.library = LibraryController(self)
         self.tray = TrayController(self)
@@ -60,6 +66,8 @@ class MainWindow(QMainWindow):
         self.apply_shortcuts()
         QApplication.instance().focusChanged.connect(self._sync_shortcut_guard)
         self.append_log("프로그램 시작. 환경 설정을 시작합니다...")
+        for note in retired_option_notes(self.config):
+            self.append_log(note)
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
 
@@ -78,7 +86,10 @@ class MainWindow(QMainWindow):
             self.series_parser.update_config(self.config)
             self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", False))
             self.apply_shortcuts()
-            self.append_log(f"설정이 저장되었습니다. 동시 다운로드: {self.config['max_concurrent_downloads']}개")
+            parallel = self.config["max_concurrent_downloads"]
+            fragments = canonicalize_config_fragments(self.config)
+            self.append_log(f"설정이 저장되었습니다. 동시 다운로드 개수 {parallel}개"
+                            f" / 조각 수 {fragments}개")
             self.library.refresh_history_list()
             self.library.refresh_fav_list()
 
@@ -213,6 +224,7 @@ class MainWindow(QMainWindow):
         self.ui.theme_button.clicked.connect(self.toggle_theme)
         self.ui.log_toggle_btn.clicked.connect(self.toggle_log_panel)
         self.ui.clear_completed_button.clicked.connect(self.download_list.clear_completed)
+        self.ui.queue_start_button.clicked.connect(self.start_restored_queue)
         self.ui.cancel_selected_button.clicked.connect(self.download_list.cancel_selected)
         self.ui.download_list.itemSelectionChanged.connect(self.download_list.sync_cancel_button)
         self.ui.download_list.customContextMenuRequested.connect(self.download_list.show_context_menu)
@@ -229,6 +241,7 @@ class MainWindow(QMainWindow):
         self.download_manager.heading.connect(self.append_heading)
         self.download_manager.progress_updated.connect(self.download_list.update_item_widget); self.download_manager.task_finished.connect(self._on_task_finished)
         self.download_manager.queue_changed.connect(self.tray.on_queue_changed)
+        self.download_manager.queue_changed.connect(lambda *_: self._sync_queue_start_button())
         self.download_manager.progress_updated.connect(lambda *_: self.tray.refresh_status())
         self.download_manager.all_tasks_completed.connect(self.tray.notify_all_finished)
         self.series_parser.log.connect(lambda ctx, msg: self.append_log(msg)); self.series_parser.finished.connect(self._on_series_parsed)
@@ -333,13 +346,19 @@ class MainWindow(QMainWindow):
         if new_folder: self.config["download_folder"] = new_folder; save_config(self.config); self.download_manager.update_config(self.config); self.append_log(f"다운로드 폴더가 '{new_folder}'(으)로 설정되었습니다."); return True
         return False
 
-    def _request_add_task(self, url: str) -> bool:
+    def _request_add_task(self, url: str, title: str = "", thumbnail: str = "") -> bool:
+        """대기열에 넣기 전에 이미 받은 것인지 물어본다.
+
+        제목·표지 그림을 아는 자리(시리즈 선택, 즐겨찾기 확인)는 함께 넘긴다.
+        받아 둔 것이 있으면 카드가 그 자리에서 채워져, 차례를 기다리는 동안
+        다시 물어보러 갈 일이 없다.
+        """
         if self.history_store.exists(url):
             again = confirm(self, "중복 다운로드",
                             f"이미 다운로드한 항목입니다:\n\n{self.history_store.get_title(url)}\n\n다시 다운로드할까요?",
                             icon_name="download", theme=self.config.get("theme", "light"))
             if not again: self.append_log(f"[알림] 중복 다운로드 취소: {url}"); return False
-        return self.download_manager.add_task(url)
+        return self.download_manager.add_task(url, title=title, thumbnail=thumbnail)
 
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
         if not ok: self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다."); QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요."); return
@@ -348,10 +367,52 @@ class MainWindow(QMainWindow):
         self.append_notice("안내", ["TVer는 일본 지역 제한이 있습니다.",
                                     "원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요."])
         self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
+        self._restore_queue()
         if self.config.get("auto_update_check", True):
             QTimer.singleShot(1000, self._check_for_update)
         if self.config.get("auto_check_favorites_on_start", True):
             QTimer.singleShot(2500, self.library.check_all_favorites)
+
+    def _restore_queue(self):
+        """지난 실행에서 끝내지 못한 대기열을 목록에 되살린다.
+
+        부르는 자리가 준비가 끝난 뒤인 것은 되살린 항목도 제목을 물어보러 갈 수
+        있어야 해서다. 미리 묻기는 yt-dlp 경로가 정해지기 전에는 줄만 서 있는다.
+
+        **되살리기만 하고 받기 시작하지는 않는다.** 이유는 restore_task에 적어
+        두었다 — 시작 프로그램으로 뜨면 VPN보다 앱이 먼저 서서, 그 자리에서
+        받기 시작하면 담아 둔 것이 전부 지역 제한에 걸린다.
+        """
+        if not self._queue_file_ok:
+            self.append_log("[알림] 대기열 파일이 손상되어 읽지 못했습니다. 빈 대기열로 시작합니다.")
+        entries = self.queue_store.entries()
+        if not entries:
+            return
+        restored = sum(1 for entry in entries
+                       if self.download_manager.restore_task(entry.get("url", ""),
+                                                             title=entry.get("title", ""),
+                                                             thumbnail=entry.get("thumbnail", "")))
+        if restored:
+            self.append_log(f"[대기열] 지난 실행에서 남은 {restored}개를 되살렸습니다. "
+                            "'대기열 시작'을 누르면 받기 시작합니다.")
+
+    def _sync_queue_start_button(self):
+        """되살린 항목이 남아 있는 동안에만 `대기열 시작`을 보인다."""
+        self.ui.set_queue_start_visible(self.download_manager.held_count() > 0)
+
+    def start_restored_queue(self):
+        """되살린 대기 항목을 지금부터 받기 시작한다.
+
+        폴더를 먼저 확인하는 것은 재다운로드와 같은 이유다. 폴더가 없으면
+        항목마다 곧바로 실패로 떨어져, 되살린 것이 한꺼번에 오류 카드가 된다.
+        """
+        if not self.download_manager.held_count():
+            return
+        if not self._ensure_download_folder():
+            self.append_log("[알림] 다운로드 폴더가 설정되지 않아 대기열을 시작하지 못했습니다.")
+            return
+        started = self.download_manager.start_held_tasks()
+        self.append_log(f"[대기열] 되살린 {started}개를 대기열에 넣었습니다.")
 
     def _check_for_update(self):
         """새 버전을 확인한다. 받는 중인 것이 있으면 업데이트 쪽이 먼저 물어본다.
@@ -363,7 +424,11 @@ class MainWindow(QMainWindow):
                           pending_downloads=self.download_manager.pending_count())
 
     def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
-        """에피소드 선택 창을 띄우고, 고른 것만 대기열에 넣는다."""
+        """에피소드 선택 창을 띄우고, 고른 것만 대기열에 넣는다.
+
+        분석이 제목과 표지 그림을 이미 들고 왔으므로 주소와 함께 넘긴다. 대기
+        카드가 그 자리에서 채워지고, 미리 물어보러 갈 일도 그만큼 줄어든다.
+        """
         dialog = SeriesSelectionDialog(episode_info, self)
         if not dialog.exec():
             self.append_log(f"{label} 에피소드 추가를 취소했습니다.")
@@ -372,9 +437,13 @@ class MainWindow(QMainWindow):
         if not selected_urls:
             self.append_log(f"{label} 선택된 에피소드가 없어 추가하지 않았습니다.")
             return
+        known = {ep.get("url"): ep for ep in episode_info if ep.get("url")}
         added_count = 0
         for url in selected_urls:
-            if self._request_add_task(url): added_count += 1
+            episode = known.get(url) or {}
+            if self._request_add_task(url, title=episode.get("title", ""),
+                                      thumbnail=episode.get("thumbnail_url", "")):
+                added_count += 1
         self.append_log(f"{label} 선택한 {added_count}개 에피소드를 추가했습니다.")
 
     def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
@@ -642,34 +711,42 @@ class MenuIconTinter(QObject):
             action.setProperty("tinted_for", self._color)
 
 
-class MenuShapeGuard(QObject):
-    """Qt가 직접 만드는 메뉴도 우리 메뉴와 같은 모양으로 맞춘다.
+class PopupShapeGuard(QObject):
+    """제 창을 가진 팝업을 모두 같은 모양으로 맞춘다. 메뉴와 콤보박스 펼침 목록.
 
-    입력칸을 우클릭하면 나오는 잘라내기·복사·붙여넣기 메뉴는 `QLineEdit`이
-    Qt 안쪽에서 만든다. 우리는 그 자리에 `RoundedMenu`를 넣을 수 없어서, 그
-    메뉴만 **그림자가 지고** 모서리 모양도 달랐다. 우클릭 메뉴가 두 종류로
-    보이는 셈이라 눈에 띈다.
+    **한 곳에서 거는 이유는 콤보박스가 여러 파일에 흩어져 있어서다.** 만드는
+    자리마다 손대게 하면 새 콤보박스를 넣을 때 언젠가 빠뜨리고, 그 하나만 모양이
+    달라진다. Qt가 직접 만드는 입력칸 우클릭 메뉴처럼 우리가 클래스를 고를 수
+    없는 팝업도 여기서 함께 걸린다.
 
     **손대는 시점은 Polish다.** Show에서 창 힌트를 바꾸면 Qt가 그 자리에서 창을
     숨겨 버려 메뉴가 아예 뜨지 않는다(실측: Show로 걸면 `isVisible()`이 False).
-    Polish는 창이 만들어지기 전에 오므로 힌트가 그대로 먹고 메뉴도 정상으로 뜬다.
-    아이콘 색을 맞추는 `MenuIconTinter`가 Show를 쓰는 것과 다른 이유가 이것이다.
+    Polish는 창이 만들어지기 전에 오므로 힌트가 그대로 먹는다. 콤보박스도 같다 -
+    Polish 때는 펼침 창이 아직 만들어지지 않아(실측: `WA_WState_Created`가 False)
+    투명 속성이 창을 만들 때부터 반영된다. 아이콘 색을 맞추는 `MenuIconTinter`가
+    Show를 쓰는 것과 다른 이유가 이것이다.
 
     이미 힌트가 걸린 `RoundedMenu`에 다시 걸어도 달라지는 것은 없다.
     """
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Polish and isinstance(obj, QMenu):
-            apply_menu_shape(obj)
+        if event.type() == QEvent.Type.Polish:
+            if isinstance(obj, QMenu):
+                apply_popup_shape(obj)
+            elif isinstance(obj, QComboBox):
+                apply_combo_popup_shape(obj)
+        elif (event.type() == QEvent.Type.Show
+              and obj.objectName() == COMBO_POPUP_OBJECT):
+            flatten_combo_popup_margins(obj)
         return super().eventFilter(obj, event)
 
 
 def setup_menu_icons(app: QApplication, theme: str) -> MenuIconTinter:
-    """메뉴 아이콘 색과 모양을 우리 것에 맞추는 감시자를 앱에 건다."""
+    """팝업 아이콘 색과 모양을 우리 것에 맞추는 감시자를 앱에 건다."""
     tinter = MenuIconTinter(palette(theme)["text"], app)
     app.installEventFilter(tinter)
     app._menu_icon_tinter = tinter
-    shape = MenuShapeGuard(app)
+    shape = PopupShapeGuard(app)
     app.installEventFilter(shape)
     app._menu_shape_guard = shape
     return tinter

@@ -7,7 +7,7 @@ import subprocess
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QMessageBox
 
@@ -35,6 +35,61 @@ DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
 PARALLEL_MAX = 20
 FILENAME_TITLE_MAX_LENGTH = 80
+
+MAX_TOTAL_CONNECTIONS = 20
+"""동시 다운로드 수 × 조각 수의 상한. TVer에 한꺼번에 걸리는 연결 수다.
+
+두 값은 각자 범위 안에 있어도 곱하면 얼마든지 커진다(20 × 16 = 320). 그러면
+지역 제한 차단에 걸리는데, **그 차단은 한번 걸리면 IP를 바꾸기 전까지 계속
+막히는 성질이라 값을 되돌려도 곧바로 낫지 않는다**(yt-dlp #13888). 되돌리기
+어려운 실패라서, 고르는 자리에서 아예 막는다(SettingsDialog._save_settings).
+
+설정 파일을 손으로 고친 경우는 막지 않는다. 어느 쪽을 줄여야 할지 정할 근거가
+없어서다 — 사용자가 고른 값을 말없이 바꾸는 것보다 그대로 쓰는 편이 낫다.
+"""
+
+DEFAULT_FRAGMENTS = 4
+FRAGMENTS_MIN = 1
+FRAGMENTS_MAX = 16
+"""영상 하나에서 한꺼번에 받을 조각 수(yt-dlp의 -N).
+
+TVer은 HLS라 영상이 수백 개 조각으로 나뉘어 있고, **yt-dlp 기본값은 1이라 그것을
+한 개씩 차례로 받는다.** 조각 하나하나는 작아서 왕복 시간이 그대로 대기 시간이
+되므로, 회선을 다 쓰지 못한 채 느려지는 원인이 여기다.
+
+**기본값을 4로 잡은 것은 동시 다운로드 수와 곱해지기 때문이다.** 이 값이 N이고
+동시 다운로드가 M이면 TVer에 걸리는 연결은 N×M이다. 기본값(M=5)에서 4면 20인데,
+여기서 더 늘리면 지역 제한 차단에 걸릴 위험이 커진다. 그 차단은 한번 걸리면 IP를
+바꾸기 전까지 계속 막히는 성질이라(yt-dlp #13888) 되돌리기가 어렵다.
+
+상한을 16으로 둔 것은 그 위로는 조각을 더 벌려도 회선이 아니라 서버 쪽에서
+막히기 시작해서다. 1로 두면 이 기능을 끈 것과 같다.
+"""
+
+HARDWARE_ENCODERS = ("cpu", "nvidia")
+"""고를 수 있는 코덱 변환 가속.
+
+3.4.0에서 Intel(QSV)과 AMD(AMF)를 뺐다. 둘 다 화면에는 있었지만 가진 사람이
+드물어 실제로 어떤 결과가 나오는지 확인해 본 적이 없고, 확인하지 않은 선택지를
+띄워 두면 고른 사람만 조용히 다른 품질을 받는다.
+"""
+
+PREFERRED_CODECS = ("original", "avc", "hevc")
+"""고를 수 있는 재인코딩 코덱.
+
+3.4.0에서 VP9와 AV1을 뺐다. 둘 다 CPU 인코딩이 실시간의 몇 분의 일이라 한 편에
+몇 시간이 걸리고, 그렇게 만든 파일을 편집 도구가 대부분 읽지 못한다. 재인코딩을
+쓰는 이유가 호환성인데 목적과 반대로 가는 선택지였다.
+"""
+
+RETIRED_HARDWARE_ENCODERS = {"intel": "cpu", "amd": "cpu"}
+RETIRED_PREFERRED_CODECS = {"vp9": "original", "av1": "original"}
+"""이제 없는 값이 설정 파일에 남아 있을 때 대신 쓸 값.
+
+**말없이 바꾸지 않는다.** 고른 적 있는 설정이 사라진 것이라 화면만 보고는
+언제 어떻게 달라졌는지 알 수 없다. retired_option_notes()가 로그에 남길 문장을
+만들고, 창이 켜질 때 그것을 찍는다.
+"""
 
 NO_AUDIO_STATUS = "음성 없음"
 """내려받기는 끝났지만 음성 트랙이 빠진 상태.
@@ -181,6 +236,7 @@ def load_config() -> Dict[str, Any]:
         "theme": "light",
         "download_folder": "",
         "max_concurrent_downloads": DEFAULT_PARALLEL,
+        "concurrent_fragments": DEFAULT_FRAGMENTS,
         "filename_parts": {
             "series": True, "upload_date": True, "episode_number": True,
             "episode": True, "id": True,
@@ -197,11 +253,6 @@ def load_config() -> Dict[str, Any]:
         "delete_on_conversion": False,
         "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"],
         "hardware_encoder": "cpu",
-        "quality_cpu_h264_crf": 26,
-        "quality_cpu_h265_crf": 31,
-        "quality_cpu_vp9_crf": 36,
-        "quality_cpu_av1_crf": 41,
-        "quality_gpu_cq": 30,
         "embed_thumbnail": False,
         "download_subtitles": True,
         "embed_subtitles": False,
@@ -279,6 +330,92 @@ def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
                 if key in nested_dict:
                     return clamp(nested_dict[key])
     return DEFAULT_PARALLEL
+
+
+def canonicalize_config_fragments(config: Dict[str, Any]) -> int:
+    """설정 파일에서 온 조각 수를 쓸 수 있는 값으로 다듬는다.
+
+    canonicalize_config_parallel과 달리 옛 키 이름을 찾지 않는다. 3.4.0에서
+    처음 생긴 설정이라 다른 이름으로 저장된 적이 없다.
+    """
+    try:
+        value = int(float(config.get("concurrent_fragments", DEFAULT_FRAGMENTS)))
+    except (ValueError, TypeError):
+        return DEFAULT_FRAGMENTS
+    return max(FRAGMENTS_MIN, min(FRAGMENTS_MAX, value))
+
+
+def _choice_value(raw: Any) -> Optional[str]:
+    """설정 파일에서 온 선택지 값을 견줄 수 있는 문자열로 만든다.
+
+    **문자열이 아닌 것은 전부 None으로 접는다.** 설정 파일은 손으로 고칠 수 있어
+    목록이나 사전이 들어오기도 하는데, 그것을 그대로 사전 조회에 넘기면 해시가
+    없어 TypeError로 터진다. 값을 다듬는 자리가 입력 때문에 죽으면 안 된다.
+    """
+    return raw.strip().lower() if isinstance(raw, str) else None
+
+
+def _canonicalize_choice(raw: Any, allowed: tuple, retired: Dict[str, str],
+                         default: str) -> str:
+    """설정 파일에서 온 선택지 하나를 쓸 수 있는 값으로 다듬는다.
+
+    canonicalize_config_parallel과 같은 자리에 있는 함수다. 다른 점은 자를 범위가
+    아니라 고를 목록이 있다는 것뿐이라, 목록에 없으면 정해 둔 대체값으로 간다.
+    """
+    value = _choice_value(raw)
+    if value in allowed:
+        return value
+    return retired.get(value, default)
+
+
+def canonicalize_config_encoder(config: Dict[str, Any]) -> str:
+    """설정 파일에서 온 코덱 변환 가속을 쓸 수 있는 값으로 다듬는다."""
+    return _canonicalize_choice(config.get("hardware_encoder", "cpu"),
+                                HARDWARE_ENCODERS, RETIRED_HARDWARE_ENCODERS, "cpu")
+
+
+def canonicalize_config_codec(config: Dict[str, Any]) -> str:
+    """설정 파일에서 온 선호 코덱을 쓸 수 있는 값으로 다듬는다."""
+    return _canonicalize_choice(config.get("preferred_codec", "original"),
+                                PREFERRED_CODECS, RETIRED_PREFERRED_CODECS, "original")
+
+
+RETIRED_OPTION_LABELS = {
+    "intel": "Intel (QSV)", "amd": "AMD (AMF)",
+    "vp9": "VP9", "av1": "AV1",
+}
+"""로그에 적을 때 쓸 옛 값의 이름. 설정 화면에 있던 그대로 적어야 알아본다."""
+
+
+def retired_option_notes(config: Dict[str, Any]) -> List[str]:
+    """이제 없는 값을 쓰고 있었다면 그 사실을 알릴 문장들을 만든다.
+
+    **load_config에서 값을 갈아 끼우지 않는 이유가 이것이다.** 거기서 고쳐 두면
+    원래 무엇이었는지가 사라져 알릴 내용이 남지 않는다. 조각 수(-N)와 같은
+    방식으로 읽는 자리에서 다듬고, 알리는 일은 창이 켜질 때 한 번만 한다.
+
+    설정 파일에 되쓰지도 않는다. 사용자가 설정을 저장하는 순간 지금 값으로
+    덮이고, 그때까지는 파일을 그대로 두는 편이 무엇을 골랐었는지 되짚기 좋다.
+    """
+    notes: List[str] = []
+    for key, allowed, retired, kind in (
+        ("hardware_encoder", HARDWARE_ENCODERS, RETIRED_HARDWARE_ENCODERS, "코덱 변환 가속"),
+        ("preferred_codec", PREFERRED_CODECS, RETIRED_PREFERRED_CODECS, "선호 코덱"),
+    ):
+        raw = config.get(key)
+        if raw is None:
+            continue
+        value = _choice_value(raw)
+        if value in allowed:
+            continue
+        replacement = retired.get(value)
+        was = RETIRED_OPTION_LABELS.get(value, str(raw))
+        if replacement is None:
+            notes.append(f"[설정] {kind} 설정값 '{was}'을(를) 알 수 없어 기본값으로 되돌립니다.")
+        else:
+            notes.append(f"[설정] {kind} '{was}'은(는) 더 이상 지원하지 않습니다. "
+                         f"'{replacement}'(으)로 대신 진행합니다.")
+    return notes
 
 
 def get_startupinfo():
