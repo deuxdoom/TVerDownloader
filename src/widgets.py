@@ -20,7 +20,8 @@ from PyQt6.QtWidgets import (
 
 from src.icons import get_icon
 from src.qss import blend, palette
-from src.utils import ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS, item_percent
+from src.utils import (ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS,
+                       format_duration, item_percent)
 
 THUMBNAIL_CACHE_DIR = Path("thumbnails")
 
@@ -28,23 +29,10 @@ LIST_THUMB_W, LIST_THUMB_H = 128, 72
 
 
 def apply_popup_shape(popup: QWidget):
-    """제 창을 가진 팝업을 '모서리가 둥글고 테두리만 있는' 모양으로 만든다.
+    """제 창을 가진 팝업(메뉴·콤보 펼침 목록)을 모서리가 둥근 테두리 모양으로 만든다.
 
-    메뉴와 콤보박스 펼침 목록이 같은 것을 쓴다. 둘 다 위젯이 아니라 최상위
-    팝업 창이라 QSS의 border-radius만으로는 둥글어지지 않는다는 점이 같다.
-    **한 곳에 모아 둔 이유는 한쪽만 고치면 두 팝업이 조금씩 달라 보이기
-    때문이다** - 3.3.0에서 입력칸 우클릭 메뉴에만 그림자가 지던 것이 그 예다.
-
-    세 가지를 함께 걸어야 한다. 하나라도 빠지면 눈에 보이는 결과가 달라진다.
-
-    1. `WA_TranslucentBackground` - 모서리 바깥을 창 배경이 채우지 않게 한다.
-    2. `FramelessWindowHint` - **이것이 빠지면 모서리 바깥이 까맣게 찍힌다.**
-       투명 속성만 켜도 Qt는 창을 알파로 합성하지 않는다(실측: 모서리 밝기 0).
-    3. `NoDropShadowWindowHint` - 그림자를 끈다. 테두리만 있는 쪽이 깔끔하다.
-
-    **`setWindowFlags`로 통째로 덮어쓰지 않는다.** 플래그 하나씩 켜는
-    `setWindowFlag`을 쓰는 것은 창 종류 비트(`Qt.WindowType.Popup`)를 지키기
-    위해서다. 통째로 덮으면 팝업이 보통 창처럼 되어 포커스를 잃어도 닫히지 않는다.
+    셋을 함께 걸어야 한다 - Frameless가 빠지면 Qt가 알파로 합성하지 않아 모서리
+    바깥이 검게 찍힌다(실측 밝기 0). 통째로 덮지 않는 것은 Popup 비트를 지키려는 것.
     """
     popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     popup.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -52,42 +40,14 @@ def apply_popup_shape(popup: QWidget):
 
 
 COMBO_POPUP_OBJECT = "ComboPopup"
-"""콤보박스 펼침 목록을 감싸는 창에 붙이는 이름.
-
-앱 전역 QSS로는 이 창을 가리킬 수 없어서(아래 참고) 이름을 붙이는 쪽은 코드다.
-"""
+"""콤보박스 펼침 목록을 감싸는 창에 붙이는 이름. 앱 전역 QSS로는 이 창을 가리킬 수 없다."""
 
 
 def apply_combo_popup_shape(combo) -> None:
-    """콤보박스를 펼쳤을 때 뜨는 창을 메뉴와 같은 모양으로 만든다.
+    """콤보 펼침 창을 메뉴와 같은 모양으로 만든다. 메뉴와 달리 창 힌트만으로는 안 된다.
 
-    펼침 목록은 두 겹이다. 안쪽의 `QAbstractItemView`는 QSS가 둥글게 그리는데,
-    그것을 담은 바깥 창(`QComboBoxPrivateContainer`)이 사각형 그대로 남아
-    **테두리가 이중으로 보였다.** 밝은 테마에서 특히 눈에 띈다.
-
-    **창 힌트만으로는 고쳐지지 않는다. 여기가 메뉴와 다른 점이다.** 앱 전역
-    스타일시트는 이 창에 닿지 않아서, 힌트를 걸어도 창이 제 기본 배경(흰색)을
-    그대로 칠한다. 스타일시트를 **이 창에 직접** 걸어 주어야 Qt가 그리기를
-    스타일시트에 넘기고, 그제서야 투명 속성이 실제로 반영된다. 실측 결과다.
-
-    | 건 것 | 모서리 |
-    |---|---|
-    | 아무것도 안 함 | 흰 사각형 |
-    | 창 힌트 셋만 | 흰 사각형 (그대로) |
-    | 직접 스타일시트만 | **검음** |
-    | 창 힌트 셋 + 직접 스타일시트 | 깨끗 |
-
-    **규칙을 이름으로 좁히는 것도 필요하다.** 선택자 없이 `background:
-    transparent`만 주면 그 값이 자식에게까지 내려가 안쪽 목록까지 투명해진다
-    (실측: 팝업 한가운데가 뒤 창 배경색으로 나왔다). 이름으로 좁히면 이 창
-    하나만 투명해지고 안쪽 목록은 제 배경을 그대로 그린다.
-
-    창 힌트는 한 번만 건다. Polish는 테마를 바꿀 때마다 다시 오는데, 그때마다
-    창 힌트를 다시 걸면 Qt가 창을 새로 만들어 팝업이 깜빡인다.
-
-    여백을 누르는 일은 여기서 하지 않는다. 여기서 해 봐야 Qt가 창을 띄우기 전에
-    되돌려 놓는다(실측). `flatten_combo_popup_margins`가 창이 뜰 때마다 맞추며,
-    이름을 여기서 붙여 두는 덕분에 그때 이 창을 알아볼 수 있다.
+    앱 전역 QSS가 이 창(QComboBoxPrivateContainer)에 닿지 않아 흰 사각형이 남는다.
+    스타일시트를 이 창에 직접, 이름으로 좁혀 걸어야 안쪽 목록을 건드리지 않고 투명해진다.
     """
     container = combo.view().window()
     if container.objectName() == COMBO_POPUP_OBJECT:
@@ -100,26 +60,8 @@ def apply_combo_popup_shape(combo) -> None:
 def flatten_combo_popup_margins(container) -> None:
     """펼침 창이 안쪽 목록보다 위아래로 커지지 않게 여백을 없앤다.
 
-    Qt는 펼침 창 배치의 맨 위와 맨 아래에 **6px짜리 빈 칸을 하나씩** 넣어 둔다
-    (스타일이 정하는 값이고 우리 QSS와는 무관하다 - 메뉴 여백을 0으로 바꿔도
-    그대로 6이었다). 창이 불투명하던 시절에는 그 자리도 같은 색으로 칠해져
-    티가 나지 않았지만, 투명해지고 나면 **거기로 뒤가 비친다.**
-
-    비치는 것이 하필 콤보박스 자신이라 눈에 띈다. Qt는 지금 고른 항목이 콤보박스
-    자리에 오도록 창을 놓는데, 첫 항목을 고른 상태면 창 위쪽이 콤보박스 위쪽과
-    겹친다. 그러면 그 6px 사이로 콤보박스 테두리가 삐져나와, **아래로 열릴 때만
-    상자가 겹쳐 보이고 위나 가운데로 열릴 때는 멀쩡한** 들쭉날쭉한 모양이 된다
-    (실측: 첫 항목 6px 드러남, 가운데·마지막 항목 0px).
-
-    **부르는 시점은 창이 뜨는 순간(Show)이다.** 더 이르게 걸면 Qt가 되돌려
-    놓는다 - Polish에서도 LayoutRequest에서도 창이 뜰 때는 다시 6이었고, Show만
-    남았다(실측). 테마를 바꿔도 되살아나므로 한 번 걸고 마는 것으로는 안 된다.
-
-    눌러 없앤 12px는 목록이 가져가 아래쪽 여백이 그만큼 넉넉해진다. 그 자리를
-    목록 여백을 키워 되찾아 볼 수도 있지만, 그러면 창 높이를 정하는 계산과
-    얽혀 **첫 번째 펼침만 목록이 잘리는** 현상이 났다(실측: 창 103에 필요
-    112). 창 크기는 Qt가 먼저 정하고 우리 손은 그 뒤에 닿기 때문이라, 건드리지
-    않는 편이 안전하다.
+    Qt가 배치 위아래에 넣는 6px짜리 빈 칸으로 첫 항목일 때만 콤보박스가 비친다.
+    부르는 시점은 Show다 - Polish에서도 LayoutRequest에서도 창이 뜰 때 다시 6이었다.
     """
     layout = container.layout()
     if layout is None:
@@ -134,14 +76,8 @@ def flatten_combo_popup_margins(container) -> None:
 class RoundedMenu(QMenu):
     """모서리가 둥글고 테두리만 있는 메뉴.
 
-    거는 것은 `apply_popup_shape`의 창 힌트 세 가지이고, 무엇을 왜 거는지는
-    그쪽 설명에 있다. 메뉴는 앱 전역 QSS가 그대로 닿아서 콤보박스 펼침 목록과
-    달리 창에 직접 스타일시트를 걸 필요가 없다.
-
-    예전 주석은 투명 속성만으로 충분하고 `FramelessWindowHint`를 붙이면 그림자가
-    사라진다고 적어 두었으나 잘못된 관찰이다. 그때 '그림자가 남았다'고 본 어두운
-    가장자리는 실은 합성되지 않은 검은 모서리였다. 그림자를 실제로 없애는 것은
-    `NoDropShadowWindowHint`뿐이다.
+    거는 것은 `apply_popup_shape`의 창 힌트 셋이다. 메뉴는 앱 전역 QSS가 그대로 닿아서
+    콤보 펼침 목록과 달리 창에 직접 스타일시트를 걸 필요가 없다.
     """
 
     def __init__(self, parent=None):
@@ -151,17 +87,10 @@ class RoundedMenu(QMenu):
         self.aboutToShow.connect(self._sync_checkmark_space)
 
     def _sync_checkmark_space(self):
-        """체크 표시를 쓰지 않는 메뉴는 글자 앞자리를 비워 두지 않는다.
+        """체크 표시를 쓰지 않는 메뉴는 글자 앞자리(체크 자리)를 비워 두지 않는다.
 
-        메뉴 항목의 왼쪽 여백은 체크 표시가 들어갈 자리다. 체크할 것이 하나도 없는
-        메뉴에서는 그 자리가 그냥 빈칸으로 남아 글이 오른쪽으로 밀려 보인다.
-
-        기본값은 '자리 없음'이고 필요할 때만 넓힌다(QSS의 `QMenu[checkmarks="true"]`).
-        그래야 Qt가 직접 만드는 입력칸 우클릭 메뉴처럼 우리 손을 거치지 않는
-        메뉴도 빈칸 없이 나온다. 그쪽에도 체크 항목은 없다.
-
-        판단을 항목을 넣을 때가 아니라 열기 직전에 하는 이유는, 항목을 만든 뒤에
-        checkable을 켜는 경우가 있어서다. 그때는 넣는 시점에 물어봐야 답이 없다.
+        기본값을 '자리 없음'으로 두어야 Qt가 직접 만드는 입력칸 우클릭 메뉴도 빈칸 없이
+        나온다. 열기 직전에 보는 것은 항목을 만든 뒤에 checkable을 켜는 경우가 있어서다.
         """
         checkmarks = any(action.isCheckable() for action in self.actions())
         if self.property("checkmarks") == checkmarks:
@@ -172,11 +101,7 @@ class RoundedMenu(QMenu):
 
 
 class ElidedLabel(QLabel):
-    """폭이 모자라면 말줄임표로 줄여 보여 주는 라벨.
-
-    QLabel은 줄바꿈을 끄면 글자를 그냥 잘라 내서 문장이 어중간하게 끊긴다.
-    2열 카드처럼 폭이 바뀌는 자리에서는 매번 폭에 맞춰 다시 줄여야 한다.
-    """
+    """폭이 모자라면 말줄임표로 줄여 보여 주는 라벨. QLabel은 문장을 그냥 잘라 낸다."""
 
     def __init__(self, text: str = "", mode=Qt.TextElideMode.ElideRight, parent=None):
         super().__init__(parent)
@@ -207,19 +132,10 @@ class ElidedLabel(QLabel):
 
 
 class NoFocusDelegate(QStyledItemDelegate):
-    """행에 그려지는 초점 사각형을 지운다.
+    """행이 current가 될 때 스타일이 그리는 초점 사각형을 지운다.
 
-    행을 고르면(정확히는 그 행이 current가 될 때) 스타일이 행 상자를 그대로 두르는
-    각진 선을 그린다. 카드는 모서리가 둥글어서 그 선이 카드 밖으로 삐져나오고,
-    네 귀퉁이에 사각 자국이 남는다. 고르기 전에는 멀쩡하다가 고른 뒤에만 나타난다.
-
-    **QSS로는 지워지지 않는다.** `::item`에 `outline: none`을 넣어도 그대로 그려지고,
-    행 배경색을 투명으로 바꿔도 마찬가지다 — 그리는 것이 배경이 아니라 초점
-    사각형이라서다. 실측하면 카드 우상단 대각선에서 목록 배경(242,244,247)이어야 할
-    자리가 (213,214,219)로 바뀌고, 이 델리게이트를 끼우면 되돌아온다.
-
-    포커스 정책을 끄는 방법도 있지만 그러면 목록에서 방향키와 Del이 듣지 않는다.
-    그리는 순간에만 상태 비트를 떼는 편이 잃는 것이 없다.
+    카드가 둥글어 그 각진 선이 네 귀퉁이에 자국으로 남는다. QSS로는 지워지지 않고
+    (`outline: none`도 소용없다), 포커스 정책을 끄면 목록에서 방향키와 Del이 죽는다.
     """
 
     def paint(self, painter, option, index):
@@ -228,15 +144,10 @@ class NoFocusDelegate(QStyledItemDelegate):
 
 
 class GridListWidget(QListWidget):
-    """항목을 가로로 흘려 여러 열로 감싸는 목록.
-
-    한 열로 세우면 카드 오른쪽이 비어 도는 자리에 쓴다. 폭이 좁아 한 칸이
-    min_item_width보다 작아지면 열을 하나씩 줄여 결국 1열로 되돌아간다.
-    """
+    """항목을 가로로 흘려 여러 열로 감싸는 목록. 한 칸이 min_item_width보다 좁아지면 열을 줄인다."""
 
     LAYOUT_SLACK = 2
-    """칸 폭 합계가 뷰포트와 딱 맞아떨어지면 Qt가 마지막 칸을 다음 줄로 넘긴다.
-    2px만 남겨도 열이 유지되고, 그만큼 오른쪽에 남는 자리도 최소가 된다."""
+    """칸 폭 합계가 뷰포트와 딱 맞아떨어지면 Qt가 마지막 칸을 다음 줄로 넘긴다. 2px면 유지된다."""
 
     def __init__(self, columns: int = 2, min_item_width: int = 300, parent=None):
         super().__init__(parent)
@@ -253,12 +164,7 @@ class GridListWidget(QListWidget):
         self._item_height = height
 
     def column_width(self) -> int:
-        """한 칸의 폭.
-
-        세로 스크롤바를 늘 띄워 두므로 뷰포트 폭이 항목 수에 따라 변하지 않는다.
-        예전처럼 '숨었을 때도 스크롤바 자리를 빼두는' 보정이 필요 없고, 그 자리가
-        오른쪽에만 빈 공간으로 남아 좌우 여백이 달라 보이던 문제도 사라진다.
-        """
+        """한 칸의 폭. 세로 스크롤바를 늘 띄워 두어 뷰포트 폭이 항목 수에 따라 변하지 않는다."""
         width = self.viewport().width() - self.LAYOUT_SLACK
         gap = 2 * self.spacing()
         columns = self._columns
@@ -280,29 +186,16 @@ class GridListWidget(QListWidget):
 
 
 class EmptyStateOverlay(QWidget):
-    """목록이 비었을 때 그 위에 겹쳐 보이는 안내. 아이콘 하나와 글 두 줄.
+    """목록이 비었을 때 뷰포트 위에 겹쳐 보이는 안내. 아이콘 하나와 글 두 줄.
 
-    빈 목록은 아무 말도 하지 않는다. 처음 켠 사람에게는 고장 난 것인지 아직
-    할 일이 남은 것인지 구별할 단서가 없어서, 세 탭 모두 무엇을 하면 되는지
-    한 줄로 알려 준다.
-
-    **목록 안에 항목으로 넣지 않고 뷰포트 위에 겹친다.** 항목으로 넣으면 그것도
-    한 줄이라 선택되고 우클릭 메뉴가 뜨고 개수에 잡힌다. 지울 때를 놓치면 카드와
-    나란히 남기도 한다. 겹쳐 두면 목록은 비어 있는 그대로다.
-
-    **마우스는 통과시킨다**(`WA_TransparentForMouseEvents`). 뷰포트를 통째로
-    덮으므로, 그러지 않으면 빈 목록에서 우클릭이 막히고 창으로 끌어다 놓는
-    주소도 이 위젯이 가로챈다.
-
-    보일지 말지는 목록 모델이 알려 주는 대로 따라간다. 항목을 넣고 빼는 곳이
-    창 쪽 여러 군데라, 그때마다 갱신을 부르게 하면 언젠가 한 곳을 빠뜨린다.
+    항목으로 넣으면 그것도 한 줄이라 선택되고 우클릭 메뉴가 뜨고 개수에 잡힌다.
+    마우스는 통과시킨다 - 안 그러면 빈 목록에서 우클릭과 드롭을 이 위젯이 가로챈다.
     """
 
     ICON_SIZE = 44
     MARGIN = 24
     TEXT_MAX_WIDTH = 320
-    """설명 줄의 최대 폭. 창을 넓히면 한 줄이 끝없이 길어져 읽는 눈이 되돌아온다.
-    목록이 이보다 좁으면(최소 폭 창의 다운로드 칸) 그 폭에 맞춰 줄인다."""
+    """설명 줄의 최대 폭. 창을 넓히면 한 줄이 끝없이 길어져 읽는 눈이 되돌아온다."""
 
     def __init__(self, list_widget: QListWidget, icon_name: str,
                  title: str, description: str,
@@ -352,33 +245,20 @@ class EmptyStateOverlay(QWidget):
     def _usable(self) -> bool:
         """기대던 목록이 아직 살아 있는지.
 
-        이 위젯은 자기가 만들지 않은 목록의 모델 신호와 뷰포트 이벤트에 매달려
-        있다. 창을 닫으면 그 목록이 먼저 헐리는데 그 와중에도 행이 사라졌다는
-        신호는 나오므로, 이미 없어진 쪽을 만지면 RuntimeError가 난다. 슬롯 안에서
-        난 예외는 PyQt가 잡지 못하고 그대로 프로세스를 끝낸다.
-
-        `destroyed`만으로는 늦는 경우가 있어 sip 쪽도 함께 본다.
+        창을 닫으면 목록이 먼저 헐리는데 행이 사라졌다는 신호는 그 와중에도 나온다.
+        없어진 쪽을 만지면 RuntimeError가 나고, 슬롯 안의 예외는 PyQt가 잡지 못한다.
         """
         return (not self._dead and not sip.isdeleted(self)
                 and not sip.isdeleted(self._list))
 
     def apply_theme(self, theme: str):
-        """아이콘을 지금 테마의 흐린 글자색으로 다시 그린다.
-
-        글자는 QSS가 맡지만 아이콘 색은 SVG를 그릴 때 정해지므로, 테마가 바뀌면
-        여기서 새로 만들어야 한다.
-        """
+        """아이콘을 지금 테마의 흐린 글자색으로 다시 그린다. 색은 SVG를 그릴 때 정해진다."""
         icon = get_icon(self._icon_name, palette(theme)["text_dim"], self.ICON_SIZE)
         self.icon_label.setPixmap(icon.pixmap(QSize(self.ICON_SIZE, self.ICON_SIZE),
                                               self.devicePixelRatioF()))
 
     def set_filtered(self, filtered: bool):
-        """검색 때문에 빈 것인지 알려 준다.
-
-        기록·즐겨찾기는 검색할 때 목록을 새로 채우므로, 걸리는 것이 없으면 항목
-        수가 0이 된다. 그대로 두면 기록이 500개 있는 사람에게 '아직 받은 것이
-        없다'고 말하게 된다.
-        """
+        """검색으로 걸러져 빈 것인지 알려 준다. 기록·즐겨찾기는 검색 때 목록을 새로 채운다."""
         if self._filtered == filtered:
             return
         self._filtered = filtered
@@ -399,11 +279,8 @@ class EmptyStateOverlay(QWidget):
     def _fit(self):
         """목록 크기에 맞춰 자리를 잡고, 접히는 설명 줄의 높이를 직접 먹인다.
 
-        QLabel은 wordWrap을 켜도 sizeHint가 한 줄 높이로 나온다. 가로 가운데
-        정렬까지 걸면 레이아웃이 그 값을 그대로 써서, 두 줄로 접힌 글이 한 줄
-        높이 상자에 겹쳐 그려진다(실측: 필요 64px에 받은 것은 16px, 폭도
-        320이 아니라 160으로 접혔다). 폭을 고정하고 그 폭에서 필요한 높이를
-        heightForWidth로 구해 넣어야 두 줄이 온전히 보인다.
+        QLabel은 wordWrap을 켜도 sizeHint가 한 줄 높이라, 가운데 정렬까지 걸면 두 줄이
+        겹쳐 그려진다(실측: 필요 64px에 받은 것 16px). heightForWidth로 구해 넣는다.
         """
         if not self._usable():
             return
@@ -415,34 +292,21 @@ class EmptyStateOverlay(QWidget):
             self.description_label.heightForWidth(width))
 
     def eventFilter(self, obj, event):
-        """뷰포트가 커지고 줄어드는 대로 따라간다.
-
-        보이는 동안만 따라가게 두면 안 된다. 다른 탭에 있는 목록은 그 탭을 고르기
-        전까지 숨어 있고, 배치는 그동안에도 돈다. 그 사이의 크기 변화를 흘려보내면
-        탭을 처음 열었을 때 안내가 엉뚱한 자리에 놓인 채로 나타난다.
-        """
+        """뷰포트 크기를 따라간다. 다른 탭의 목록은 숨어 있는 동안에도 배치가 돈다."""
         if (event.type() == QEvent.Type.Resize and self._usable()
                 and obj is self._list.viewport()):
             self._fit()
         return False
 
     def showEvent(self, event):
-        """탭이 열리며 처음 보일 때 자리를 다시 맞춘다.
-
-        숨어 있는 동안 뷰포트가 제 크기를 받지 못했을 수 있다. 그때는 Resize도
-        오지 않아 eventFilter만으로는 늦는다.
-        """
+        """탭이 열리며 처음 보일 때 자리를 다시 맞춘다. 숨은 동안에는 Resize가 오지 않는다."""
         self._fit()
         super().showEvent(event)
 
 
 def rounded_thumbnail(pixmap: QPixmap, width: int, height: int,
                       dpr: float = 1.0, radius: int = 4) -> QPixmap:
-    """지정한 크기를 꽉 채우도록 가운데를 잘라내고 모서리를 둥글린다.
-
-    KeepAspectRatio로 맞추면 원본 비율이 다를 때 위아래가 남아 세로가 짧아 보인다.
-    KeepAspectRatioByExpanding으로 채운 뒤 잘라야 어떤 원본이든 같은 비율로 보인다.
-    """
+    """가운데를 잘라 지정 크기를 꽉 채우고 모서리를 둥글린다. KeepAspectRatio는 위아래가 남는다."""
     dpr = dpr or 1.0
     dev_w, dev_h = round(width * dpr), round(height * dpr)
     scaled = pixmap.scaled(dev_w, dev_h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
@@ -496,22 +360,15 @@ class ThumbnailDownloader(QThread):
 class _ThumbCoordinator(QObject):
     """썸네일 스레드의 종료를 메인 스레드에서 받아 다음 요청을 시작한다.
 
-    QThread.finished는 워커 스레드에서 발생한다. 모듈 함수에 그대로 연결하면
-    워커 스레드에서 새 QThread를 만들게 된다. 메인 스레드에 사는 QObject를
-    수신자로 두면 Qt가 큐 연결로 바꿔 메인 스레드에서 처리한다.
+    QThread.finished는 워커 스레드에서 난다. 메인 스레드에 사는 QObject를 수신자로
+    두어야 Qt가 큐 연결로 바꿔, 워커 스레드에서 새 QThread를 만드는 일이 없다.
     """
 
     def on_thread_finished(self):
         """이미 지워진 스레드를 먼저 걷어낸다.
 
-        finished에는 큐 연결이 둘 걸려 있고 deleteLater가 먼저다. 둘 사이에
-        순서 보장이 없어, 이 슬롯의 호출이 아직 큐에 남아 있는 동안 C++ 객체가
-        먼저 파괴될 수 있다. 그러면 목록에는 껍데기만 남아 isFinished()가
-        RuntimeError를 낸다. 슬롯 안에서 난 예외는 PyQt6가 잡지 못해 앱이
-        그대로 죽는다.
-
-        sender()만 지우지 않고 전체를 훑는 것은 그대로 둔다. 지워진 항목은
-        어느 호출에서 발견하든 목록에서 빠져야 하고, 여기가 유일한 청소처다.
+        finished에 걸린 deleteLater와 순서 보장이 없어 C++ 객체가 먼저 파괴될 수 있다.
+        isFinished()가 내는 RuntimeError는 슬롯 안의 예외라 PyQt6가 못 잡고 앱이 죽는다.
         """
         for thread in list(_running_thumb_threads):
             if sip.isdeleted(thread) or thread.isFinished():
@@ -552,12 +409,8 @@ def _pump_thumb_queue():
 def start_thumbnail_download(url: str, on_loaded):
     """썸네일 요청을 넣는다. 동시 실행 수를 넘으면 대기열에 쌓인다.
 
-    on_loaded는 반드시 QObject의 바운드 메서드여야 한다. 람다를 넘기면 수신자가
-    사라져도 Qt가 연결을 끊지 못해, 삭제된 위젯을 건드리며 죽는다.
-
-    주소가 없으면 아무것도 하지 않는다. 표지 그림이 없는 영상은 메타데이터에서
-    thumbnail이 None으로 오는데, 그대로 넘기면 urlopen이 던지는 예외를 받으려고
-    스레드 하나와 동시 실행 자리 하나를 쓴다. 답이 정해져 있는 일이다.
+    on_loaded는 QObject의 바운드 메서드여야 한다 - 람다는 수신자가 사라져도 연결이
+    끊기지 않아 삭제된 위젯을 건드리며 죽는다. 주소가 비면 스레드를 쓰지 않는다.
     """
     if not url or not isinstance(url, str):
         return None
@@ -570,13 +423,8 @@ def start_thumbnail_download(url: str, on_loaded):
 def cached_thumbnail(path: Path) -> Optional[QPixmap]:
     """캐시에 둔 그림을 읽는다. 그림으로 읽히지 않으면 그 파일을 지우고 None을 준다.
 
-    깨진 파일을 그냥 두면 '파일이 있다'는 이유로 다시 받지 않는다. 그 카드만
-    영영 빈칸으로 남고, 지울 방법은 설정의 캐시 비우기로 전부 날리는 것뿐이다.
-
-    이미 그런 파일을 들고 있는 사람이 있다. 예전에는 받아 온 것을 그림으로
-    읽어 보기 전에 적어 두어서, 사라진 영상 자리에 온 오류 쪽지가 그대로
-    캐시가 됐다(_on_thumb_finished 참고). 읽어 보고 지우면 그 사람들도 다음에
-    켤 때 저절로 낫는다.
+    깨진 파일을 두면 '파일이 있다'는 이유로 다시 받지 않아 그 카드만 영영 빈칸으로
+    남는다. 읽어 보고 지우면 이미 그런 파일을 들고 있는 사람도 다음에 켤 때 낫는다.
     """
     if not path.exists():
         return None
@@ -593,12 +441,8 @@ def cached_thumbnail(path: Path) -> Optional[QPixmap]:
 def discard_thumbnail_requests(receiver) -> int:
     """이 카드가 걸어 둔 '아직 시작 전' 썸네일 요청을 대기열에서 뺀다.
 
-    _pump_thumb_queue도 꺼낼 때 지워진 수신자를 걸러 낸다. 다만 '지워졌다'가
-    참이 되는 것은 deleteLater가 처리된 뒤라, 목록을 새로 그리는 그 순간에는
-    아직 아니다. 그 틈에 자리가 나면 이미 버린 카드의 요청이 실제로 나간다.
-    버릴 것이 정해진 시점에 바로 빼는 편이 확실하다.
-
-    되돌려주는 수는 검사용이다. 지운 것이 없으면 대기열을 건드리지 않는다.
+    _pump_thumb_queue의 걸러 내기는 deleteLater가 처리된 뒤에야 참이 되어, 목록을
+    새로 그리는 그 순간에는 늦다. 되돌려주는 수는 검사용이다.
     """
     if receiver is None:
         return 0
@@ -614,18 +458,8 @@ def discard_thumbnail_requests(receiver) -> int:
 def clear_item_widgets(view: QListWidget):
     """목록을 비운다. 걸어 둔 카드에게 먼저 거둘 기회를 준다.
 
-    QListWidget.clear()도 카드 자체는 지운다. 다만 deleteLater로 미뤄 두어,
-    이벤트 루프가 그것을 처리하기 전까지는 살아 있다. 그동안 그 카드가 걸어
-    둔 썸네일 요청은 지금 보이는 카드의 것과 구별되지 않아, 자리가 나면
-    아무도 보지 않을 그림을 실제로 받으러 간다.
-
-    **사라진 영상에서 유독 아프다.** 없어진 표지 그림은 403이 돌아올 때까지
-    여섯 자리 중 하나를 붙잡는데, 그 자리를 이미 버린 카드가 차지하면 지금
-    눈앞의 목록이 그만큼 늦게 뜬다. 40개짜리 기록을 다섯 번 새로 그린 뒤
-    대기열을 세면 62개(그중 22개가 이미 버린 카드의 것)에서 22개(버린 것 0)로
-    줄었다.
-
-    기록 검색은 글자를 칠 때마다 다시 그려서 이 자리를 가장 자주 지난다.
+    clear()는 카드를 deleteLater로 미뤄, 그때까지 그 카드의 썸네일 요청이 지금 보이는
+    것과 구별되지 않는다. 사라진 영상은 403이 올 때까지 여섯 자리 중 하나를 붙잡는다.
     """
     for row in range(view.count()):
         cleanup = getattr(view.itemWidget(view.item(row)), "cleanup", None)
@@ -635,12 +469,7 @@ def clear_item_widgets(view: QListWidget):
 
 
 class ImagePreviewDialog(QDialog):
-    """썸네일을 크게 보여 주는 창. 보기만 한다.
-
-    예전에는 여기서 우클릭해 이미지를 저장할 수 있었다. 그 기능은 목록 우클릭
-    메뉴로 옮겼다 — 파일에 관한 일(재생·위치 열기·썸네일 저장)이 한자리에 모여야
-    어디서 무엇을 할 수 있는지 외우지 않아도 된다. 이 창은 크게 보는 일만 맡는다.
-    """
+    """썸네일을 크게 보여 주는 창. 보기만 한다 - 저장은 목록 우클릭 메뉴가 맡는다."""
 
     def __init__(self, pixmap: QPixmap, parent=None):
         super().__init__(parent)
@@ -667,12 +496,7 @@ THUMB_RADIUS = 4
 
 
 class BroadcastStrip(QWidget):
-    """카드 왼쪽 가장자리의 4px 세로 색 띠 (UI_REDESIGN.md 3항).
-
-    EPG에서 채널을 구분하는 색 바와 같은 형태이며, 여기서는 상태를 나타낸다.
-    진행 중일 때만 은은한 밝기 변화 애니메이션이 돈다. 화면에서 움직이는 요소는
-    이것 하나뿐이라, 뭔가 돌아가고 있다는 신호가 한눈에 들어온다.
-    """
+    """카드 왼쪽 가장자리의 4px 세로 상태 색 띠. 진행 중일 때만 밝기 변화가 돈다."""
 
     PULSE_MS = 1600
     PULSE_LIGHTEN = 35
@@ -784,10 +608,13 @@ class DownloadItemWidget(QWidget):
         meta_row.setContentsMargins(0, 0, 0, 0)
         meta_row.setSpacing(4)
         self.status_label = QLabel("대기", objectName="Status")
+        self.duration_label = QLabel("", objectName="Duration")
+        self.duration_label.hide()
         self.play_btn = self._make_action_button("play", "재생")
         self.folder_btn = self._make_action_button("folder_open", "폴더 열기")
         meta_row.addWidget(self.status_label)
         meta_row.addStretch(1)
+        meta_row.addWidget(self.duration_label)
         meta_row.addWidget(self.play_btn)
         meta_row.addWidget(self.folder_btn)
 
@@ -832,18 +659,15 @@ class DownloadItemWidget(QWidget):
         if self._selected == selected:
             return
         self._selected = selected
-        set_selected_style((self, self.title_label, self.status_label, self.percent_label), selected)
+        set_selected_style((self, self.title_label, self.status_label,
+                            self.percent_label, self.duration_label), selected)
         self._paint_action_icons()
 
     def _strip_muted(self, ctx_key: str) -> str:
         return blend(self._colors[ctx_key], self._colors["surface"], 0.55)
 
     def _refresh_strip(self):
-        """상태를 스트립 색으로 옮긴다. 진행 중일 때만 애니메이션이 돈다.
-
-        음성 없음은 실패와 구분한다. 파일은 손에 남았지만 그대로 쓸 수 없는
-        상태라, 빨강 대신 경고색으로 '받긴 받았는데 문제가 있다'를 알린다.
-        """
+        """상태를 스트립 색으로 옮긴다. 음성 없음은 파일이 남았으므로 빨강이 아니라 경고색이다."""
         if self.status == NO_AUDIO_STATUS:
             self.strip.set_state(QColor(self._colors["warn"]), False)
         elif self.status in ERROR_STATUSES:
@@ -876,11 +700,7 @@ class DownloadItemWidget(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def thumbnail_pixmap(self) -> Optional[QPixmap]:
-        """받아 둔 원본 썸네일. 아직 없으면 None.
-
-        카드가 화면에 그리는 것은 모서리를 둥글린 축소본이라, 저장에 쓸 원본을
-        따로 내준다.
-        """
+        """저장에 쓸 원본 썸네일. 카드가 그리는 것은 모서리를 둥글린 축소본이라 따로 내준다."""
         if self._orig_thumb_pm is None or self._orig_thumb_pm.isNull():
             return None
         return self._orig_thumb_pm
@@ -917,12 +737,24 @@ class DownloadItemWidget(QWidget):
         self._set_actions_visible(False)
         self._refresh_strip()
 
+    def set_duration(self, seconds):
+        """재생 시간을 재생·폴더 단추 왼쪽에 얹는다. 모르면 라벨째 숨긴다.
+
+        빈 라벨을 남겨 두면 그 폭만큼 단추가 안쪽으로 밀려, 길이를 아는 카드와 모르는
+        카드에서 단추 자리가 어긋난다.
+        """
+        text = format_duration(seconds)
+        self.duration_label.setText(text)
+        self.duration_label.setVisible(bool(text))
+
     def update_progress(self, payload: dict):
         if "thumbnail" in payload and payload["thumbnail"] != self._thumb_url:
             self._thumb_url = payload["thumbnail"]
             self._start_thumb_download(self._thumb_url)
         if payload.get("title"):
             self.title_label.setText(payload["title"])
+        if "duration" in payload:
+            self.set_duration(payload["duration"])
         if "final_filepath" in payload:
             self.final_filepath = payload["final_filepath"]
 
@@ -996,11 +828,7 @@ class DownloadItemWidget(QWidget):
             pass
 
 class FavoriteItemWidget(QWidget):
-    """즐겨찾기 시리즈 카드.
-
-    2열로 깔리므로 폭이 목록 절반이다. 제목은 두 줄까지 접고 URL은 줄여서,
-    어떤 폭에서도 카드 높이가 CARD_HEIGHT로 일정하게 유지된다.
-    """
+    """즐겨찾기 시리즈 카드. 2열이라 폭이 절반이고, 제목·URL을 줄여 높이를 붙든다."""
 
     CARD_HEIGHT = 112
     TITLE_LINES = 2
@@ -1066,11 +894,7 @@ class FavoriteItemWidget(QWidget):
         except Exception: pass
 
     def cleanup(self):
-        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다.
-
-        받아 온 그림을 넣을 곳이 없어졌는데도 연결이 남아 있으면, 지워진 라벨을
-        건드렸다가 슬롯 안에서 예외가 난다. 그 예외는 PyQt6가 잡지 못한다.
-        """
+        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다. 지워진 라벨을 건드리면 앱이 죽는다."""
         discard_thumbnail_requests(self)
         downloader = getattr(self, "downloader", None)
         self.downloader = None
@@ -1084,10 +908,8 @@ class FavoriteItemWidget(QWidget):
     def _on_thumb_finished(self, result: tuple):
         """받아 온 것을 그림으로 읽어 보고, 읽히는 것만 캐시에 남긴다.
 
-        순서가 뒤였을 때가 문제였다. 사라진 영상의 표지 그림 자리에 서버가
-        오류 쪽지를 200으로 돌려주는 일이 있는데(VPN 중간 페이지도 그렇다),
-        그걸 그대로 적어 두면 다음부터는 파일이 있다는 이유로 다시 받지 않는다.
-        빈 카드가 굳고, 지울 수도 없는 쓰레기가 캐시 용량에 잡힌다.
+        사라진 영상 자리에 오류 쪽지가 200으로 오는 일이 있다(VPN 중간 페이지도 그렇다).
+        그대로 적어 두면 파일이 있다는 이유로 다시 받지 않아 빈 카드가 굳는다.
         """
         try: url, data = result
         except (TypeError, ValueError): return
@@ -1155,11 +977,7 @@ class HistoryItemWidget(QWidget):
         except Exception: pass
 
     def cleanup(self):
-        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다.
-
-        받아 온 그림을 넣을 곳이 없어졌는데도 연결이 남아 있으면, 지워진 라벨을
-        건드렸다가 슬롯 안에서 예외가 난다. 그 예외는 PyQt6가 잡지 못한다.
-        """
+        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다. 지워진 라벨을 건드리면 앱이 죽는다."""
         discard_thumbnail_requests(self)
         downloader = getattr(self, "downloader", None)
         self.downloader = None
@@ -1173,10 +991,8 @@ class HistoryItemWidget(QWidget):
     def _on_thumb_finished(self, result: tuple):
         """받아 온 것을 그림으로 읽어 보고, 읽히는 것만 캐시에 남긴다.
 
-        순서가 뒤였을 때가 문제였다. 사라진 영상의 표지 그림 자리에 서버가
-        오류 쪽지를 200으로 돌려주는 일이 있는데(VPN 중간 페이지도 그렇다),
-        그걸 그대로 적어 두면 다음부터는 파일이 있다는 이유로 다시 받지 않는다.
-        빈 카드가 굳고, 지울 수도 없는 쓰레기가 캐시 용량에 잡힌다.
+        사라진 영상 자리에 오류 쪽지가 200으로 오는 일이 있다(VPN 중간 페이지도 그렇다).
+        그대로 적어 두면 파일이 있다는 이유로 다시 받지 않아 빈 카드가 굳는다.
         """
         try: url, data = result
         except (TypeError, ValueError): return

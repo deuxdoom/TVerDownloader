@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from src.threads import ytdlp_run
 
 class SeriesParseThread(QThread):
-    """시리즈 URL을 받아 하위 에피소드 정보(딕셔너리) 리스트를 반환하는 스레드."""
+    """시리즈 URL을 받아 하위 회차 정보(dict) 목록을 돌려주는 스레드."""
     log = pyqtSignal(str)
     finished = pyqtSignal(str, list)
 
@@ -14,8 +14,7 @@ class SeriesParseThread(QThread):
     PARSE_TIMEOUT = 300
     """전체 회차를 훑는 분석의 제한 시간. 72화 기준 61초라 넉넉히 잡는다.
 
-    없이 두면 yt-dlp가 응답을 기다리며 멈춰 있을 때 즐겨찾기 확인 대기열 전체가
-    그 자리에 선다. 한 시리즈가 막히더라도 나머지는 이어져야 한다.
+    없으면 한 시리즈가 막힐 때 즐겨찾기 확인 대기열 전체가 그 자리에 선다.
     """
 
     def __init__(self, series_url: str, ytdlp_exe_path: str, exclude_keywords: List[str],
@@ -79,10 +78,8 @@ class SeriesParseThread(QThread):
     def _run_title_only(self):
         """시리즈 제목만 확인한다.
 
-        --flat-playlist는 회차를 하나씩 열어 보지 않는다. 72화짜리 시리즈에서
-        전체 메타데이터는 60초가 걸리는데 이 방식은 4초면 끝난다. 즐겨찾기에 막
-        넣은 시리즈는 제목만 있으면 되고, 회차 목록은 '신규 영상 확인'을 누르거나
-        다음 실행 때 어차피 다시 훑는다.
+        --flat-playlist는 회차를 하나씩 열어 보지 않는다 - 72화 기준 60초가 4초로 준다.
+        회차 목록은 '신규 영상 확인'을 누르거나 다음 실행 때 어차피 다시 훑는다.
         """
         self.log.emit(f"[시리즈] 제목 확인 중: {self.series_url}")
         command = [self.ytdlp_exe_path, "--flat-playlist", "--playlist-items", "1", "-J", "--skip-download",

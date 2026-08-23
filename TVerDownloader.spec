@@ -1,7 +1,54 @@
+import importlib.util
 import os
+
 import PyQt6
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo, StringFileInfo, StringStruct, StringTable,
+    VarFileInfo, VarStruct, VSVersionInfo,
+)
 
 APP_NAME = "TVerDownloader"
+APP_PUBLISHER = "deuxdoom"
+APP_DESCRIPTION = "TVer Downloader"
+
+
+def read_app_version():
+    """버전은 versioninfo.py 한 줄에서만 온다 - 여기 숫자를 적어 두면 둘이 조용히 어긋난다."""
+    finder = importlib.util.spec_from_file_location(
+        "_tvd_versioninfo", os.path.join(SPECPATH, "versioninfo.py")
+    )
+    module = importlib.util.module_from_spec(finder)
+    finder.loader.exec_module(module)
+    return module.APP_VERSION
+
+
+def build_version_resource(version):
+    """윈도우 버전 리소스. CompanyName이 작업 관리자 시작 프로그램 탭의 '게시자'로 나온다.
+
+    리소스가 네 자리를 요구해서 세 자리 버전 뒤에 0을 붙인다.
+    """
+    numbers = tuple(int(part) for part in version.split(".")) + (0,)
+    strings = [
+        StringStruct("CompanyName", APP_PUBLISHER),
+        StringStruct("FileDescription", APP_DESCRIPTION),
+        StringStruct("FileVersion", version),
+        StringStruct("InternalName", APP_NAME),
+        StringStruct("LegalCopyright", "Copyright (c) " + APP_PUBLISHER),
+        StringStruct("OriginalFilename", APP_NAME + ".exe"),
+        StringStruct("ProductName", APP_DESCRIPTION),
+        StringStruct("ProductVersion", version),
+    ]
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numbers, prodvers=numbers),
+        kids=[
+            StringFileInfo([StringTable("041204B0", strings)]),
+            VarFileInfo([VarStruct("Translation", [0x0412, 1200])]),
+        ],
+    )
+
+
+APP_VERSION = read_app_version()
+VERSION_RESOURCE = build_version_resource(APP_VERSION)
 
 QT_TRANSLATIONS_DIR = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6", "translations")
 TRANSLATION_LANGS = ["ko", "ja"]
@@ -91,6 +138,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/tver.ico",
+    version=VERSION_RESOURCE,
 )
 
 coll = COLLECT(

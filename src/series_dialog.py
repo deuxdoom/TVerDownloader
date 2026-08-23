@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from src.widgets import start_thumbnail_download, THUMBNAIL_CACHE_DIR
 
 class SeriesSelectionDialog(QDialog):
-    """시리즈의 에피소드 목록을 보여주고 사용자가 다운로드할 항목을 선택하게 하는 다이얼로그."""
+    """시리즈의 회차 목록에서 받을 것을 고르는 창."""
 
     def __init__(self, episode_info: List[Dict[str, str]], parent=None):
         super().__init__(parent)
@@ -85,13 +85,11 @@ class SeriesSelectionDialog(QDialog):
             item.setIcon(icon)
 
     def _toggle_all_checkboxes(self, check: bool = True):
-        """목록의 모든 체크박스 상태를 변경합니다."""
         state = Qt.CheckState.Checked if check else Qt.CheckState.Unchecked
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(state)
 
     def get_selected_urls(self) -> List[str]:
-        """선택된(체크된) 항목들의 URL 목록을 반환합니다."""
         selected_urls = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)

@@ -29,12 +29,8 @@ PREVIEW_SAMPLES = {
 }
 """미리보기에 넣는 본보기 값.
 
-짧은 것으로 골랐다. 예전에는 버라이어티 제목을 그대로 썼는데, 한 줄에
-들어가지 않아 미리보기가 두 줄로 접혔다. 체크 하나를 여닫을 때마다 줄 수가
-바뀌면 글 전체가 밀려서, 정작 어느 조각이 빠졌는지가 그 움직임에 묻힌다.
-
-확장자는 적지 않는다. 여기서 고르는 것은 이름을 이루는 조각들이고,
-확장자는 그 중 하나가 아니라 받고 나서 정해진다.
+**한 줄에 들어갈 만큼 짧게 둔다** - 두 줄로 접히면 체크 하나를 여닫을 때마다 글 전체가
+밀려서, 정작 어느 조각이 빠졌는지가 그 움직임에 묻힌다. 확장자는 적지 않는다.
 """
 
 
@@ -48,13 +44,9 @@ def part_color(theme: str, key: str, on: bool) -> str:
 class PartColorDelegate(QStyledItemDelegate):
     """구성 요소 목록의 글자를 조각마다 정해 둔 색으로 그린다.
 
-    색을 항목의 ForegroundRole에 적어 두는 방법도 있다. 그러면 체크를 여닫을
-    때마다 색을 다시 적어야 하고, 적는 일이 itemChanged를 다시 울려 같은 함수로
-    되돌아온다. 그릴 때 정하면 그런 되먹임이 생기지 않는다.
-
-    고른 행을 스타일이 HighlightedText로 그리는 것도 여기서 막는다. 끌어 자리를
-    바꾸는 동안 그 항목만 색을 잃으면, 지금 옮기는 것이 미리보기의 어느 덩어리인지를
-    짚을 수 없다.
+    ForegroundRole에 적어 두면 체크를 여닫을 때마다 다시 적어야 하고, 적는 일이
+    itemChanged를 울려 같은 함수로 되돌아온다. 고른 행의 HighlightedText도 여기서 막는다 -
+    끌어 옮기는 동안 그 항목만 색을 잃으면 지금 옮기는 것이 미리보기의 어디인지 짚을 수 없다.
     """
 
     def __init__(self, theme: str, parent=None):
@@ -223,7 +215,7 @@ class SettingsDialog(QDialog):
         clip_layout.setSpacing(10)
         clip_layout.addWidget(QLabel("클립보드:"))
         self.clipboard_watch_checkbox = QCheckBox("TVer 주소를 복사하면 입력창에 자동으로 넣기")
-        self.clipboard_watch_checkbox.setChecked(self.config.get("clipboard_watch", False))
+        self.clipboard_watch_checkbox.setChecked(self.config.get("clipboard_watch", True))
         self.clipboard_watch_checkbox.setToolTip(
             "TVer 주소를 복사하면 위쪽 입력창에 자동으로 채워 넣습니다.\n"
             "다운로드가 저절로 시작되지는 않고, 입력창에 이미 내용이 있으면 건드리지 않습니다.\n"
@@ -236,7 +228,7 @@ class SettingsDialog(QDialog):
         fav_layout.setSpacing(10)
         fav_layout.addWidget(QLabel("즐겨찾기:"))
         self.fav_autocheck_checkbox = QCheckBox("프로그램을 켤 때 새 회차를 확인하기")
-        self.fav_autocheck_checkbox.setChecked(self.config.get("auto_check_favorites_on_start", True))
+        self.fav_autocheck_checkbox.setChecked(self.config.get("auto_check_favorites_on_start", False))
         self.fav_autocheck_checkbox.setToolTip(
             "프로그램을 켠 뒤 잠시 있다가 즐겨찾기에 담긴 시리즈를 모두 확인합니다.\n"
             "TVer는 일본 지역 제한이 있어, VPN을 켜기 전에 확인이 돌면 전부 실패로 끝납니다.\n"
@@ -268,12 +260,9 @@ class SettingsDialog(QDialog):
     def _create_shortcuts_tab(self):
         """동작마다 조합 입력칸을 하나씩 놓는다.
 
-        QKeySequenceEdit는 눌린 키를 그대로 받아 적는다. 조합을 글자로 적게 하면
-        'Ctrl + L'인지 'Control+l'인지부터 헷갈리고, 그 키가 실제로 눌리는 키인지
-        확인할 방법도 없다.
-
-        빈 칸 안내 문구는 Qt가 자기 번역에서 넣는다(setup_translations). 직접
-        바꿔 봐야 QKeySequenceEdit가 상태를 되돌릴 때마다 원래 문구로 덮인다.
+        QKeySequenceEdit는 눌린 키를 그대로 받아 적는다. 글자로 적게 하면 'Ctrl + L'인지
+        'Control+l'인지부터 헷갈린다. 빈 칸 안내 문구는 Qt 번역에서 온다 - 직접 바꿔 봐야
+        QKeySequenceEdit가 상태를 되돌릴 때마다 덮인다.
         """
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(12)
         guide = QLabel("입력칸을 누른 뒤 원하는 키를 누르면 바뀝니다. "
@@ -328,10 +317,7 @@ class SettingsDialog(QDialog):
                 for key, editor in self.shortcut_edits.items()}
 
     def _sync_shortcut_warning(self):
-        """겹치는 조합이 있으면 고치는 자리에서 바로 알린다.
-
-        저장할 때만 알리면 어느 칸이 문제인지 되짚어야 한다.
-        """
+        """겹치는 조합이 있으면 고치는 자리에서 바로 알린다. 저장할 때만 알리면 되짚어야 한다."""
         clashes = shortcuts.conflicts(self._shortcut_table())
         if not clashes:
             self.shortcut_warning.setText("")
@@ -396,9 +382,8 @@ class SettingsDialog(QDialog):
     def _update_preview(self, *args):
         """고른 조각을 차례대로 이어 미리보기를 다시 적는다.
 
-        서식 있는 글로 적는 것은 조각마다 위 목록과 같은 색을 입힐 수 있어서다.
-        그 대신 본보기 값을 반드시 이스케이프해야 한다. 지금 값에는 꺾은괄호가 없지만,
-        그런 글자가 든 제목으로 바꾸는 날 그 대목이 통째로 사라진다.
+        서식 있는 글이라 조각마다 위 목록과 같은 색을 입힐 수 있다. 그 대신 본보기 값을
+        반드시 이스케이프해야 한다 - 꺾은괄호가 든 제목이 오면 그 대목이 통째로 사라진다.
         """
         spans = []
         for i in range(self.order_list.count()):
@@ -535,28 +520,13 @@ class SettingsDialog(QDialog):
     def _create_advanced_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(20)
 
-        conv_groupbox = QWidget(); conv_v_layout = QVBoxLayout(conv_groupbox); conv_v_layout.setContentsMargins(0,0,0,0)
-        conv_v_layout.addWidget(QLabel("다운로드 후 변환 (컨테이너):"))
-        self.conversion_button_group = QButtonGroup(self); conv_radio_layout = QVBoxLayout(); conv_radio_layout.setSpacing(10)
-        formats = {"변환 안 함 (MP4)": "none", "AVI로 변환": "avi", "MOV로 변환": "mov", "오디오만 추출 (MP3)": "mp3"}
-        current_format = self.config.get("conversion_format", "none")
-        for text, key in formats.items():
-            radio = QRadioButton(text); radio.setProperty("config_value", key); self.conversion_button_group.addButton(radio); conv_radio_layout.addWidget(radio)
-            if key == current_format: radio.setChecked(True)
-        conv_v_layout.addLayout(conv_radio_layout)
-        self.delete_original_checkbox = QCheckBox("변환 후 원본 파일 삭제")
-        self.delete_original_checkbox.setChecked(self.config.get("delete_on_conversion", False))
-        self.conversion_button_group.buttonToggled.connect(self._toggle_delete_checkbox)
-        self._toggle_delete_checkbox()
-        conv_v_layout.addWidget(self.delete_original_checkbox); layout.addWidget(conv_groupbox)
-
         exclude_groupbox = QWidget()
         exclude_v_layout = QVBoxLayout(exclude_groupbox)
         exclude_v_layout.setContentsMargins(0,0,0,0)
         exclude_v_layout.addWidget(QLabel("시리즈 분석 시 제외할 키워드 (쉼표,로 구분):"))
         current_keywords = self.config.get("series_exclude_keywords", [])
         self.exclude_keywords_edit = QLineEdit(", ".join(current_keywords))
-        self.exclude_keywords_edit.setPlaceholderText("예: 予告, SP, ダイジェスト")
+        self.exclude_keywords_edit.setPlaceholderText("예: 予告, ダイジェスト, 解説放送版")
         exclude_v_layout.addWidget(self.exclude_keywords_edit)
         layout.addWidget(exclude_groupbox)
 
@@ -594,25 +564,16 @@ class SettingsDialog(QDialog):
     def _sync_codec_dependent_state(self):
         """'원본 유지'면 재인코딩 관련 설정을 흐리게 한다.
 
-        숨기지는 않는다. 사라지면 그런 설정이 있었는지조차 모르게 되지만,
-        흐리게 남아 있으면 '지금은 해당 없음'이 전달된다. (UI_REDESIGN.md 6항)
+        숨기지는 않는다 - 사라지면 그런 설정이 있었는지조차 모르게 된다.
         """
         self._hw_group.setEnabled(self.codec_combo.currentData() != "original")
-
-    def _toggle_delete_checkbox(self):
-        selected_button = self.conversion_button_group.checkedButton()
-        is_conversion_selected = selected_button is not None and selected_button.property("config_value") != "none"
-        self.delete_original_checkbox.setEnabled(is_conversion_selected)
 
     @staticmethod
     def _align_labels(*labels: QLabel):
         """나란히 놓인 설명들의 폭을 맞춰 뒤의 입력칸이 한 줄로 서게 한다.
 
-        두 줄은 성격이 같은 값(동시 다운로드 수 · 조각 수)이라 함께 읽는다. 글자
-        길이가 달라 칸이 어긋나 있으면 짝이라는 것이 눈에 들어오지 않는다.
-
-        폭을 숫자로 박아 두지 않고 sizeHint에서 가져온다. 서체와 배율에 따라
-        글자 폭이 달라져, 박아 두면 어느 환경에서는 글이 잘린다.
+        성격이 같은 값(동시 다운로드 수 · 조각 수)이라 함께 읽는다. 폭은 sizeHint에서
+        가져온다 - 숫자로 박아 두면 서체와 배율에 따라 어느 환경에서는 글이 잘린다.
         """
         widest = max(label.sizeHint().width() for label in labels)
         for label in labels:
@@ -625,11 +586,9 @@ class SettingsDialog(QDialog):
     def _check_connection_total(self) -> bool:
         """동시 다운로드 수와 조각 수의 곱이 상한 안에 있는지 본다. 넘으면 알리고 막는다.
 
-        두 값이 각자 범위 안에 있어도 곱하면 얼마든지 커진다. 저장할 때 막는 것은
-        단축키 충돌과 같은 이유다 — 넘긴 채로 저장되면 다음 다운로드에서야 실패하고,
-        그때는 무엇 때문인지 짚기 어렵다.
-
-        고친 뒤 바로 다시 누를 수 있게 일반 탭으로 돌려놓는다.
+        저장할 때 막는 것은 단축키 충돌과 같은 이유다 - 넘긴 채로 저장되면 다음 다운로드에서야
+        실패하고, 그때는 무엇 때문인지 짚기 어렵다. 고쳐서 바로 다시 누를 수 있게 일반 탭으로
+        돌려놓는다.
         """
         parallel = self.concurrent_spinbox.value()
         fragments = self.fragments_spinbox.value()
@@ -683,8 +642,6 @@ class SettingsDialog(QDialog):
         if self.subtitle_format_button_group.checkedButton():
             self.config["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
 
-        if self.conversion_button_group.checkedButton(): self.config["conversion_format"] = self.conversion_button_group.checkedButton().property("config_value")
-        self.config["delete_on_conversion"] = self.delete_original_checkbox.isChecked()
         self.config["embed_thumbnail"] = self.embed_thumbnail_checkbox.isChecked()
         self.config["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()
         keywords_str = self.exclude_keywords_edit.text()

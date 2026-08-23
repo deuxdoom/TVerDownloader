@@ -1,12 +1,8 @@
 """헤더의 앱 이름을 그림 로고로 바꿔 준다.
 
-assets/logo/ 에는 언어 3종 × 테마 2종, 총 6개의 완성된 PNG가 들어 있다.
-배경이 이미 투명하고 글자 색도 테마에 맞춰 칠해져 있어서, 여기서는 표시 크기로
-줄여 쓰기만 한다.
-
-파일은 표시 높이의 3배(462x90)로 만들어져 있어 어떤 화면 배율에서도 축소만
-일어난다. 팔레트의 text 색을 바꾸면 로고 글자 색은 따라오지 않으니, 그때는
-원본에서 다시 만들어 넣어야 한다.
+assets/logo/에 언어 3종 × 테마 2종의 완성된 PNG가 있다. 표시 높이의 3배(462x90)로
+만들어져 어떤 배율에서도 축소만 일어난다. 팔레트의 text 색을 바꿔도 로고 글자 색은
+따라오지 않으므로 그때는 원본에서 다시 만들어 넣어야 한다.
 """
 from __future__ import annotations
 
@@ -42,11 +38,7 @@ def logo_path(theme: str, language: Optional[QLocale.Language] = None) -> Path:
 
 def build_logo(theme: str, height: int = LOGO_HEIGHT, dpr: float = 1.0,
                language: Optional[QLocale.Language] = None) -> Optional[QPixmap]:
-    """헤더에 넣을 로고 픽스맵을 돌려준다.
-
-    파일이 없거나 읽지 못하면 None을 돌려준다. 호출부는 글자 제목으로 되돌아가므로
-    로고가 빠져도 앱은 그대로 쓸 수 있다.
-    """
+    """헤더에 넣을 로고 픽스맵. 없거나 못 읽으면 None이고 호출부는 글자 제목으로 돌아간다."""
     from src.utils import get_resource_path
 
     lang = language_code(language)

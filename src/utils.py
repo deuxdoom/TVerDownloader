@@ -21,10 +21,7 @@ APP_NAME_BY_LANGUAGE = {
 
 
 def localized_app_name(language: QLocale.Language | None = None) -> str:
-    """OS 표시 언어에 맞는 앱 이름을 돌려준다. 모르는 언어면 영문 이름.
-
-    language를 넘기면 그 언어로 계산한다(검증용). 평소에는 시스템 언어를 쓴다.
-    """
+    """OS 표시 언어에 맞는 앱 이름. 모르는 언어면 영문. language를 넘기면 그 언어로(검증용)."""
     if language is None:
         language = QLocale.system().language()
     return APP_NAME_BY_LANGUAGE.get(language, APP_NAME_FALLBACK)
@@ -39,13 +36,9 @@ FILENAME_TITLE_MAX_LENGTH = 80
 MAX_TOTAL_CONNECTIONS = 20
 """동시 다운로드 수 × 조각 수의 상한. TVer에 한꺼번에 걸리는 연결 수다.
 
-두 값은 각자 범위 안에 있어도 곱하면 얼마든지 커진다(20 × 16 = 320). 그러면
-지역 제한 차단에 걸리는데, **그 차단은 한번 걸리면 IP를 바꾸기 전까지 계속
-막히는 성질이라 값을 되돌려도 곧바로 낫지 않는다**(yt-dlp #13888). 되돌리기
-어려운 실패라서, 고르는 자리에서 아예 막는다(SettingsDialog._save_settings).
-
-설정 파일을 손으로 고친 경우는 막지 않는다. 어느 쪽을 줄여야 할지 정할 근거가
-없어서다 — 사용자가 고른 값을 말없이 바꾸는 것보다 그대로 쓰는 편이 낫다.
+각자 범위 안이어도 곱하면 320까지 간다. 지역 제한 차단은 한번 걸리면 IP를 바꾸기 전까지
+계속 막혀(yt-dlp #13888) 되돌리기 어려우므로 고르는 자리에서 아예 막는다. 설정 파일을
+손으로 고친 경우는 어느 쪽을 줄여야 할지 근거가 없어 막지 않는다.
 """
 
 DEFAULT_FRAGMENTS = 4
@@ -53,63 +46,44 @@ FRAGMENTS_MIN = 1
 FRAGMENTS_MAX = 16
 """영상 하나에서 한꺼번에 받을 조각 수(yt-dlp의 -N).
 
-TVer은 HLS라 영상이 수백 개 조각으로 나뉘어 있고, **yt-dlp 기본값은 1이라 그것을
-한 개씩 차례로 받는다.** 조각 하나하나는 작아서 왕복 시간이 그대로 대기 시간이
-되므로, 회선을 다 쓰지 못한 채 느려지는 원인이 여기다.
-
-**기본값을 4로 잡은 것은 동시 다운로드 수와 곱해지기 때문이다.** 이 값이 N이고
-동시 다운로드가 M이면 TVer에 걸리는 연결은 N×M이다. 기본값(M=5)에서 4면 20인데,
-여기서 더 늘리면 지역 제한 차단에 걸릴 위험이 커진다. 그 차단은 한번 걸리면 IP를
-바꾸기 전까지 계속 막히는 성질이라(yt-dlp #13888) 되돌리기가 어렵다.
-
-상한을 16으로 둔 것은 그 위로는 조각을 더 벌려도 회선이 아니라 서버 쪽에서
-막히기 시작해서다. 1로 두면 이 기능을 끈 것과 같다.
+TVer은 HLS라 조각이 수백 개인데 yt-dlp 기본값 1은 그것을 하나씩 받아 회선을 다 쓰지
+못한다. 기본값 4는 동시 다운로드 수와 곱해지기 때문이고(4 × 5 = 20), 상한 16 위로는
+회선이 아니라 서버 쪽에서 막히기 시작한다.
 """
 
 HARDWARE_ENCODERS = ("cpu", "nvidia")
 """고를 수 있는 코덱 변환 가속.
 
-3.4.0에서 Intel(QSV)과 AMD(AMF)를 뺐다. 둘 다 화면에는 있었지만 가진 사람이
-드물어 실제로 어떤 결과가 나오는지 확인해 본 적이 없고, 확인하지 않은 선택지를
-띄워 두면 고른 사람만 조용히 다른 품질을 받는다.
+3.4.0에서 Intel(QSV)·AMD(AMF)를 뺐다 - 확인해 본 적 없는 선택지를 띄워 두면 고른
+사람만 조용히 다른 품질을 받는다.
 """
 
 PREFERRED_CODECS = ("original", "avc", "hevc")
 """고를 수 있는 재인코딩 코덱.
 
-3.4.0에서 VP9와 AV1을 뺐다. 둘 다 CPU 인코딩이 실시간의 몇 분의 일이라 한 편에
-몇 시간이 걸리고, 그렇게 만든 파일을 편집 도구가 대부분 읽지 못한다. 재인코딩을
-쓰는 이유가 호환성인데 목적과 반대로 가는 선택지였다.
+3.4.0에서 VP9·AV1을 뺐다 - CPU 인코딩이 한 편에 몇 시간이고 그 파일을 편집 도구가
+대부분 읽지 못해, 호환성이라는 목적과 반대로 갔다.
 """
 
 RETIRED_HARDWARE_ENCODERS = {"intel": "cpu", "amd": "cpu"}
 RETIRED_PREFERRED_CODECS = {"vp9": "original", "av1": "original"}
 """이제 없는 값이 설정 파일에 남아 있을 때 대신 쓸 값.
 
-**말없이 바꾸지 않는다.** 고른 적 있는 설정이 사라진 것이라 화면만 보고는
-언제 어떻게 달라졌는지 알 수 없다. retired_option_notes()가 로그에 남길 문장을
-만들고, 창이 켜질 때 그것을 찍는다.
+말없이 바꾸지 않는다 - retired_option_notes()가 로그에 남길 문장을 만든다.
 """
 
 NO_AUDIO_STATUS = "음성 없음"
 """내려받기는 끝났지만 음성 트랙이 빠진 상태.
 
-파일은 남아 있으니 실패는 아니지만 그대로 두면 안 되는 결과다. 재다운로드
-대상으로 삼으려고 ERROR_STATUSES에 넣지만, 색만은 따로 구분한다.
+파일은 남으니 실패는 아니다. 재다운로드 대상이라 ERROR_STATUSES에 넣되 색은 따로 구분한다.
 """
 
 def item_percent(percent, previous: int) -> int:
     """항목 하나의 진행률(0~100)을 정리한다. 값이 없으면 이전 값을 지킨다.
 
-    **여기 오는 percent는 이미 항목 전체 기준이다.** yt-dlp는 영상과 소리를 따로
-    받으면서 조각마다 0->100을 새로 세는데, 그 환산은 조각 수를 아는
-    DownloadThread가 끝내고 보낸다. 사이트마다 조각 수가 달라(유튜브는 하나로
-    주기도 한다) 화면 쪽에서는 알 수 없는 값이다.
-
-    진행률이 없는 알림(상태만 바뀐 경우)에 이전 값을 돌려주는 이유는, 그때마다
-    0으로 떨어지면 받는 중에 눈금이 깜빡이기 때문이다.
-
-    카드와 트레이가 같은 값을 보여야 하므로 이 정리는 여기 한 곳에서만 한다.
+    **여기 오는 percent는 이미 항목 전체 기준이다** - 조각 수를 아는 DownloadThread가
+    환산을 끝내고 보낸다. 값이 없을 때마다 0으로 떨어뜨리면 눈금이 깜빡이고, 카드와
+    트레이가 같은 값을 보여야 하므로 이 정리는 여기 한 곳에서만 한다.
     """
     if percent is None:
         return previous
@@ -118,6 +92,24 @@ def item_percent(percent, previous: int) -> int:
     except (TypeError, ValueError):
         return previous
     return int(max(0.0, min(100.0, value)))
+
+
+def format_duration(seconds) -> str:
+    """재생 시간을 '45분'으로 만든다. 알 수 없으면 빈 문자열 - 부르는 쪽이 라벨을 숨긴다.
+
+    분으로 적는 것은 카드에서 재생·폴더 단추 옆 좁은 자리를 쓰기 때문이다. **1분이 안
+    되는 것만 '45초'로 적는다** - 드물지만 그때 '1분'으로 올리면 실제보다 길게 보인다.
+    """
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return ""
+    if value <= 0:
+        return ""
+    total = round(value)
+    if total < 60:
+        return f"{max(1, total)}초"
+    return f"{round(total / 60)}분"
 
 
 ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류", NO_AUDIO_STATUS}
@@ -131,8 +123,7 @@ TVER_URL_RE = re.compile(
     re.IGNORECASE)
 """클립보드에서 받아들일 TVer 주소.
 
-에피소드와 시리즈만 본다. 전체 일치를 요구해서, 주소가 섞인 긴 글을 복사했을 때
-멋대로 반응하지 않게 한다. 뒤에 붙는 물음표나 조각(#) 부분은 허용한다.
+에피소드와 시리즈만, 전체 일치로 본다 - 주소가 섞인 긴 글에 멋대로 반응하지 않게.
 """
 
 
@@ -146,13 +137,9 @@ MEDIA_URL_RE = re.compile(
     r"^https?://[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?$", re.IGNORECASE)
 """yt-dlp에 넘겨 볼 만한 주소인지 가르는 최소 조건.
 
-yt-dlp가 다루는 사이트는 천 곳이 넘어 목록으로 가릴 수 없다. 여기서 거르려는 것은
-'어느 사이트인가'가 아니라 '애초에 주소가 아닌 것'이다. 잘못 붙여넣은 문장이나
-낱말, 파일 경로가 그대로 넘어가면 카드가 하나 생겼다가 오류로 끝난다.
-
-체계(scheme)를 반드시 요구한다. 없이도 받아 주면 'memo.txt'나 '3.14' 같은 것까지
-점이 든 호스트로 보여 거르는 의미가 없어진다. 호스트에 점을 요구하는 것도 같은
-이유이고, 덕분에 사이트 판단은 여전히 yt-dlp가 한다.
+사이트는 가리지 않는다(yt-dlp가 다루는 곳이 천 곳을 넘는다). 여기서 보는 것은 '애초에
+주소인가'뿐이다. 체계(scheme)를 반드시 요구하지 않으면 'memo.txt'나 '3.14'까지 점이 든
+호스트로 보여 거르는 의미가 없어진다.
 """
 
 
@@ -164,8 +151,7 @@ def is_media_url(text: str) -> bool:
 def resolve_ffprobe_path(ffmpeg_path: str):
     """ffmpeg 경로에서 짝이 되는 ffprobe 경로를 찾는다. 없으면 None.
 
-    같은 폴더에 함께 설치되므로 이름만 바꿔 본다. 확장자가 붙은 경우를 먼저
-    시도해야 'ffmpeg'가 경로 중간에 들어간 설치본에서 엉뚱한 치환을 피할 수 있다.
+    확장자가 붙은 경우를 먼저 본다 - 'ffmpeg'가 경로 중간에 든 설치본에서 엉뚱한 치환을 피한다.
     """
     if not ffmpeg_path:
         return None
@@ -181,8 +167,7 @@ RATE_LIMIT_STATUSES = (403, 429)
 def github_api_headers(user_agent: str) -> Dict[str, str]:
     """GitHub API 호출에 붙이는 공통 헤더.
 
-    User-Agent가 없으면 GitHub이 403으로 막는다. 호출 주체별로 다른 이름을 주면
-    할당량이 어디서 소모됐는지 응답 헤더로 되짚을 수 있다.
+    User-Agent가 없으면 GitHub이 403으로 막는다. 주체별로 다른 이름을 주면 할당량을 되짚을 수 있다.
     """
     return {"Accept": "application/vnd.github+json", "User-Agent": user_agent}
 
@@ -190,8 +175,7 @@ def github_api_headers(user_agent: str) -> Dict[str, str]:
 def is_rate_limited(response) -> bool:
     """호출 한도에 걸린 응답인지 판별한다.
 
-    403은 권한 문제로도 오고 429는 일시적 과부하로도 온다. 둘 다 기다린다고
-    풀리는 게 아니라서, 남은 호출 수가 0이라고 명시된 경우만 한도 초과로 본다.
+    403은 권한 문제로도, 429는 과부하로도 온다. 남은 호출 수가 0이라고 명시된 경우만 본다.
     """
     if response.status_code not in RATE_LIMIT_STATUSES:
         return False
@@ -199,11 +183,7 @@ def is_rate_limited(response) -> bool:
 
 
 def rate_limit_reset_text(response) -> str:
-    """X-RateLimit-Reset(에포크 초)을 사람이 읽을 수 있는 시각으로 바꾼다.
-
-    헤더가 없거나 숫자가 아니면 빈 문자열을 돌려준다. 호출부는 시각 안내를
-    생략하고 나머지 문구만 보이면 된다.
-    """
+    """X-RateLimit-Reset(에포크 초)을 읽을 수 있는 시각으로. 없거나 숫자가 아니면 빈 글."""
     raw = response.headers.get("X-RateLimit-Reset", "")
     try:
         return datetime.fromtimestamp(int(raw)).strftime("%Y-%m-%d %H:%M:%S")
@@ -221,8 +201,8 @@ def rate_limit_message(response) -> str:
 def get_resource_path(relative_path) -> Path:
     """개발 실행과 PyInstaller 번들(onefile/onedir) 양쪽에서 리소스 경로를 돌려준다.
 
-    PyInstaller는 두 모드 모두에서 sys._MEIPASS를 설정한다(onedir은 _internal 폴더).
-    번들이 아닐 때는 현재 작업 디렉터리가 아니라 이 파일이 속한 프로젝트 루트를 쓴다.
+    PyInstaller는 두 모드 모두 sys._MEIPASS를 설정한다(onedir은 _internal 폴더). 번들이
+    아닐 때는 현재 작업 디렉터리가 아니라 이 파일이 속한 프로젝트 루트를 쓴다.
     """
     base = getattr(sys, "_MEIPASS", None)
     if base is None:
@@ -244,14 +224,13 @@ def load_config() -> Dict[str, Any]:
         "filename_order": ["series", "upload_date", "episode_number", "episode", "id"],
         "quality": "bv*+ba/b",
         "preferred_codec": "original",
-        "auto_check_favorites_on_start": True,
+        "auto_check_favorites_on_start": False,
         "auto_update_check": True,
         "always_on_top": False,
         "log_visible": True,
-        "clipboard_watch": False,
-        "conversion_format": "none",
-        "delete_on_conversion": False,
-        "series_exclude_keywords": ["予告", "SP", "ダイジェスト", "ナビ", "解説放送版"],
+        "clipboard_watch": True,
+        "series_exclude_keywords": ["予告", "ティザー", "ダイジェスト", "メイキング",
+                                    "ナビ", "解説放送版"],
         "hardware_encoder": "cpu",
         "embed_thumbnail": False,
         "download_subtitles": True,
@@ -278,7 +257,7 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: dict) -> bool:
-    """설정을 저장하고 성공 여부를 반환합니다. (실패를 조용히 삼키지 않음)"""
+    """설정을 저장하고 성공 여부를 돌려준다. 실패를 조용히 삼키지 않는다."""
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
@@ -333,11 +312,7 @@ def canonicalize_config_parallel(config: Dict[str, Any]) -> int:
 
 
 def canonicalize_config_fragments(config: Dict[str, Any]) -> int:
-    """설정 파일에서 온 조각 수를 쓸 수 있는 값으로 다듬는다.
-
-    canonicalize_config_parallel과 달리 옛 키 이름을 찾지 않는다. 3.4.0에서
-    처음 생긴 설정이라 다른 이름으로 저장된 적이 없다.
-    """
+    """설정 파일에서 온 조각 수를 쓸 수 있는 값으로 다듬는다. 3.4.0에서 생겨 옛 키가 없다."""
     try:
         value = int(float(config.get("concurrent_fragments", DEFAULT_FRAGMENTS)))
     except (ValueError, TypeError):
@@ -348,20 +323,15 @@ def canonicalize_config_fragments(config: Dict[str, Any]) -> int:
 def _choice_value(raw: Any) -> Optional[str]:
     """설정 파일에서 온 선택지 값을 견줄 수 있는 문자열로 만든다.
 
-    **문자열이 아닌 것은 전부 None으로 접는다.** 설정 파일은 손으로 고칠 수 있어
-    목록이나 사전이 들어오기도 하는데, 그것을 그대로 사전 조회에 넘기면 해시가
-    없어 TypeError로 터진다. 값을 다듬는 자리가 입력 때문에 죽으면 안 된다.
+    **문자열이 아닌 것은 전부 None으로 접는다** - 손으로 고친 설정에서 목록이나 사전이
+    들어오는데, 그대로 사전 조회에 넘기면 해시가 없어 TypeError로 터진다.
     """
     return raw.strip().lower() if isinstance(raw, str) else None
 
 
 def _canonicalize_choice(raw: Any, allowed: tuple, retired: Dict[str, str],
                          default: str) -> str:
-    """설정 파일에서 온 선택지 하나를 쓸 수 있는 값으로 다듬는다.
-
-    canonicalize_config_parallel과 같은 자리에 있는 함수다. 다른 점은 자를 범위가
-    아니라 고를 목록이 있다는 것뿐이라, 목록에 없으면 정해 둔 대체값으로 간다.
-    """
+    """설정 파일에서 온 선택지 하나를 다듬는다. 목록에 없으면 정해 둔 대체값으로 간다."""
     value = _choice_value(raw)
     if value in allowed:
         return value
@@ -390,12 +360,8 @@ RETIRED_OPTION_LABELS = {
 def retired_option_notes(config: Dict[str, Any]) -> List[str]:
     """이제 없는 값을 쓰고 있었다면 그 사실을 알릴 문장들을 만든다.
 
-    **load_config에서 값을 갈아 끼우지 않는 이유가 이것이다.** 거기서 고쳐 두면
-    원래 무엇이었는지가 사라져 알릴 내용이 남지 않는다. 조각 수(-N)와 같은
-    방식으로 읽는 자리에서 다듬고, 알리는 일은 창이 켜질 때 한 번만 한다.
-
-    설정 파일에 되쓰지도 않는다. 사용자가 설정을 저장하는 순간 지금 값으로
-    덮이고, 그때까지는 파일을 그대로 두는 편이 무엇을 골랐었는지 되짚기 좋다.
+    **load_config에서 갈아 끼우지 않는 이유가 이것이다** - 거기서 고치면 원래 무엇이었는지가
+    사라져 알릴 내용이 남지 않는다. 설정 파일에 되쓰지도 않는다.
     """
     notes: List[str] = []
     for key, allowed, retired, kind in (

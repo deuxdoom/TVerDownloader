@@ -41,12 +41,12 @@ class HistoryStore:
             self._data = {}; return False
 
     def save(self) -> None:
-        """비동기로 저장을 수행하여 UI 블로킹을 방지합니다."""
+        """비동기로 저장한다. 디스크 쓰기에 UI가 멈추지 않게 하려는 것."""
         data_snapshot = self._data.copy()
         self._executor.submit(self._save_sync, data_snapshot)
 
     def _save_sync(self, data: Dict[str, dict]) -> bool:
-        """실제 디스크 쓰기 작업 (백그라운드에서 실행됨)"""
+        """실제 디스크 쓰기. 백그라운드 스레드에서 돈다."""
         try:
             target = Path(self.path)
             self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ class HistoryStore:
 
     def add(self, url: str, title: str, filepath: Optional[str] = None,
             series_id: Optional[str] = None, thumbnail_url: Optional[str] = None):
-        """기록에 항목을 추가합니다. series_id와 thumbnail_url을 선택적으로 저장합니다."""
+        """기록에 항목을 더한다. series_id·thumbnail_url은 있으면 함께 남긴다."""
         url = (url or "").strip()
         if not url: return
 

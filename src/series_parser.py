@@ -31,8 +31,7 @@ class SeriesParser(QObject):
     def parse(self, context: str, urls: List[str]):
         """분석 대기열에 넣는다. 사용자 요청은 즐겨찾기 확인 앞으로 끼어든다.
 
-        즐겨찾기를 여러 개 확인하는 중에는 대기열이 길어서, 그냥 뒤에 붙이면
-        방금 붙여넣은 시리즈가 몇 분씩 밀린다. 사용자가 기다리는 쪽을 먼저 돌린다.
+        확인 중에는 대기열이 길어서, 뒤에 붙이면 방금 붙여넣은 시리즈가 몇 분씩 밀린다.
         """
         if not self.ytdlp_path:
             self.log.emit(context, "[오류] yt-dlp 경로가 설정되지 않아 시리즈를 분석할 수 없습니다.")
@@ -67,7 +66,7 @@ class SeriesParser(QObject):
         self._thread.start()
 
     def _on_parse_finished(self, series_title: str, episode_urls: List[str]):
-        """스레드 완료 시 결과를 finished 시그널로 보내고 다음 작업을 시작합니다."""
+        """분석이 끝나면 결과를 내보내고 다음 작업을 시작한다."""
         self.finished.emit(self._current_context, self._current_url, series_title, episode_urls or [])
 
         if self._thread:

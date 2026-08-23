@@ -24,12 +24,8 @@ class MainWindowUI:
     MIN_WIDTH_WITH_LOG = 970
     """로그를 편 상태의 최소 창 폭.
 
-    로그가 LOG_PANE_WIDTH로 고정이므로, 그 옆에 다운로드 카드가 잘리지 않고 들어갈
-    폭(548px)과 탭 여백을 더한 값이다. 로그 폭을 줄이면 이 값도 같은 만큼 함께
-    내려야 왼쪽 목록에 돌아가는 폭이 그대로 유지된다. 한쪽만 고치면 최소 폭에서
-    목록이 넓어지거나(로그만 줄임) 카드가 눌린다(최소 폭만 줄임).
-
-    로그를 접으면 MIN_WIDTH로 돌아가 좁은 화면에서도 쓸 수 있다.
+    로그가 LOG_PANE_WIDTH로 고정이라, 그 옆에 카드가 잘리지 않고 들어갈 폭(548px)과 탭
+    여백을 더한 값이다. **로그 폭을 바꾸면 이 값도 같은 만큼 함께 움직인다.**
     """
     MIN_HEIGHT = 620
     DEFAULT_WIDTH = 1100
@@ -38,16 +34,14 @@ class MainWindowUI:
     TAB_ICONS = (("download", "ctx_download", "받는 중인 영상 목록"),
                  ("tab_history", "ctx_history", "지금까지 받은 영상"),
                  ("tab_favorites", "ctx_favorites", "새 회차를 챙길 시리즈"))
-    """탭마다 (아이콘, 강조색, 툴팁). 탭 이름만으로는 무엇이 담기는지 애매해서
-    한 줄 설명을 붙인다. 이름 옆에 늘 붙여 두기에는 탭 줄이 길어진다."""
+    """탭마다 (아이콘, 강조색, 툴팁). 이름만으로는 무엇이 담기는지 애매해 설명을 붙인다."""
     FAV_COLUMNS = 2
     FAV_MIN_CARD_WIDTH = 340
     LOG_PANE_WIDTH = 390
     """로그 패널 고정 폭.
 
-    로그는 읽고 지나가는 곳이라 목록보다 좁아도 된다. 480px일 때는 최소 폭 창에서
-    화면의 45%를 가져가 정작 카드가 뒤로 밀렸다. 바꿀 때는 MIN_WIDTH_WITH_LOG도
-    같은 만큼 움직인다.
+    480px일 때는 최소 폭 창에서 화면의 45%를 가져가 카드가 뒤로 밀렸다. 바꿀 때는
+    MIN_WIDTH_WITH_LOG도 같은 만큼 움직인다.
     """
 
     LEFT_PANE_MIN_WIDTH = 360
@@ -59,15 +53,13 @@ class MainWindowUI:
     HEADER_ROW_HEIGHT = 32
     """탭 제목 줄의 높이. 줄 안에 무엇이 들어가든 이 높이로 고정한다.
 
-    줄 높이는 그 안에서 가장 큰 위젯이 정한다. 탭마다 놓이는 위젯이 달라
-    그대로 두면 아이콘 버튼(32)이 있는 탭과 입력칸(31)만 있는 탭의 높이가
-    1px 어긋나고, 그만큼 아래 목록 상자가 위아래로 튄다.
+    그대로 두면 아이콘 버튼(32)이 있는 탭과 입력칸(31)만 있는 탭이 1px 어긋나고, 그만큼
+    아래 목록 상자가 위아래로 튄다.
     """
 
     SEARCH_INPUT_WIDTH = 200
     FAV_INPUT_WIDTH = 280
-    """시리즈 URL은 190px 남짓이라 입력칸이 이만큼이면 충분하다.
-    남는 폭을 다 먹게 두면 옆 버튼들이 화면 끝으로 밀려 읽기 어렵다."""
+    """시리즈 URL은 190px 남짓이라 이만큼이면 충분하다. 다 먹게 두면 옆 버튼이 밀린다."""
 
     SHORTCUT_HINT_BUTTONS = {
         "open_settings": "settings_button",
@@ -76,7 +68,6 @@ class MainWindowUI:
     """툴팁 끝에 지금 걸린 조합을 붙일 버튼.
 
     조합을 사용자가 바꿀 수 있게 된 이상 지금 값이 화면 어딘가에는 보여야 한다.
-    툴팁이 그 자리로 가장 방해가 적고, 버튼이 곧 그 동작이라 설명이 따로 없어도 된다.
     """
 
     def _tab_page(self, object_name: str):
@@ -95,10 +86,7 @@ class MainWindowUI:
         return label
 
     def _hide_focus_rect(self, list_widget):
-        """고른 행에 사각 초점 선이 그려지지 않게 한다(`NoFocusDelegate`).
-
-        델리게이트를 목록의 자식으로 두어 목록과 수명을 같이하게 한다.
-        """
+        """고른 행에 사각 초점 선이 그려지지 않게 한다. 델리게이트는 목록과 수명을 같이한다."""
         list_widget.setItemDelegate(NoFocusDelegate(list_widget))
 
     def _add_empty_state(self, list_widget, icon_name, title, description,
@@ -171,19 +159,12 @@ class MainWindowUI:
         self._paint_icon(self.theme_button)
 
     def set_primary_action_enabled(self, enabled: bool):
-        """다운로드 버튼의 아이콘 색을 활성 상태에 맞춘다.
-
-        primary_fg 아이콘을 비활성 배경에 그대로 두면 보이지 않는다.
-        """
+        """다운로드 버튼의 아이콘 색을 활성 상태에 맞춘다. primary_fg는 비활성 배경에서 안 보인다."""
         self.add_button.setProperty("icon_color_key", "primary_fg" if enabled else "text_dim")
         self._paint_icon(self.add_button)
 
     def _apply_title_logo(self):
-        """헤더 제목을 로고 이미지로 채운다.
-
-        파일이 없거나 읽지 못하면 글자 제목으로 되돌아가므로, 로고가 빠져도
-        앱은 그대로 쓸 수 있다.
-        """
+        """헤더 제목을 로고 이미지로 채운다. 못 읽으면 글자 제목으로 되돌아간다."""
         dpr = self.main_window.devicePixelRatioF() or 1.0
         pixmap = build_logo(self._theme, LOGO_HEIGHT, dpr)
         if pixmap is None:
@@ -198,8 +179,7 @@ class MainWindowUI:
     def _set_hinted_tooltip(self, attribute: str, base: str):
         """원래 문구를 기억해 두고, 뒤에 지금 걸린 조합을 붙여 툴팁으로 넣는다.
 
-        이미 붙은 문자열에 다시 붙이면 설정을 열고 닫을 때마다 조합이 줄줄이
-        쌓인다. 문구와 조합을 따로 들고 있다가 불릴 때마다 새로 만든다.
+        이미 붙은 문자열에 다시 붙이면 설정을 열고 닫을 때마다 조합이 줄줄이 쌓인다.
         """
         self._shortcut_hint_bases[attribute] = base
         hint = self._shortcut_hints.get(attribute, "")
@@ -208,10 +188,8 @@ class MainWindowUI:
     def apply_shortcut_hints(self, table: dict):
         """버튼 툴팁 끝에 지금 걸린 조합을 붙인다.
 
-        조합만 따로 적어 두고 문구는 버튼이 지금 들고 있는 것을 그대로 쓴다. 로그
-        토글처럼 상태에 따라 문구가 바뀌는 버튼이 있어, 처음 문구를 고정으로 잡아
-        두면 바뀐 뒤에 엉뚝한 안내가 남는다. 조합을 비워 둔 동작은 붙일 것이 없으므로
-        원래 문구로 되돌린다.
+        문구는 버튼이 지금 들고 있는 것을 쓴다 - 로그 토글처럼 상태에 따라 문구가 바뀌는
+        버튼이 있어, 처음 문구를 고정으로 잡으면 바뀐 뒤에 엉뚱한 안내가 남는다.
         """
         for key, attribute in self.SHORTCUT_HINT_BUTTONS.items():
             button = getattr(self, attribute, None)
@@ -284,8 +262,7 @@ class MainWindowUI:
     def refresh_tab_icons(self):
         """선택된 탭만 진하게 칠한다.
 
-        QTabBar는 QIcon의 Selected 모드를 쓰지 않아서, 선택이 바뀔 때마다
-        해당 색으로 새로 만들어 넣어야 한다.
+        QTabBar는 QIcon의 Selected 모드를 쓰지 않아 선택이 바뀔 때마다 새로 만들어 넣는다.
         """
         current = self.tabs.currentIndex()
         for index, (name, ctx_key, _tooltip) in enumerate(self.TAB_ICONS):
@@ -303,9 +280,8 @@ class MainWindowUI:
     def _create_download_tab(self):
         """다운로드 목록과 로그를 좌우로 놓는다.
 
-        로그는 폭을 고정한다. 스플리터로 사용자가 끌어 줄일 수 있게 두면 그때마다
-        복원할 폭을 기억해야 하고, 창이 뜨기 전에는 그 값을 신뢰할 수 없어 상태가
-        어긋난다. 고정폭이면 그 부류의 문제가 처음부터 생기지 않는다.
+        로그는 폭을 고정한다. 스플리터로 두면 복원할 폭을 기억해야 하는데, 창이 뜨기
+        전에는 그 값을 믿을 수 없어 상태가 어긋난다.
         """
         tab, layout = self._tab_page("DownloadTab")
         panes = QHBoxLayout(); panes.setContentsMargins(0, 0, 0, 0)
@@ -319,12 +295,12 @@ class MainWindowUI:
             "지난 실행에서 남은 대기 항목을 지금부터 받습니다.\n"
             "TVer는 일본 지역 제한이 있으니 VPN을 켠 뒤에 누르십시오.")
         self.queue_start_button.setVisible(False)
-        self.cancel_selected_button = QPushButton("선택 항목 취소")
+        self.cancel_selected_button = QPushButton("선택 항목 취소", objectName="DangerButton")
         self.cancel_selected_button.setToolTip(
             "진행 중인 항목은 중지하고, 대기 중인 항목은 대기열에서 뺍니다.\n"
             "여러 개를 선택하면 한 번에 처리합니다.")
         self.cancel_selected_button.setEnabled(False)
-        self.clear_completed_button = QPushButton("완료 항목 삭제")
+        self.clear_completed_button = QPushButton("완료 항목 삭제", objectName="CautionButton")
         self.queue_count_label = QLabel("0 대기 / 0 진행", objectName="PaneSubtitle")
         self.log_toggle_btn = self._make_icon_button("log", "로그 숨기기")
         row.addWidget(self._make_pane_title("다운로드 목록")); row.addStretch(1)
@@ -364,24 +340,17 @@ class MainWindowUI:
     def set_queue_start_visible(self, visible: bool):
         """`대기열 시작`을 되살린 항목이 있을 때만 보인다.
 
-        늘 두면 제목 줄이 그만큼 넓어져 최소 폭 창에서 옆의 단추들이 눌린다.
-        되살린 것이 없을 때는 눌러도 할 일이 없는 단추라, 있어야 할 때만 자리를
-        차지하는 편이 낫다.
-
-        **이 단추만 아이콘이 없는 것도 폭 때문이다.** 최소 폭 창에서 왼쪽 목록에
-        돌아가는 폭은 548px이고, 제목 줄은 이 단추를 빼면 412px로 넉넉하다.
-        아이콘을 달면 단추가 110px이 되어 줄이 530px까지 차는데, 개수 라벨은
-        숫자가 늘면 함께 넓어진다 — `120 대기 / 20 진행`에서 550px이 되어 넘친다
-        (실측). 아이콘을 떼면 86px이라 `9999 대기 / 999 진행`에서도 543px로
-        들어간다. 같은 줄의 다른 두 단추도 아이콘이 없어 모양도 어긋나지 않는다.
+        늘 두면 제목 줄이 넓어져 최소 폭 창에서 옆 단추들이 눌린다. **이 단추만 아이콘이
+        없는 것도 폭 때문이다** - 아이콘을 달면 단추가 110px이 되어 `120 대기 / 20 진행`
+        에서 550px로 넘친다(목록 폭 548px). 떼면 86px이라 네 자리 수에서도 들어간다.
         """
         self.queue_start_button.setVisible(visible)
 
     def set_log_visible(self, visible: bool):
         """로그 패널을 접거나 편다. 폭이 고정이라 되돌릴 상태가 없다.
 
-        편 상태에서는 창 최소 폭도 함께 올린다. 그러지 않으면 좁은 창에서
-        고정폭 로그가 목록을 밀어내 카드가 잘린다.
+        편 상태에서는 창 최소 폭도 함께 올린다 - 안 그러면 좁은 창에서 고정폭 로그가
+        목록을 밀어내 카드가 잘린다.
         """
         self.log_pane.setVisible(visible)
         self.main_window.setMinimumWidth(
@@ -427,9 +396,9 @@ class MainWindowUI:
         row.addStretch(1)
         self.fav_input = QLineEdit(placeholderText="https://tver.jp/series/...")
         self.fav_input.setFixedWidth(self.FAV_INPUT_WIDTH)
-        self.fav_add_btn = QPushButton("추가")
+        self.fav_add_btn = QPushButton("추가", objectName="AddButton")
         self.fav_del_btn = QPushButton("삭제", objectName="DangerButton")
-        self.fav_chk_btn = QPushButton("갱신")
+        self.fav_chk_btn = QPushButton("갱신", objectName="RefreshButton")
         self.fav_chk_btn.setToolTip("등록한 시리즈를 모두 확인해 새로 올라온 회차를 찾습니다.")
         self.fav_search_input = self._make_search_input()
         for widget in (self.fav_input, self.fav_add_btn, self.fav_del_btn,
@@ -446,8 +415,8 @@ class MainWindowUI:
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.fav_empty = self._add_empty_state(
             self.fav_list, "tab_favorites", "담아 둔 시리즈가 없습니다",
-            "시리즈 주소를 담아 두면 프로그램을 켤 때 새 회차를 찾아 줍니다. "
-            "설정 > 일반에서 끌 수 있습니다.",
+            "시리즈 주소를 담아 두고 위의 갱신을 누르면 새 회차를 찾아 줍니다. "
+            "프로그램을 켤 때 자동으로 찾게 하려면 설정 > 일반에서 켜십시오.",
             "찾는 시리즈가 없습니다", "다른 낱말로 찾아보세요.")
         layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, "즐겨찾기")
 
@@ -456,22 +425,9 @@ class MainWindowUI:
     def setup_tray(self, app_version):
         """트레이 아이콘과 우클릭 메뉴를 만든다.
 
-        첫 항목은 '<앱 이름> 열기'이고 누르면 창이 돌아온다. 트레이 메뉴를 열었다는
-        것은 대개 창을 다시 보려던 것이라 가장 자주 쓰는 동작을 맨 위에 둔다. 이름만
-        적어 두면 제목처럼 읽혀 눌러도 되는 줄인지 알기 어려워서 '열기'를 붙인다.
-        굵게 표시해 기본 동작임을 함께 보인다.
-
-        구분선은 둘만 쓴다. 항목마다 그으면 다섯 줄짜리 메뉴가 선으로 더 채워져
-        오히려 읽기 어렵다. 창을 여는 일 / 설정에 해당하는 것들 / 끝내는 일, 이렇게
-        성격이 다른 세 덩이만 가른다. 종료를 따로 떼는 것은 되돌릴 수 없는 동작이라
-        위 항목을 누르려다 잘못 짚는 것을 막기 위해서다.
-
-        시작 프로그램 체크는 열 때마다 레지스트리를 다시 읽는다(aboutToShow).
-        다른 프로그램이나 작업 관리자에서 꺼 놓았을 수 있는데, 앱이 마지막으로 쓴
-        값을 기억해 두면 실제와 다른 상태를 보여 주게 된다.
-
-        설정은 창을 되살리지 않고 바로 연다. 트레이에 넣어 둔 채로 동시 다운로드 수만
-        바꾸고 싶은 경우가 있어서, 창까지 끌어내면 하던 일을 되돌려 놓아야 한다.
+        첫 항목은 '<앱 이름> 열기'다 - 이름만 적으면 제목처럼 읽혀 눌러도 되는 줄인지
+        알기 어렵다. 구분선은 여는 일 / 설정 / 끝내는 일 세 덩이만 가른다. 시작 프로그램
+        체크는 열 때마다 레지스트리를 다시 읽는다 - 밖에서 꺼 놓았을 수 있다.
         """
         tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
         self._tray_name = f"{localized_app_name()} {app_version}"
@@ -510,18 +466,9 @@ class MainWindowUI:
     def update_tray_status(self, queued: int, active: int, percent=None):
         """트레이 툴팁을 지금 상태로 바꾼다.
 
-        커서를 올려야 보이는 자리라, 평소에는 앱 이름만 두고 받는 중일 때만 줄을
-        늘린다. 아무것도 안 하는데 '0 대기 / 0 진행'이 붙어 있으면 읽을 것이
-        늘기만 하고 알려 주는 것은 없다.
-
-        진행률은 실제로 도는 것이 있을 때만 붙는다(percent가 None이면 뺀다).
-        줄만 서 있고 아직 아무것도 시작하지 않았으면 '0 진행'이 이미 그 말을 하고
-        있어서, 뒤에 붙는 '0%'는 더 알려 주는 것 없이 읽을 것만 늘린다. 준비가
-        끝나지 않았거나 폴더가 없어서 대기열이 그대로 서 있는 동안 계속 보이는
-        줄이기도 하다.
-
-        고리도 같은 값으로 함께 바꾼다. 커서를 올려야 보이는 툴팁과 늘 보이는
-        고리가 다른 숫자를 말하면 어느 쪽을 믿어야 할지 알 수 없다.
+        커서를 올려야 보이는 자리라 평소에는 앱 이름만 두고, 받는 중일 때만 줄을 늘린다.
+        진행률은 실제로 도는 것이 있을 때만 붙는다(percent가 None이면 뺀다). 늘 보이는
+        고리도 같은 값으로 바꾼다 - 둘이 다른 숫자를 말하면 어느 쪽을 믿을지 알 수 없다.
         """
         lines = [self._tray_name]
         if queued or active:
@@ -531,10 +478,7 @@ class MainWindowUI:
         self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))
 
     def sync_autostart_check(self):
-        """레지스트리에 걸린 실제 상태로 체크 표시를 맞춘다.
-
-        toggled 신호가 다시 돌아 레지스트리를 또 쓰지 않도록 잠시 끊는다.
-        """
+        """레지스트리의 실제 상태로 체크를 맞춘다. toggled가 되돌아 또 쓰지 않게 잠시 끊는다."""
         self.autostart_action.blockSignals(True)
         self.autostart_action.setChecked(autostart.is_enabled())
         self.autostart_action.blockSignals(False)

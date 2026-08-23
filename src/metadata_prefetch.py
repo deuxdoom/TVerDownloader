@@ -1,18 +1,11 @@
 """대기열에 서 있는 항목의 정보를 미리 받아 두는 조정자.
 
-**한 번에 하나씩만 물어본다.** 대기열에 스무 개가 있다고 스무 개를 한꺼번에
-물으면, 그 순간 받고 있는 영상과 회선을 나눠 쓰게 된다. 조회 쪽이 느려지는
-것으로 끝나지 않는다 — ytdlp_run 주석에 적힌 `Read timed out`이 바로 그
-상황에서 났고, 그때 실패하는 것은 조회가 아니라 **받는 쪽**일 수도 있다.
-줄 세워 하나씩 던지면 늘어나는 부하가 언제나 질의 하나뿐이다.
+**한 번에 하나씩만 물어본다.** 스무 개를 한꺼번에 물으면 그 순간 받고 있는 영상과 회선을
+나눠 쓰고, 그때 실패하는 것이 조회가 아니라 받는 쪽일 수도 있다(ytdlp_run의 Read timed out).
 
-**받아 둔 것은 그대로 DownloadThread에 넘어간다**(take). 그래서 미리 묻기가
-통신을 두 배로 늘리지 않고 앞당기기만 한다. 미리 묻지 못한 항목은 예전처럼
-받기 직전에 DownloadThread가 스스로 묻는다.
-
-**차례가 온 항목은 기다리지 않고 버린다.** 마침 그 항목을 묻고 있었다면 질의를
-죽이고 받기부터 시작한다. 조회가 끝나기를 기다리면 미리 묻기가 다운로드를
-늦추는 셈이 되는데, 그건 이 기능이 하려던 것과 정반대다.
+**받아 둔 것은 그대로 DownloadThread에 넘어간다**(take). 그래서 통신이 두 배가 되지 않고
+앞당겨지기만 한다. 차례가 온 항목은 기다리지 않고 버린다 - 기다리면 미리 묻기가 다운로드를
+늦추는 셈이 되는데, 이 기능이 하려던 것과 정반대다.
 """
 
 from typing import Callable, Dict, List, Optional
@@ -31,8 +24,8 @@ class MetadataPrefetcher(QObject):
     STOP_WAIT_MS = 2000
     """그만두라고 한 뒤 질의 스레드를 기다리는 시간.
 
-    프로세스를 죽이면 곧바로 빠져나오므로 넉넉한 값이다. 그래도 기다리는 것은
-    도는 QThread를 남긴 채 앱이 끝나면 그 자리에서 죽기 때문이다.
+    프로세스를 죽이면 곧바로 빠져나온다. 그래도 기다리는 것은 도는 QThread를 남긴 채 앱이
+    끝나면 그 자리에서 죽기 때문이다.
     """
 
     def __init__(self, parent=None):
@@ -50,8 +43,7 @@ class MetadataPrefetcher(QObject):
     def set_ytdlp_path(self, path: str):
         """준비가 끝나 yt-dlp를 쓸 수 있게 되면 알려 준다.
 
-        준비 전에 담긴 주소는 그대로 기다린다. 트레이로 시작해 로그인과 함께
-        뜨는 경우 준비보다 주소가 먼저 들어올 수 있다.
+        준비 전에 담긴 주소는 그대로 기다린다 - 트레이로 시작하면 주소가 먼저 들어올 수 있다.
         """
         self.ytdlp_path = path
         self._pump()
@@ -62,9 +54,8 @@ class MetadataPrefetcher(QObject):
     def set_wanted_check(self, predicate: Callable[[str], bool]):
         """아직 이 항목의 정보가 필요한지 물어볼 곳을 걸어 둔다.
 
-        담아 둔 목록과 실제 대기열이 어긋날 여지를 없앤다. 취소를 빠뜨린 자리가
-        하나라도 있으면 이미 받기 시작했거나 목록에서 지운 주소를 뒤늦게
-        물어보게 되는데, 그건 아무도 보지 않을 답을 위해 회선을 쓰는 일이다.
+        담아 둔 목록과 실제 대기열이 어긋날 여지를 없앤다. 취소를 빠뜨린 자리가 하나라도
+        있으면 아무도 보지 않을 답을 위해 회선을 쓴다.
         """
         self._is_wanted = predicate
 
@@ -80,8 +71,7 @@ class MetadataPrefetcher(QObject):
     def take(self, url: str) -> Optional[dict]:
         """받아 둔 정보를 넘기고 그 항목에 대한 미리 묻기를 끝낸다.
 
-        받기 시작하는 자리에서 부른다. 담아 둔 것이 있으면 그대로 쓰고, 마침
-        묻고 있었다면 그 질의를 죽인다. 어느 쪽이든 이 주소로는 더 묻지 않는다.
+        받기 시작하는 자리에서 부른다. 마침 묻고 있었다면 그 질의를 죽인다.
         """
         metadata = self._cache.pop(url, None)
         if metadata is None:
@@ -134,13 +124,9 @@ class MetadataPrefetcher(QObject):
     def _reap(self):
         """다 돈 질의 스레드를 거둔다.
 
-        지워진 것부터 걸러 낸다. 빼먹으면 isFinished()가 RuntimeError를 내는데,
-        슬롯 안의 예외라 PyQt6가 잡지 못해 앱이 그대로 죽는다(썸네일 스레드에서
-        실제로 겪은 것과 같은 자리다).
-
-        거두는 일을 loaded/failed 쪽에 두지 않는 것은, 그 신호가 run()의 마지막
-        줄에서 나와 아직 스레드가 도는 중일 수 있어서다. QThread.finished는
-        run()이 정말로 끝난 뒤에만 온다.
+        지워진 것부터 걸러 낸다 - 빼먹으면 isFinished()가 RuntimeError를 내는데 슬롯 안의
+        예외라 PyQt6가 잡지 못해 앱이 죽는다. 거두는 일을 loaded/failed에 두지 않는 것은
+        그 신호가 run()의 마지막 줄에서 나와 아직 스레드가 도는 중일 수 있어서다.
         """
         alive = []
         for thread in self._retiring:

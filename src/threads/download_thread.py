@@ -9,16 +9,13 @@ from src.threads import ytdlp_run
 MAX_PATH_LEN = 250
 """저장 경로 전체에 허용하는 최대 길이.
 
-윈도우 기본 제한은 260자다. TVer는 영상과 음성을 따로 받아 합치는데 음성 쪽
-임시 파일명이 본편보다 길어서 먼저 걸리므로, 그만큼 여유를 두고 잘라 둔다.
+윈도우 기본 제한은 260자인데, TVer는 음성 쪽 임시 파일명이 본편보다 길어 먼저 걸린다.
 """
 
 MIN_NAME_LEN = 10
 """이름을 줄일 때 남겨 두는 최소 글자 수.
 
-여기까지 줄여도 길면 더 깎지 않는다. 두 글자짜리 이름은 어느 회차인지 알아볼
-수 없어서, 경로가 조금 넘치더라도 알아볼 수 있는 편이 낫다. 그래서 이 함수는
-'반드시 max_len 안에 넣는' 것이 아니라 '할 수 있는 만큼 줄이는' 것이다.
+여기까지 줄여도 길면 더 깎지 않는다 - 두 글자짜리 이름은 어느 회차인지 알아볼 수 없다.
 """
 
 
@@ -26,18 +23,9 @@ def shorten_long_path(full_dir: str, path_without_ext: str, ext: str,
                       max_len: int = MAX_PATH_LEN):
     """경로가 너무 길면 이름을 줄인다. (전체 경로, 줄인 상대 경로)를 돌려준다.
 
-    줄이지 않았으면 둘째 값이 None이다. 부르는 쪽은 그걸로 안내 로그를 낼지 정한다.
-
-    **회차 이름부터 줄이고 시리즈 폴더는 마지막에 손댄다.** 폴더 이름을 먼저 깎으면
-    같은 시리즈가 서로 다른 폴더로 흩어진다. 회차 이름은 그 폴더 안에서만 다르면
-    되므로 잃는 것이 적다.
-
-    **폴더 구분자는 그대로 둔다.** rpartition의 sep을 다시 끼워 넣는 이유가 이것이다.
-    구분자를 잃으면 시리즈 폴더가 사라지고 파일이 최상위에 쏟아진다.
-
-    순수 함수로 떼어 둔 것은 이 계산이 파일 시스템도 yt-dlp도 건드리지 않기
-    때문이다. 원래는 _build_final_filepath 안에 묻혀 있어서 극단적으로 긴 이름을
-    넣어 보려면 다운로드를 통째로 돌려야 했다.
+    줄이지 않았으면 둘째 값이 None이다. **회차 이름부터 줄이고 시리즈 폴더는 마지막에
+    손댄다** - 폴더를 먼저 깎으면 같은 시리즈가 서로 다른 폴더로 흩어진다. 폴더 구분자는
+    그대로 둔다(잃으면 파일이 최상위에 쏟아진다).
     """
     full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
     if len(full_path) <= max_len:
@@ -69,9 +57,7 @@ class DownloadThread(QThread):
                                    "embed the thumbnail")
     """썸네일 임베드 실패를 알리는 yt-dlp 출력 조각.
 
-    이 후처리가 실패하면 yt-dlp는 종료 코드 1로 끝난다. 영상 파일은 이미 병합까지
-    끝나 멀쩡한데도 그렇다. 표지 그림 하나 때문에 정상 다운로드를 실패로 만들지
-    않으려고, 이 경우만 따로 알아본다.
+    이 후처리가 실패하면 영상은 병합까지 끝나 멀쩡한데도 yt-dlp가 종료 코드 1로 끝난다.
     """
 
     THUMBNAIL_SIDECAR_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg")
@@ -79,16 +65,14 @@ class DownloadThread(QThread):
     FORMAT_COUNT_RE = re.compile(r"Downloading\s+\d+\s+format\(s\):\s*(\S+)")
     """yt-dlp가 무엇을 받을지 알리는 줄. 받기 전에 한 번 나온다.
 
-    `Downloading 1 format(s): 401+251`이면 영상과 소리를 따로 받아 합치고,
-    `Downloading 1 format(s): 18`이면 소리까지 든 파일 하나를 받는다. 몇 조각을
-    받는지는 이 줄 말고는 미리 알 방법이 없다.
+    `401+251`이면 영상과 소리를 따로 받아 합치고 `18`이면 소리까지 든 하나를 받는다.
+    몇 조각을 받는지는 이 줄 말고 미리 알 방법이 없다.
     """
 
     DEFAULT_PARTS = 2
     """위 줄을 못 봤을 때 가정하는 조각 수.
 
-    TVer는 늘 영상과 소리를 따로 준다. 못 읽었을 때 1로 두면 영상만으로 100%가
-    찼다가 소리를 받으면서 0으로 떨어지므로, 안전한 쪽인 2로 둔다.
+    TVer는 늘 둘로 준다. 1로 두면 영상만으로 100%가 찼다가 소리를 받으며 0으로 떨어진다.
     """
 
     COMPONENT_NAMES = ("비디오", "오디오")
@@ -97,15 +81,9 @@ class DownloadThread(QThread):
     SIDECAR_WRITE_RE = re.compile(r"^\[info\]\s+Writing\s+.+?\s+to:\s*(.+)$")
     """본편이 아닌 파일을 만들기 직전에 yt-dlp가 내는 줄. 그 경로를 잡아낸다.
 
-    자막은 본편보다 **먼저** 받는다. 그런데 자막도 `[download] Destination:`과
-    0->100% 진행률을 본편과 똑같이 내놓아서, Destination 줄 수만 세면 34KB짜리
-    자막이 영상 자리를 차지한다. 그러면 진행바가 눈 깜짝할 사이 50%까지 차오르고
-    정작 영상을 받는 내내 '오디오 다운로드 중'으로 보인다(자막 있는 TVer 드라마
-    실측). 표지 그림·설명·정보 JSON도 같은 줄을 쓰므로 함께 걸린다.
-
-    Destination 줄만 보고는 본편과 구별할 방법이 없다. 확장자로 가리는 것은
-    사이트마다 규칙이 달라 믿을 수 없고(유튜브는 소리를 .webm으로 준다),
-    그래서 yt-dlp가 스스로 알려 주는 이 줄을 쓴다.
+    자막도 Destination과 0->100% 진행률을 본편과 똑같이 내면서 본편보다 먼저 온다. 줄 수만
+    세면 34KB짜리 자막이 첫 조각 자리를 차지해 진행바가 순식간에 50%까지 찬다. 확장자로
+    가리면 사이트마다 규칙이 달라 믿을 수 없어(유튜브는 소리를 .webm으로 준다) 이 줄을 쓴다.
     """
 
     def __init__(self, url: str, download_folder: str, ytdlp_exe_path: str, ffmpeg_exe_path: str,
@@ -140,9 +118,7 @@ class DownloadThread(QThread):
         self._preloaded_metadata: Dict = preloaded_metadata or {}
         """대기열에서 기다리는 동안 미리 받아 둔 영상 정보.
 
-        있으면 다시 묻지 않는다. 같은 질의를 같은 조건으로 던져 얻은 것이라
-        결과가 다를 이유가 없고, 두 번 묻는 것은 받는 쪽과 회선을 나눠 쓰는
-        일만 늘린다. 못 받아 왔으면 비어 있고, 그때는 예전처럼 여기서 묻는다.
+        있으면 다시 묻지 않는다 - 같은 질의를 같은 조건으로 던져 얻은 것이라 다를 이유가 없다.
         """
 
     def stop(self):
@@ -178,7 +154,7 @@ class DownloadThread(QThread):
         self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
 
     def _convert_vtt_to_srt(self, vtt_filepath: Path):
-        """FFmpeg를 사용하여 VTT 파일을 SRT 파일로 변환하고 원본 VTT를 삭제합니다."""
+        """VTT를 SRT로 바꾸고 원본 VTT를 지운다."""
         if not vtt_filepath.exists():
             self.progress.emit(self.url, {"log": f"[오류] SRT 변환 대상 VTT 파일을 찾지 못함: {vtt_filepath}"})
             return
@@ -214,7 +190,9 @@ class DownloadThread(QThread):
         if not self._metadata:
             self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."}); return False
 
-        self.progress.emit(self.url, {"title": self._metadata.get("title", "제목 없음"), "thumbnail": self._metadata.get("thumbnail")})
+        self.progress.emit(self.url, {"title": self._metadata.get("title", "제목 없음"),
+                                      "thumbnail": self._metadata.get("thumbnail"),
+                                      "duration": self._metadata.get("duration")})
         self._final_filepath = self._build_final_filepath(self._metadata)
         command = self._build_command(self._final_filepath)
         popen_kwargs: Dict[str, Any] = {}
@@ -260,14 +238,9 @@ class DownloadThread(QThread):
     def _begin_destination(self, path: str):
         """Destination 한 줄을 받아, 지금부터 받는 것이 몇 번째 조각인지 정한다.
 
-        파일 이름으로 영상인지 소리인지 가리던 것을 순서 세기로 바꿨다. 이름
-        규칙이 사이트마다 달라서다 — 유튜브는 소리를 `.f251.webm`으로 내놓아
-        `.m4a`도 `audio`도 걸리지 않고 영상으로 잘못 잡혔다.
-
-        본편이 아닌 파일은 앞뒤 양쪽에서 끼어든다. 자막은 본편보다 **먼저**,
-        표지 그림은 뒤에 온다. 앞의 것을 세면 진행률이 절반을 건너뛰고 구간
-        이름까지 한 칸씩 밀리고, 뒤의 것을 세면 마지막 구간을 0부터 다시 그려
-        진행률이 되돌아간다. 어느 쪽이든 `_aside`를 세워 진행률 보고를 멈춘다.
+        파일 이름이 아니라 순서로 센다 - 유튜브는 소리를 `.f251.webm`으로 내놓아 이름
+        규칙으로는 영상으로 잘못 잡힌다. 본편이 아닌 것(자막은 앞, 표지 그림은 뒤)은
+        `_aside`를 세워 진행률 보고를 멈춘다.
         """
         if path in self._sidecar_paths or self._part_index >= self._parts - 1:
             self._aside = True
@@ -281,13 +254,8 @@ class DownloadThread(QThread):
     def _overall_percent(self, raw: float) -> Optional[float]:
         """조각 하나의 진행률을 항목 전체 기준(0~100)으로 옮긴다.
 
-        yt-dlp는 조각마다 0->100을 새로 센다. 조각 수를 아는 곳이 여기뿐이라
-        환산도 여기서 한다. 화면 쪽은 이미 전체 기준인 값을 받으므로 사이트마다
-        다른 사정을 몰라도 된다.
-
-        본편이 아닌 파일에는 None을 준다. 부르는 쪽이 percent를 빼고 보내면
-        화면은 마지막 값을 그대로 지킨다. 아직 첫 조각도 시작하지 않았다면
-        (본편보다 먼저 오는 자막을 받는 중이다) 마찬가지로 알리지 않는다.
+        yt-dlp는 조각마다 0->100을 새로 센다. 조각 수를 아는 곳이 여기뿐이라 환산도 여기서
+        한다. 본편이 아니거나 첫 조각 전이면 None을 주어 화면이 마지막 값을 지키게 한다.
         """
         if self._aside or self._part_index < 0:
             return None
@@ -296,10 +264,7 @@ class DownloadThread(QThread):
         return max(0.0, min(100.0, start + span * max(0.0, min(100.0, raw)) / 100.0))
 
     def _cleanup_thumbnail_sidecars(self):
-        """임베드가 실패해 남은 표지 이미지를 지운다.
-
-        완료로 처리하는 이상 영상 옆에 쓰지도 않을 그림 파일을 남기지 않는다.
-        """
+        """임베드가 실패해 남은 표지 이미지를 지운다. 완료로 처리하는 이상 남길 이유가 없다."""
         target = Path(self._final_filepath)
         removed = []
         for suffix in self.THUMBNAIL_SIDECAR_SUFFIXES:
@@ -317,8 +282,7 @@ class DownloadThread(QThread):
     def _has_audio_stream(self, filepath: str) -> Optional[bool]:
         """음성 트랙이 들어 있는지 본다. True/False, 확인 불가면 None.
 
-        None은 '없다'가 아니라 '모른다'는 뜻이다. ffprobe가 없거나 실행이 실패했다고
-        멀쩡한 다운로드를 실패로 만들면 안 되므로, 호출부는 None을 통과로 다룬다.
+        None은 '없다'가 아니라 '모른다'는 뜻이다 - 호출부는 통과로 다룬다.
         """
         ffprobe_path = resolve_ffprobe_path(self.ffmpeg_full_exe_path)
         if not ffprobe_path:
@@ -348,9 +312,8 @@ class DownloadThread(QThread):
     def _warn_missing_audio(self):
         """음성이 빠진 이유를 짐작해 로그에 남긴다.
 
-        TVer는 2025년 3월 사양 변경 이후 영상과 음성을 따로 내려받아 합치는데,
-        음성 쪽 임시 파일명이 더 길어서 Windows 경로 길이 제한에 먼저 걸린다.
-        그러면 yt-dlp는 0으로 끝나고 영상만 남아 겉보기에는 성공처럼 보인다.
+        TVer는 2025년 3월 사양 변경 이후 영상과 음성을 따로 받아 합치는데, 음성 쪽 임시
+        파일명이 길어 경로 제한에 먼저 걸린다. 그러면 yt-dlp는 0으로 끝나고 영상만 남는다.
         """
         length = len(self._final_filepath)
         self.progress.emit(self.url, {"log": (
@@ -364,17 +327,11 @@ class DownloadThread(QThread):
     METADATA_TIMEOUT = 60
     """제목·썸네일을 물어보는 데 주는 제한 시간.
 
-    예전에는 20초에 한 번 물어보고 끝이라, 시리즈 분석이 도는 중에 주소를 넣으면
-    회선을 나눠 쓰다가 여기서 떨어지고 '메타데이터를 가져올 수 없습니다'로 끝났다.
-    실제로 받기도 전에 실패하는 것이라 조회 쪽은 넉넉히 기다린다.
+    20초일 때는 시리즈 분석과 회선을 나눠 쓰다 여기서 떨어져, 받기도 전에 실패로 끝났다.
     """
 
     def _get_metadata(self) -> Optional[Dict[str, Any]]:
-        """받기 전에 제목·썸네일을 미리 물어본다.
-
-        통신이 밀리는 순간에 걸리면 다시 건다(ytdlp_run). 여기서 한 번에 포기하면
-        다운로드가 시작조차 못 하고 오류 카드로 남는다.
-        """
+        """받기 전에 제목·썸네일을 미리 물어본다. 통신이 밀리면 ytdlp_run이 다시 건다."""
         cmd = [self.ytdlp_exe_path, "-J", "--skip-download", *ytdlp_run.network_options()]
         if self.ignore_ssl_errors:
             cmd.append("--no-check-certificate")
@@ -431,21 +388,9 @@ class DownloadThread(QThread):
     def _build_command(self, final_filepath: str) -> List[str]:
         """yt-dlp 명령을 조립한다.
 
-        자막 옵션은 임베드와 별도 저장이 서로 배타적이다. --embed-subs만 주면
-        yt-dlp가 자막을 받아 영상에 넣은 뒤 자막 파일을 지우지만, --write-subs를
-        함께 주면 "이미 파일이 있다"고 판단해 남겨 둔다. 그래서 임베드를 골랐는데도
-        영상 옆에 .ja.vtt가 따라붙던 것이다. 둘을 같이 붙이지 말 것.
-
-        --embed-thumbnail도 같은 규칙을 따른다. 단독으로 주면 썸네일을 받아 넣고
-        파일은 지우므로, --write-thumbnail을 함께 붙이지 않는다.
-
-        **-N은 1보다 클 때만 붙인다.** 1은 yt-dlp 기본값이라 붙여도 달라지는 것이
-        없는데, 명령줄에만 남아 로그를 읽을 때 '무언가 켜 두었나' 하고 헷갈린다.
-
-        조각을 여러 개 받아도 **진행률 파싱은 그대로 동작한다.** yt-dlp가 조각별로
-        따로 알리지 않고 형식 하나당 Destination 한 줄과 합산 진행률만 내놓기
-        때문이다(-N 4로 실측: `Destination` 두 줄에 각각 0->100%가 한 번씩,
-        되돌아가는 값 없음). 조각 수를 세는 _begin_destination은 손댈 것이 없다.
+        자막은 임베드와 별도 저장이 배타적이다. --embed-subs 단독이면 자막을 넣고 사이드카를
+        지우는데, --write-subs를 함께 주면 남는다. --embed-thumbnail도 같은 규칙이다.
+        -N은 1보다 클 때만 붙인다 - 1은 기본값이라 명령줄에만 남아 로그에서 헷갈린다.
         """
         command: List[str] = [
             self.ytdlp_exe_path, self.url,

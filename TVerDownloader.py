@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
         self.ui.set_log_visible(self.config.get("log_visible", True))
         self._apply_initial_geometry()
-        self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", False))
+        self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", True))
         self.library.refresh_history_list(); self.library.refresh_fav_list()
         self.apply_shortcuts()
         QApplication.instance().focusChanged.connect(self._sync_shortcut_guard)
@@ -74,9 +74,8 @@ class MainWindow(QMainWindow):
     def open_settings(self):
         """설정 창을 연다. 메인 창이 트레이에 들어가 있어도 뜬다.
 
-        자리를 잡는 일을 exec() 전에 할 수는 없다. 그 시점에는 창이 아직 만들어지지
-        않아 raise_()도 크기 계산도 할 것이 없다. 0ms 타이머로 exec()가 돌리는
-        이벤트 루프 안으로 미룬다.
+        자리 잡는 일을 exec() 전에 할 수는 없다 - 그 시점에는 창이 아직 만들어지지
+        않았다. 0ms 타이머로 exec()가 돌리는 이벤트 루프 안으로 미룬다.
         """
         dialog = SettingsDialog(self.config, self)
         QTimer.singleShot(0, lambda: self._place_dialog(dialog))
@@ -84,7 +83,7 @@ class MainWindow(QMainWindow):
             self.config = load_config()
             self.download_manager.update_config(self.config)
             self.series_parser.update_config(self.config)
-            self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", False))
+            self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", True))
             self.apply_shortcuts()
             parallel = self.config["max_concurrent_downloads"]
             fragments = canonicalize_config_fragments(self.config)
@@ -125,16 +124,13 @@ class MainWindow(QMainWindow):
     """글자를 입력받는 위젯들. 이 중 하나에 포커스가 있으면 '입력 중'으로 본다."""
 
     LOG_RULE_MAX = 12
-    """구분선 한쪽에 넣을 괘선의 최대 개수.
-
-    폭이 남는다고 끝까지 채우면 짧은 제목에서 괘선만 늘어져 정작 제목이 묻힌다."""
+    """구분선 한쪽에 넣을 괘선의 최대 개수. 끝까지 채우면 짧은 제목이 괘선에 묻힌다."""
 
     def apply_shortcuts(self):
         """설정에 저장된 조합으로 단축키를 처음부터 다시 만든다.
 
-        setKey로 갈아끼우지 않고 버린 뒤 새로 만든다. 조합이 비면 QShortcut 자체를
-        두지 않아야 '사용 안 함'이 확실해지고, 범위가 여러 위젯에 걸린 항목은 만들
-        개수까지 달라져서 어차피 한 번에 다시 세우는 편이 경로가 하나로 남는다.
+        setKey로 갈아끼우지 않는 것은, 조합이 비면 QShortcut 자체를 두지 않아야
+        '사용 안 함'이 확실해지고 범위에 따라 만들 개수까지 달라지기 때문이다.
         """
         for shortcut in self._shortcuts:
             shortcut.setEnabled(False)
@@ -167,11 +163,7 @@ class MainWindow(QMainWindow):
         self._sync_shortcut_guard(None, QApplication.focusWidget())
 
     def _shortcut_handler(self, key: str, widget):
-        """단축키 하나가 부를 함수를 돌려준다.
-
-        검색어 지우기는 탭마다 대상 입력칸이 달라서, 붙은 위젯을 닫아 넣은 함수를
-        만든다. 이름을 모르는 항목은 None을 돌려주고 호출부가 건너뛴다.
-        """
+        """단축키 하나가 부를 함수. 검색어 지우기는 탭마다 대상 입력칸이 달라 닫아 넣는다."""
         handlers = {
             "open_settings": self.open_settings,
             "toggle_log": self.toggle_log_panel,
@@ -183,12 +175,8 @@ class MainWindow(QMainWindow):
     def _sync_shortcut_guard(self, _old=None, new=None):
         """글자를 입력하는 중에는 수식키 없는 창 단축키를 꺼 둔다.
 
-        QShortcut은 켜져 있는 한 키를 위젯보다 먼저 가져간다. 콜백 안에서 상황을
-        보고 되돌아 나와도 이미 삼킨 키는 입력칸에 도착하지 않으므로, 판단을
-        콜백이 아니라 활성 여부로 옮긴다.
-
-        범위가 위젯인 단축키는 손대지 않는다. 검색칸의 Esc처럼 대상이 입력칸
-        자신인 경우가 있어서, 입력 중이라고 끄면 있어야 할 자리에서 사라진다.
+        QShortcut은 켜져 있는 한 키를 위젯보다 먼저 가져가, 콜백에서 되돌아 나와도 이미
+        삼킨 키는 입력칸에 닿지 않는다. 범위가 위젯인 것(검색칸 Esc)은 손대지 않는다.
         """
         typing = isinstance(new, self.TEXT_ENTRY_TYPES)
         for shortcut in self._guarded_shortcuts:
@@ -250,12 +238,8 @@ class MainWindow(QMainWindow):
     def set_always_on_top(self, on: bool, init: bool = False):
         """항상 위 설정을 켜고 끈다.
 
-        Windows에서는 창 플래그를 바꾸면 창이 숨겨져서 다시 show()를 불러야 한다.
-        다만 아직 한 번도 뜨지 않았을 때는 부르지 않는다. 시작 프로그램으로 켜져
-        트레이에만 있어야 할 실행이 이 자리에서 창을 띄워 버린다.
-
-        보이는지는 플래그를 바꾸기 전에 봐 둔다. 바꾸는 순간 창이 숨겨져서, 그
-        뒤에 물으면 떠 있던 창까지 '안 떠 있었다'고 나온다.
+        Windows에서는 플래그를 바꾸면 창이 숨겨져 다시 show()를 불러야 한다. 보이는지는
+        바꾸기 전에 봐 둔다 - 뒤에 물으면 '안 떠 있었다'가 되어 트레이 시작에서 창이 뜬다.
         """
         was_visible = self.isVisible()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on)
@@ -276,15 +260,10 @@ class MainWindow(QMainWindow):
         window.activateWindow()
 
     def _place_dialog(self, dialog):
-        """대화상자를 앞으로 끌어내고, 메인 창이 없으면 화면 가운데로 옮긴다.
+        """대화상자를 앞으로 끌어내고, 메인 창이 트레이에 있으면 화면 가운데로 옮긴다.
 
-        트레이 메뉴에서 부르면 다른 앱이 앞에 있을 수 있고, 대화상자에는 작업
-        표시줄 단추가 없어 뒤에 깔리면 되찾을 방법이 마땅치 않다. 그래서 끌어낸다.
-
-        메인 창이 트레이에 들어가 있으면 자리도 직접 잡는다. Qt는 대화상자를 부모
-        가운데에 놓는데, 최소화된 부모로는 그 계산이 되지 않아 화면 왼쪽 위
-        구석(0, 30)에 붙어 나온다. 부모가 보이는 동안에는 손대지 않는다 —
-        그때는 창 가운데가 눈이 가 있는 자리라 그대로가 낫다.
+        대화상자에는 작업 표시줄 단추가 없어 뒤에 깔리면 되찾기 어렵다. Qt는 부모 가운데에
+        놓는데 최소화된 부모로는 그 계산이 되지 않아 왼쪽 위 구석(0, 30)에 붙는다.
         """
         self._pull_to_front(dialog)
         if self.isVisible() and not self.isMinimized():
@@ -294,14 +273,8 @@ class MainWindow(QMainWindow):
     def _apply_initial_geometry(self):
         """첫 창의 크기와 자리를 우리가 정한다.
 
-        정해 두지 않으면 배치가 창 관리자에게 넘어간다. 로그인과 함께 뜨는 경우
-        (`--tray` 자동 실행) 화면 구성과 배율이 아직 확정되기 전이라, 그 판단이
-        좌측 위 구석에 원래보다 작은 창으로 떨어질 때가 있었다. 화면에 맞춰 줄인
-        뒤 가운데에 놓으면 무엇이 먼저 준비되든 같은 자리에 같은 크기로 뜬다.
-
-        최소 폭은 로그 패널을 편 상태에서 더 크므로(`set_log_visible`) 그 뒤에 부른다.
-        화면이 기본 크기보다 좁아도 최소 크기 아래로는 줄이지 않는다 — 그 아래로는
-        카드가 눌려서, 차라리 조금 넘치는 편이 낫다.
+        정해 두지 않으면 `--tray` 자동 실행처럼 화면 구성이 확정되기 전에 뜰 때 좌측 위
+        구석에 작은 창으로 떨어진다. 최소 폭은 로그를 편 쪽이 커서 set_log_visible 뒤에 부른다.
         """
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is not None:
@@ -313,12 +286,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _center_on_cursor_screen(window):
-        """작업 표시줄을 뺀 영역 안에서 가운데로 옮긴다.
-
-        availableGeometry라서 작업 표시줄과 겹치지 않는다. 마우스가 있는 화면을
-        고르는 것은 방금 트레이를 누른 자리가 그 화면이기 때문이다. 화면보다 큰
-        창이면 가운데 대신 영역 안쪽으로 밀어 넣어, 제목 표시줄이 잘리지 않게 한다.
-        """
+        """작업 표시줄을 뺀 영역 안에서 가운데로 옮긴다. 마우스가 있는 화면을 고른다."""
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
@@ -349,9 +317,8 @@ class MainWindow(QMainWindow):
     def _request_add_task(self, url: str, title: str = "", thumbnail: str = "") -> bool:
         """대기열에 넣기 전에 이미 받은 것인지 물어본다.
 
-        제목·표지 그림을 아는 자리(시리즈 선택, 즐겨찾기 확인)는 함께 넘긴다.
-        받아 둔 것이 있으면 카드가 그 자리에서 채워져, 차례를 기다리는 동안
-        다시 물어보러 갈 일이 없다.
+        제목·표지 그림을 아는 자리(시리즈 선택, 즐겨찾기 확인)는 함께 넘긴다. 대기 카드가
+        그 자리에서 채워져 차례를 기다리는 동안 다시 물어보러 갈 일이 없다.
         """
         if self.history_store.exists(url):
             again = confirm(self, "중복 다운로드",
@@ -370,18 +337,14 @@ class MainWindow(QMainWindow):
         self._restore_queue()
         if self.config.get("auto_update_check", True):
             QTimer.singleShot(1000, self._check_for_update)
-        if self.config.get("auto_check_favorites_on_start", True):
+        if self.config.get("auto_check_favorites_on_start", False):
             QTimer.singleShot(2500, self.library.check_all_favorites)
 
     def _restore_queue(self):
         """지난 실행에서 끝내지 못한 대기열을 목록에 되살린다.
 
-        부르는 자리가 준비가 끝난 뒤인 것은 되살린 항목도 제목을 물어보러 갈 수
-        있어야 해서다. 미리 묻기는 yt-dlp 경로가 정해지기 전에는 줄만 서 있는다.
-
-        **되살리기만 하고 받기 시작하지는 않는다.** 이유는 restore_task에 적어
-        두었다 — 시작 프로그램으로 뜨면 VPN보다 앱이 먼저 서서, 그 자리에서
-        받기 시작하면 담아 둔 것이 전부 지역 제한에 걸린다.
+        준비가 끝난 뒤에 부르는 것은 되살린 항목도 제목을 물어보러 갈 수 있어야 해서다.
+        되살리기만 하고 받기 시작하지는 않는다 - 이유는 restore_task에 적어 두었다.
         """
         if not self._queue_file_ok:
             self.append_log("[알림] 대기열 파일이 손상되어 읽지 못했습니다. 빈 대기열로 시작합니다.")
@@ -401,11 +364,7 @@ class MainWindow(QMainWindow):
         self.ui.set_queue_start_visible(self.download_manager.held_count() > 0)
 
     def start_restored_queue(self):
-        """되살린 대기 항목을 지금부터 받기 시작한다.
-
-        폴더를 먼저 확인하는 것은 재다운로드와 같은 이유다. 폴더가 없으면
-        항목마다 곧바로 실패로 떨어져, 되살린 것이 한꺼번에 오류 카드가 된다.
-        """
+        """되살린 대기 항목을 지금부터 받는다. 폴더가 없으면 전부 오류 카드가 되어 먼저 본다."""
         if not self.download_manager.held_count():
             return
         if not self._ensure_download_folder():
@@ -415,20 +374,12 @@ class MainWindow(QMainWindow):
         self.append_log(f"[대기열] 되살린 {started}개를 대기열에 넣었습니다.")
 
     def _check_for_update(self):
-        """새 버전을 확인한다. 받는 중인 것이 있으면 업데이트 쪽이 먼저 물어본다.
-
-        개수를 세는 일은 download_manager가 한다. 창에서 자료구조를 직접 세면
-        변환만 남은 항목을 빠뜨린다.
-        """
+        """새 버전을 확인한다. 개수는 download_manager가 센다 - 직접 세면 변환만 남은 것을 빠뜨린다."""
         maybe_show_update(self, APP_VERSION, self.append_log,
                           pending_downloads=self.download_manager.pending_count())
 
     def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
-        """에피소드 선택 창을 띄우고, 고른 것만 대기열에 넣는다.
-
-        분석이 제목과 표지 그림을 이미 들고 왔으므로 주소와 함께 넘긴다. 대기
-        카드가 그 자리에서 채워지고, 미리 물어보러 갈 일도 그만큼 줄어든다.
-        """
+        """에피소드 선택 창을 띄우고 고른 것만 대기열에 넣는다. 제목·표지 그림도 함께 넘긴다."""
         dialog = SeriesSelectionDialog(episode_info, self)
         if not dialog.exec():
             self.append_log(f"{label} 에피소드 추가를 취소했습니다.")
@@ -447,11 +398,7 @@ class MainWindow(QMainWindow):
         self.append_log(f"{label} 선택한 {added_count}개 에피소드를 추가했습니다.")
 
     def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
-        """분석이 끝난 시리즈를 요청 맥락에 맞게 처리한다.
-
-        맥락을 갈라 보내기만 한다. 즐겨찾기 쪽 두 갈래는 목록을 다시 그리고
-        기록과 대조하는 일이라 library가 맡는다.
-        """
+        """분석이 끝난 시리즈를 요청 맥락에 맞게 보낸다. 즐겨찾기 두 갈래는 library가 맡는다."""
         if context in ('single', 'bulk'):
             if not episode_info: self.append_log(f"[{context}] '{series_url}' 시리즈에서 에피소드를 찾지 못했습니다."); return
             self._add_from_selection(episode_info, f"[{context}] 시리즈에서")
@@ -474,10 +421,8 @@ class MainWindow(QMainWindow):
     def append_log(self, text: str):
         """로그 한 줄을 붙인다.
 
-        넣을지 말지는 부르는 쪽이 정한다. 여기에 쌓을 것은 나중에 다시 보면서
-        무슨 일이 있었는지 따져볼 만한 것뿐이다. 파일·대기열·네트워크가 그쪽이고,
-        테마 전환이나 패널 접기처럼 누른 결과가 화면에 바로 보이는 조작은 적어 두어도
-        다시 읽을 일이 없으면서 정작 봐야 할 줄만 밀어낸다.
+        넣을지 말지는 부르는 쪽이 정한다. 여기 쌓을 것은 파일·대기열·네트워크뿐이고, 테마
+        전환처럼 누른 결과가 화면에 바로 보이는 조작은 봐야 할 줄만 밀어낸다.
         """
         colors = palette(self.config.get("theme", "light"))
         color_map = {
@@ -493,17 +438,11 @@ class MainWindow(QMainWindow):
         self._scroll_log_to_end()
 
     def append_heading(self, title: str, body: str):
-        """제목을 괘선으로 두르고 그 아래에 한 줄을 붙인다.
-
-        다운로드가 시작될 때처럼 로그가 길어진 뒤에도 구간을 눈으로 찾기 위한 줄이다.
-        """
+        """제목을 괘선으로 두르고 그 아래 한 줄을 붙인다. 로그가 길어진 뒤 구간을 찾는 줄이다."""
         self.append_log(f"{self._log_heading(title)}\n{body}")
 
     def append_notice(self, title: str, lines: List[str]):
-        """가장 중요한 안내를 굵은 적색으로, 위아래 괘선 사이에 넣어 출력한다.
-
-        색과 굵기만으로는 뒤이어 쌓이는 로그에 묻히기 쉬워서 블록을 괘선으로 닫는다.
-        """
+        """가장 중요한 안내를 굵은 적색으로, 위아래 괘선 사이에 넣는다. 색과 굵기만으로는 묻힌다."""
         colors = palette(self.config.get("theme", "light"))
         head = self._log_heading(title)
         block = "\n".join([head, *lines, self._rule_matching(head)])
@@ -515,12 +454,8 @@ class MainWindow(QMainWindow):
     def _log_text_width(self) -> int:
         """로그 한 줄이 접히지 않고 들어가는 폭.
 
-        폭의 근거를 위젯이 아니라 고정폭 상수에서 가져온다. 로그 패널을 접은 채로
-        시작하면 그 자리에 배치가 한 번도 돌지 않아 위젯이 창 절반쯤 되는 폭을 들고
-        있고, 그 값으로 괘선을 뽑으면 패널을 펴는 순간 줄이 접힌다.
-
-        세로 스크롤바 폭은 지금 떠 있지 않아도 미리 뺀다. 로그가 쌓여 스크롤바가
-        생기면 그만큼 좁아지면서 이미 찍혀 있던 줄까지 다시 접힌다.
+        위젯이 아니라 고정폭 상수에서 잰다 - 로그를 접은 채로 시작하면 그 자리에 배치가
+        돌지 않아 위젯이 창 절반쯤 되는 폭을 들고 있다. 세로 스크롤바 폭은 늘 뺀다.
         """
         log = self.ui.log_output
         frame = log.width() - log.maximumViewportSize().width()
@@ -531,9 +466,8 @@ class MainWindow(QMainWindow):
     def _log_heading(self, title: str) -> str:
         """제목 양옆을 괘선으로 채운 구분선. 로그 폭 안에서 한 줄로 떨어진다.
 
-        개수를 고정해 두면 제목이 긴 쪽이 넘친다. '다운로드 시작'은 양옆 12개일 때
-        389px이라 354px짜리 로그 폭에 들어가지 못하고 두 줄로 접혔다. 제목이 차지하는
-        폭도 글꼴을 재야 아는 값이라, 제목이 쓰고 남은 폭을 양쪽이 반씩 나눠 갖는다.
+        개수를 고정하면 긴 제목이 넘친다 - '다운로드 시작'은 양옆 12개에 389px로, 로그 폭
+        354px에 들어가지 못하고 두 줄로 접혔다.
         """
         metrics = self.ui.log_output.fontMetrics()
         dash_width = metrics.horizontalAdvance("─") or 1
@@ -543,11 +477,7 @@ class MainWindow(QMainWindow):
         return f"{rule} {title} {rule}"
 
     def _rule_matching(self, head: str) -> str:
-        """head와 같은 폭으로 보이는 괘선을 만든다.
-
-        글자 수로 세면 어긋난다. 괘선은 전각이고 제목 양옆 공백은 반각이라,
-        같은 개수를 찍으면 닫는 줄이 여는 줄보다 넓어진다.
-        """
+        """head와 같은 폭으로 보이는 괘선. 괘선은 전각, 제목 양옆 공백은 반각이라 개수로는 어긋난다."""
         metrics = self.ui.log_output.fontMetrics()
         dash_width = metrics.horizontalAdvance("─") or 1
         count = max(1, round(metrics.horizontalAdvance(head) / dash_width))
@@ -555,11 +485,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _as_html(text: str) -> str:
-        """로그 한 덩어리를 서식 있는 텍스트로 바꾼다.
-
-        QTextEdit은 span 안의 줄바꿈 문자를 그냥 공백으로 흘려버린다. 이걸 넣지
-        않으면 여러 줄짜리 메시지가 한 줄로 이어붙는다.
-        """
+        """로그 한 덩어리를 서식 있는 텍스트로. QTextEdit은 span 안의 줄바꿈을 공백으로 흘린다."""
         return escape(text).replace("\n", "<br>")
 
     def _scroll_log_to_end(self):
@@ -589,9 +515,8 @@ class MainWindow(QMainWindow):
     def set_autostart(self, enabled: bool):
         """시작 프로그램 등록을 켜거나 끈다.
 
-        레지스트리 쓰기가 막히면 체크만 켜진 채 실제로는 등록되지 않는다. 그러면
-        다음 로그인에 안 뜨는 이유를 알 길이 없으므로, 표시를 실제 상태로 되돌리고
-        로그에 남긴다.
+        레지스트리 쓰기가 막히면 체크만 켜진 채 등록되지 않아, 다음 로그인에 안 뜨는 이유를
+        알 길이 없다. 표시를 실제 상태로 되돌리고 로그에 남긴다.
         """
         if autostart.set_enabled(enabled):
             self.append_log("[시작 프로그램] 윈도우 시작 시 실행: "
@@ -614,18 +539,8 @@ UI_FONT_STYLE_STRATEGY = QFont.StyleStrategy.PreferAntialias | QFont.StyleStrate
 class FontRenderingGuard(QObject):
     """스타일시트가 새로 만든 폰트에 글자 렌더링 설정을 다시 입힌다.
 
-    QSS에 font 속성이 있으면 Qt는 그 값으로 QFont를 새로 만든다. 그런데
-    QApplication.setFont()에 걸어 둔 힌팅과 안티앨리어싱 설정은 그 새 폰트로
-    따라오지 않는다. QListWidget처럼 항목을 델리게이트가 직접 그리는 위젯에서
-    특히 그렇고, 그대로 두면 기본 힌팅으로 그려져 글자가 자글자글해진다.
-
-    스타일이 폰트를 갈아끼우는 시점은 Polish가 아니라 그 뒤에 오는 FontChange다.
-    QListWidget에서 이벤트 순서를 찍어 보면 Polish까지는 설정이 살아 있다가
-    직후 FontChange에서 기본값으로 덮인다. 그래서 세 시점을 모두 본다.
-
-    고칠 때는 위젯의 현재 폰트를 가져와 두 속성만 바꾼다. QSS가 정한 서체와
-    크기는 그대로 두고 렌더링 방식만 되돌리기 위해서다. 이미 규칙대로면 손대지
-    않으므로, 우리가 부른 setFont가 다시 FontChange를 부르며 도는 일은 없다.
+    QSS에 font 속성이 있으면 Qt가 QFont를 새로 만들고 setFont()의 힌팅·안티앨리어싱이
+    따라오지 않는다. 덮이는 시점은 Polish가 아니라 그 뒤의 FontChange라 셋을 모두 본다.
     """
 
     WATCHED = (QEvent.Type.Polish, QEvent.Type.FontChange, QEvent.Type.StyleChange)
@@ -642,10 +557,7 @@ class FontRenderingGuard(QObject):
 
 
 def register_font(path: Path) -> List[str]:
-    """서체 파일 하나를 등록하고 패밀리명 목록을 돌려준다.
-
-    파일이 없거나 등록에 실패해도 예외를 내지 않고 빈 목록을 돌려준다.
-    """
+    """서체 파일 하나를 등록하고 패밀리명 목록을 돌려준다. 실패해도 빈 목록으로 돌아간다."""
     try:
         full_path = get_resource_path(path)
         if not full_path.is_file():
@@ -664,17 +576,8 @@ def register_font(path: Path) -> List[str]:
 class MenuIconTinter(QObject):
     """메뉴가 열릴 때 흰색 아이콘을 테마 글자색으로 바꿔 놓는다.
 
-    입력칸을 우클릭하면 나오는 잘라내기·복사·붙여넣기 메뉴는 Qt가 직접 만들고,
-    아이콘도 Qt에 딸려 오는 것(:/icons)을 쓴다. **일곱 개가 전부 흰색이라 라이트
-    테마에서 묻힌다.** 윤곽선으로 그려진 것(실행 취소·잘라내기·복사·삭제)은
-    흐리게나마 보이지만, 면으로 채워진 붙여넣기와 전체 선택은 아예 안 보인다.
-
-    메뉴를 우리가 새로 만들지 않고 열리는 순간에 색만 갈아끼운다. 그 메뉴를 만드는
-    곳은 Qt 안쪽이라 우리 손이 닿지 않고, 직접 다시 만들면 항목이 언제 켜지고
-    꺼지는지(붙여넣기는 클립보드가 비면 꺼진다)를 전부 따라 해야 한다.
-
-    흰색 단색인 것만 바꾼다. 색이 든 아이콘을 나중에 메뉴에 넣더라도 덮어칠하지
-    않기 위해서다. 테마를 바꾸면 색이 따라와야 하므로 열 때마다 지금 색으로 맞춘다.
+    입력칸 우클릭 메뉴는 Qt가 만들고 아이콘도 Qt 것(:/icons)이라 일곱 개가 전부 흰색이고
+    라이트 테마에서 묻힌다. 새로 만들지 않는 것은 항목이 켜지고 꺼지는 조건을 그대로 두려는 것.
     """
 
     def __init__(self, color: str, parent=None):
@@ -692,10 +595,8 @@ class MenuIconTinter(QObject):
     def _tint(self, menu):
         """메뉴 항목들의 아이콘을 지금 색으로 맞춘다.
 
-        칠하기 전 원본을 들고 있는다. 한 번 칠하고 나면 더 이상 흰색이 아니라서,
-        원본 없이는 테마가 바뀌었을 때 다시 칠할 대상으로 알아보지 못한다.
-        (우클릭 때마다 새로 만들어지는 메뉴는 늘 흰 아이콘이라 이 없이도 맞지만,
-        한 번 만들어 두고 계속 쓰는 메뉴는 옛 색에 머문다.)
+        칠하기 전 원본을 들고 있는다. 한 번 칠하면 더는 흰색이 아니라서, 원본 없이는 테마가
+        바뀌었을 때 다시 칠할 대상으로 알아보지 못한다.
         """
         for action in menu.actions():
             icon = action.icon()
@@ -712,21 +613,10 @@ class MenuIconTinter(QObject):
 
 
 class PopupShapeGuard(QObject):
-    """제 창을 가진 팝업을 모두 같은 모양으로 맞춘다. 메뉴와 콤보박스 펼침 목록.
+    """제 창을 가진 팝업(메뉴·콤보 펼침 목록)을 모두 같은 모양으로 맞춘다.
 
-    **한 곳에서 거는 이유는 콤보박스가 여러 파일에 흩어져 있어서다.** 만드는
-    자리마다 손대게 하면 새 콤보박스를 넣을 때 언젠가 빠뜨리고, 그 하나만 모양이
-    달라진다. Qt가 직접 만드는 입력칸 우클릭 메뉴처럼 우리가 클래스를 고를 수
-    없는 팝업도 여기서 함께 걸린다.
-
-    **손대는 시점은 Polish다.** Show에서 창 힌트를 바꾸면 Qt가 그 자리에서 창을
-    숨겨 버려 메뉴가 아예 뜨지 않는다(실측: Show로 걸면 `isVisible()`이 False).
-    Polish는 창이 만들어지기 전에 오므로 힌트가 그대로 먹는다. 콤보박스도 같다 -
-    Polish 때는 펼침 창이 아직 만들어지지 않아(실측: `WA_WState_Created`가 False)
-    투명 속성이 창을 만들 때부터 반영된다. 아이콘 색을 맞추는 `MenuIconTinter`가
-    Show를 쓰는 것과 다른 이유가 이것이다.
-
-    이미 힌트가 걸린 `RoundedMenu`에 다시 걸어도 달라지는 것은 없다.
+    한 곳에서 거는 것은 콤보박스가 여러 파일에 흩어져 있고, 입력칸 우클릭 메뉴처럼 클래스를
+    고를 수 없는 팝업도 있어서다. Show에서 걸면 Qt가 창을 숨겨 메뉴가 뜨지 않아 Polish에서 건다.
     """
 
     def eventFilter(self, obj, event):
@@ -755,9 +645,7 @@ def setup_menu_icons(app: QApplication, theme: str) -> MenuIconTinter:
 def setup_translations(app: QApplication) -> None:
     """Qt 기본 위젯의 문구를 OS 표시 언어로 맞춘다.
 
-    입력창 우클릭 메뉴(잘라내기/붙여넣기/모두 선택)나 표준 대화상자 문구는 Qt가
-    제공하는 번역 파일에서 온다. QTranslator를 설치하지 않으면 OS 언어와 무관하게
-    영어로 나온다. 실패해도 영어로 동작하므로 예외를 밖으로 내보내지 않는다.
+    QTranslator를 설치하지 않으면 입력칸 우클릭 메뉴 같은 것이 OS 언어와 무관하게 영어로 나온다.
     """
     try:
         translator = QTranslator(app)
@@ -775,11 +663,7 @@ def setup_translations(app: QApplication) -> None:
 
 
 def setup_app_font(app: QApplication) -> None:
-    """번들 서체를 등록하고 앱 기본 서체를 지정한다.
-
-    어느 하나가 없거나 실패해도 예외를 밖으로 내보내지 않는다.
-    등록된 것까지만 쓰고 나머지는 시스템 서체로 폴백한다.
-    """
+    """번들 서체를 등록하고 앱 기본 서체를 지정한다. 실패한 것은 시스템 서체로 폴백한다."""
     families: List[str] = []
     for font_file in UI_FONT_FILES:
         registered = register_font(font_file)

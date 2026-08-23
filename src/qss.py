@@ -9,10 +9,8 @@ UI_FONT_FALLBACKS = ("Yu Gothic UI", "Malgun Gothic", "Segoe UI")
 UI_FONT_FAMILIES = UI_FONT_BUNDLED + UI_FONT_FALLBACKS
 """본문 서체 스택. QApplication.setFont()와 같은 순서를 유지한다.
 
-setFont()로 지정한 폴백 목록은 위젯이 polish될 때 한 개로 뭉개진다. 그러면
-Pretendard JP가 빠져 일본어 한자가 맑은 고딕으로 그려진다. QListWidget처럼
-항목을 델리게이트가 직접 그리는 위젯에서 특히 눈에 띈다. QSS에 이름을 적어 두면
-polish 이후에도 스택이 그대로 남는다.
+setFont()로 지정한 폴백 목록은 polish 때 한 개로 뭉개져 Pretendard JP가 빠지고 일본어
+한자가 맑은 고딕으로 그려진다. QSS에 이름을 적어 두면 polish 이후에도 스택이 남는다.
 """
 
 UI_FONT_STACK = ", ".join(f'"{name}"' for name in UI_FONT_FAMILIES)
@@ -29,10 +27,7 @@ def blend(fg: str, bg: str, ratio: float) -> str:
 
 
 def palette(theme: str = "dark") -> dict:
-    """테마별 컬러 토큰.
-
-    QSS와 아이콘 채색이 같은 값을 쓰도록 여기서만 정의한다.
-    """
+    """테마별 컬러 토큰. QSS와 아이콘 채색이 같은 값을 쓰도록 여기서만 정의한다."""
     if theme == "light":
         colors = {
             "bg": "#F2F4F7",
@@ -61,6 +56,15 @@ def palette(theme: str = "dark") -> dict:
             "danger": "#9B3B47",
             "danger_hover": "#8A343F",
             "danger_fg": "#FFFFFF",
+            "caution": "#B85512",
+            "caution_hover": "#A04810",
+            "caution_fg": "#FFFFFF",
+            "add": "#1F6FA8",
+            "add_hover": "#1A5E8F",
+            "add_fg": "#FFFFFF",
+            "refresh": "#2F7D57",
+            "refresh_hover": "#276B4A",
+            "refresh_fg": "#FFFFFF",
             "hover_red": "#D9534F",
             "hover_yellow": "#D9A521",
             "hover_green": "#3E9E6B",
@@ -93,6 +97,15 @@ def palette(theme: str = "dark") -> dict:
             "danger": "#D9636F",
             "danger_hover": "#E4808A",
             "danger_fg": "#10161F",
+            "caution": "#F0A868",
+            "caution_hover": "#F5BC88",
+            "caution_fg": "#10161F",
+            "add": "#6FBEE8",
+            "add_hover": "#8ACDEF",
+            "add_fg": "#10161F",
+            "refresh": "#6FD39B",
+            "refresh_hover": "#8ADDAF",
+            "refresh_fg": "#10161F",
             "hover_red": "#FF7B74",
             "hover_yellow": "#F0C05A",
             "hover_green": "#6FD39B",
@@ -118,74 +131,51 @@ FILENAME_PART_COLORS = {
 }
 """파일명 구성 요소마다 정해 둔 색.
 
-목록의 항목과 미리보기의 같은 부분이 같은 색으로 보여야, 어느 것을 빼고
-넣었을 때 파일명의 어디가 달라지는지 글을 읽지 않고 알 수 있다. 그래서
-두 곳이 같은 값을 쓰도록 여기 한 곳에만 둔다.
-
-색상환에서 고르게 떨어진 다섯 가지라 나란히 놓아도 서로 헷갈리지 않는다.
-밝은 테마 쪽은 배경(#F2F4F7)에 묻히지 않도록 어둡게, 어두운 테마 쪽은
-배경(#161C26)에 대비되도록 밝게 잡았다. 목록 배경과 미리보기 배경 어느
-쪽에 얹혀도 명암비가 5를 넘는다.
+목록의 항목과 미리보기의 같은 부분이 같은 색이어야 어디가 달라지는지 글을 읽지 않고
+안다. 밝은 테마는 어둡게, 어두운 테마는 밝게 잡아 두 배경 어느 쪽에서도 명암비 5를 넘는다.
 """
 
 FILENAME_ROW_SELECT_MIX = 0.16
 """구성 요소 목록에서 고른 행에 까는 색의 비율. 창 배경에 accent를 섞는다.
 
-더 진하게 깔면 조각 색 중 어두운 쪽(#94500A)이 그 위에서 읽히지 않는다.
-0.16이면 다섯 색 모두 명암비 4.5를 넘기면서도 고른 행이 분명히 드러난다.
+더 진하면 조각 색 중 어두운 쪽(#94500A)이 그 위에서 읽히지 않는다.
 """
 
 FILENAME_PART_MUTED = 0.62
 """체크를 푼 항목의 색을 배경에 섞는 비율.
 
-회색으로 바꾸지 않고 흐리게만 만든다. 색이 곧 그 항목의 이름표라, 회색이
-되면 다시 켤 때 어느 자리가 돌아오는지 알 수 없다. 0.62면 켠 것과 뚜렷이
-갈리면서 무슨 색이었는지는 남는다.
+회색으로 바꾸지 않고 흐리게만 만든다 - 색이 곧 이름표라, 회색이 되면 다시 켤 때 어느
+자리가 돌아오는지 알 수 없다.
 """
 
 
 ABOUT_HOVER_MIX = 0.22
 """정보 창 단추에 마우스를 올렸을 때 섞는 색의 비율.
 
-창 배경에 섞어서 만든다. 고정 색을 박아 두면 밝은 테마에서는 옅고 어두운
-테마에서는 눈이 아프게 튄다. 0.22면 어느 쪽에서도 글자가 그대로 읽힌다.
+창 배경에 섞는다 - 고정 색은 밝은 테마에서 옅고 어두운 테마에서 눈이 아프게 튄다.
 """
 
 ABOUT_BUTTON_SCALE = 0.84
-"""닫기 단추 대비 정보 창 왼쪽 단추들의 크기 비율.
-
-닫기가 이 창을 끝내는 단추라 가장 크고, 나머지는 곁들이는 일이라 한 단계
-작게 둔다. 글꼴과 여백을 함께 줄여야 비율이 맞는다.
-"""
+"""닫기 단추 대비 정보 창 왼쪽 단추들의 크기 비율. 글꼴과 여백을 함께 줄여야 맞는다."""
 
 MENU_RADIUS = 10
 MENU_ITEM_RADIUS = 7
 """메뉴 바깥 모서리와 항목 강조 모서리.
 
-항목 쪽을 더 작게 둔다. 같은 값이면 강조 사각형이 메뉴 테두리에 닿아 두 곡선이
-겹쳐 보인다. RoundedMenu가 창 배경을 투명으로 만들 때 이 값이 실제 모서리가 된다.
+항목 쪽을 더 작게 둔다 - 같으면 강조 사각형이 메뉴 테두리에 닿아 두 곡선이 겹쳐 보인다.
 """
 
 COMBO_POPUP_RADIUS = 10
 COMBO_ITEM_RADIUS = 7
 COMBO_POPUP_PADDING = 4
-"""콤보박스 펼침 목록의 모서리와 여백. 모서리는 메뉴와 같은 값이다.
+"""콤보박스 펼침 목록의 모서리와 여백. 모서리는 메뉴와 같은 값으로 둔다.
 
-**여백을 창 높이에 맞춰 키우지 않는다.** 창 크기는 Qt가 먼저 정하고 우리 손은
-그 뒤에 닿아서, 여백을 키우면 첫 번째 펼침에서만 목록이 잘린다(실측).
-
-**같은 값을 쓰는 것이 요점이다.** 둘 다 제 창을 가진 팝업이고 하는 일도
-'목록에서 하나 고르기'로 같아서, 모서리가 다르면 같은 화면에서 두 가지 규칙이
-보인다. 메뉴 쪽을 고치면 이쪽도 함께 본다.
-
-항목 반지름을 더 작게 두는 이유도 메뉴와 같다. 같은 값이면 강조 사각형이 바깥
-테두리에 닿아 두 곡선이 겹쳐 보인다. 여백은 강조가 테두리에 닿지 않게 띄우는
-몫이라, 이것이 0이면 반지름을 아무리 줄여도 모서리에서 만난다.
+**여백을 창 높이에 맞춰 키우지 않는다** - 창 크기는 Qt가 먼저 정해서, 키우면 첫 번째
+펼침에서만 목록이 잘린다(실측). 메뉴 쪽 모서리를 고치면 이쪽도 함께 본다.
 """
 
 
 def build_qss(theme: str = "dark") -> str:
-    """선택된 테마에 맞는 QSS 문자열을 동적으로 생성합니다."""
     colors = palette(theme)
     ind = indicator_images(theme, colors)
 
@@ -255,6 +245,22 @@ def build_qss(theme: str = "dark") -> str:
     /* 위험 — 평소엔 2차, hover에서만 정체를 드러낸다 */
     QPushButton#DangerButton:hover {{ background: {colors["danger"]}; color: {colors["danger_fg"]}; border-color: {colors["danger"]}; }}
     QPushButton#DangerButton:pressed {{ background: {colors["danger_hover"]}; color: {colors["danger_fg"]}; border-color: {colors["danger_hover"]}; }}
+
+    /* 정리 — 위험의 옅은 쪽. 목록에서 카드만 걷어내고 **받아 둔 파일은 남는다.**
+       같은 줄에 선 '선택 항목 취소'는 받던 것을 끊고 쓰다 만 파일까지 지우므로, 둘을
+       같은 빨강으로 두면 되돌릴 수 있는 것과 없는 것이 구별되지 않는다. */
+    QPushButton#CautionButton:hover {{ background: {colors["caution"]}; color: {colors["caution_fg"]}; border-color: {colors["caution"]}; }}
+    QPushButton#CautionButton:pressed {{ background: {colors["caution_hover"]}; color: {colors["caution_fg"]}; border-color: {colors["caution_hover"]}; }}
+
+    /* 더하기 — 위험의 짝. 같은 줄에 나란히 서므로 드러나는 방식(hover에서 채움)을
+       맞추고 색만 가른다. 빨강만 물들면 무해한 단추도 위험해 보인다. */
+    QPushButton#AddButton:hover {{ background: {colors["add"]}; color: {colors["add_fg"]}; border-color: {colors["add"]}; }}
+    QPushButton#AddButton:pressed {{ background: {colors["add_hover"]}; color: {colors["add_fg"]}; border-color: {colors["add_hover"]}; }}
+
+    /* 다시 확인 — 더하기와 갈라 둔다. 목록이 늘어나는 것(추가)과 담아 둔 것을 다시
+       확인하는 것(갱신)은 결과가 달라, 나란히 선 두 단추가 같은 색이면 구별이 없다. */
+    QPushButton#RefreshButton:hover {{ background: {colors["refresh"]}; color: {colors["refresh_fg"]}; border-color: {colors["refresh"]}; }}
+    QPushButton#RefreshButton:pressed {{ background: {colors["refresh_hover"]}; color: {colors["refresh_fg"]}; border-color: {colors["refresh_hover"]}; }}
 
     /* 링크 버튼 — 색 위계가 아니라 외부 링크임을 알리는 표시 */
     QPushButton#LinkButton {{ background: transparent; border: none; color: {colors["accent"]}; padding: 6px 4px; text-decoration: underline; }}
@@ -568,9 +574,14 @@ def build_qss(theme: str = "dark") -> str:
        다크는 near-white, 라이트는 near-black으로 제목과 같은 색이 된다. */
     QLabel#Title[selected="true"],
     QLabel#Status[selected="true"],
+    QLabel#Duration[selected="true"],
     QLabel#PaneSubtitle[selected="true"] {{ color: {colors["text"]}; }}
 
     QLabel#Status {{ font-family: {mono}; font-size: {fs_num}px; font-weight: 500; color: {colors["text_dim"]}; }}
+
+    /* 재생 시간 — 상태 글씨와 같은 크기·서체에 굵기만 올린다. 좁은 자리라 눈에 걸리는
+       것은 굵기뿐이고, 색까지 세게 주면 옆의 단추보다 먼저 읽힌다. */
+    QLabel#Duration {{ font-family: {mono}; font-size: {fs_num}px; font-weight: 700; color: {colors["text_dim"]}; padding-right: 2px; }}
     QLabel#Thumb {{ background: {colors["bg"]}; border: 1px solid {colors["border"]}; border-radius: 4px; }}
 
     /* 진행바 — 높이 4px. 숫자는 옆의 퍼센트 라벨이 맡는다(UI_REDESIGN.md 5항). */

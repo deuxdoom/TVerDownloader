@@ -1,0 +1,23 @@
+# 커밋 대상은 루트의 py·spec·md, src/**, assets/** 뿐이다(가르는 기준은 .gitignore).
+# tests/ · tools/ · pytest.ini · requirements*.txt 는 일부러 커밋하지 않으므로
+# 그쪽에서만 쓰는 확장자는 여기에 적지 않는다.
+
+# 줄 끝(EOL) 정규화 - 저장소에는 LF로 담고, 체크아웃할 때는 OS 기본을 따른다.
+# eol=lf 를 붙이지 않는 것은 그러면 작업 폴더까지 LF로 바뀌기 때문이다.
+# 윈도우에서 작업하므로 받아 쓸 때는 CRLF로 나오는 편이 자연스럽다.
+* text=auto
+
+# 커밋되는 텍스트는 이 넷뿐이다. text=auto 의 자동 판별에만 맡기지 않는 것은,
+# 앞부분에 어쩌다 NUL 바이트가 섞이면 그 파일만 binary 로 넘어가
+# 조용히 정규화에서 빠지기 때문이다. 못 박아 두면 그런 일이 없다.
+*.py    text
+*.spec  text
+*.md    text
+*.svg   text
+
+# 서체·아이콘·로고는 한 바이트만 달라져도 못 쓰게 된다. 정규화 대상에서 뺀다.
+# assets/icons/*.svg 는 이름만 아이콘이지 XML이라 위의 텍스트 규칙에 남는다.
+*.ttf   binary
+*.otf   binary
+*.png   binary
+*.ico   binary

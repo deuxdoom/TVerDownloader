@@ -39,9 +39,8 @@ class SetupThread(QThread):
     def _get_api_info(self, url: str) -> Optional[dict]:
         """GitHub 릴리스 정보를 받아 온다. 실패하면 None.
 
-        raise_for_status()로 묶어 RequestException 하나로 잡으면 한도 초과가
-        네트워크 오류와 구분되지 않아, 풀리지도 않을 상태를 붙잡고 재시도하게
-        된다. 그래서 상태 코드를 먼저 갈라 보고 예외는 그다음에 다룬다.
+        raise_for_status()로 묶으면 한도 초과가 네트워크 오류와 구분되지 않아, 풀리지도
+        않을 상태를 붙잡고 재시도하게 된다. 그래서 상태 코드를 먼저 갈라 본다.
         """
         headers = github_api_headers(self.API_USER_AGENT)
 
@@ -76,10 +75,7 @@ class SetupThread(QThread):
         return None
 
     def _retry_pause(self, attempt: int, reason: str) -> bool:
-        """재시도 여지가 남았으면 지수 백오프만큼 쉬고 True를 돌려준다.
-
-        마지막 시도였다면 쉬지 않고 False. 호출부가 실패를 기록하고 끝낸다.
-        """
+        """재시도 여지가 남았으면 지수 백오프만큼 쉬고 True. 마지막 시도였으면 쉬지 않고 False."""
         if attempt >= self.API_MAX_ATTEMPTS:
             return False
         delay = self.API_RETRY_BASE_DELAY * (2 ** (attempt - 1))
@@ -89,11 +85,7 @@ class SetupThread(QThread):
         return True
 
     def _download_headers(self) -> dict:
-        """에셋 내려받기용 헤더.
-
-        API가 아니라 파일을 받는 요청이라 JSON Accept는 붙이지 않는다.
-        User-Agent는 GitHub이 모든 요청에 권장한다.
-        """
+        """에셋 내려받기용 헤더. 파일을 받는 요청이라 JSON Accept는 붙이지 않는다."""
         return {"User-Agent": self.API_USER_AGENT}
 
     def _download_and_place(self, url: str, target_path: Path) -> bool:

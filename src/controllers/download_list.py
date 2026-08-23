@@ -1,18 +1,8 @@
-"""다운로드 목록 탭의 조작을 맡는다.
+"""다운로드 목록 탭의 조작을 맡는다 - 카드 넣고 빼기, 중지·제거, 우클릭 메뉴, 재다운로드.
 
-카드를 넣고 빼는 일, 고른 것을 중지·제거하는 일, 우클릭 메뉴, 재다운로드가
-여기 모인다. 창에서 떼어낸 이유는 이것들이 하나같이 **같은 세 가지를 함께
-봐야** 하기 때문이다 — 목록 위젯의 행, 그 행에 걸린 카드, 그리고 그 URL이
-지금 대기열의 어느 상태인지. 창에 두면 이 셋을 훑는 코드가 창의 다른 일
-(로그·테마·트레이) 사이에 흩어져, 상태 판별이 호출부마다 어긋나는 일이
-실제로 있었다.
-
-밖에서 쓰는 것은 창이 시그널에 걸어 두는 메서드들이고, 대기열 상태는 반드시
-DownloadManager의 is_busy/is_queued/is_pending을 거친다. 자료구조를 직접 보면
-변환만 남은 항목이 새어 나간다.
-
-창 참조는 생성자로 받는다. import는 한쪽 방향으로만 흘러(창 → 이 모듈) 순환이
-생기지 않고, 검사에서는 가짜 창을 넘겨 이 덩어리만 따로 돌릴 수 있다.
+창에서 떼어낸 것은 이것들이 하나같이 같은 셋(목록의 행, 그 행의 카드, 그 URL의 대기열
+상태)을 함께 봐야 하기 때문이다. 대기열 상태는 반드시 DownloadManager의
+is_busy/is_queued/is_pending을 거친다 - 자료구조를 직접 보면 변환만 남은 항목이 새어 나간다.
 """
 
 import os
@@ -58,9 +48,8 @@ class DownloadListController:
     def delete_selected(self):
         """선택한 카드를 목록에서 지운다. 진행 중인 것은 남긴다.
 
-        여기서 하는 일은 목록 정리뿐이라, 밖에서 도는 프로세스가 있는 항목은
-        건드리지 않는다. 카드만 지우면 멈출 방법이 사라진 채로 다운로드나 변환이
-        계속 돌아간다. 중지까지 하려면 '선택 항목 취소' 쪽이다.
+        카드만 지우면 멈출 방법이 사라진 채로 다운로드나 변환이 계속 돈다. 중지까지
+        하려면 '선택 항목 취소' 쪽이다.
         """
         window = self.window
         selected_items = window.ui.download_list.selectedItems()
@@ -85,9 +74,8 @@ class DownloadListController:
     def remove_row(self, row: int):
         """카드를 목록에서 뺀다. 애니메이션과 콜백을 먼저 끊어야 리소스가 남지 않는다.
 
-        takeItem이 카드를 지우기는 하지만 deleteLater로 미룬다. cleanup()을
-        먼저 부르는 것은 그 사이에 남는 것들 때문이다 — 걸어 둔 썸네일 요청과
-        진행 애니메이션은 카드가 실제로 사라질 때까지 그대로 돈다.
+        takeItem은 카드를 deleteLater로 미루고, 그 사이에도 걸어 둔 썸네일 요청과 진행
+        애니메이션이 그대로 돈다.
         """
         item = self.window.ui.download_list.item(row)
         if item is None:
@@ -100,9 +88,8 @@ class DownloadListController:
     def cancel_selected(self):
         """선택한 항목을 상태에 맞게 정리한다.
 
-        진행 중이면 중지하고 카드는 남긴다(취소됨으로 보이고 재다운로드할 수 있다).
-        대기 중이면 대기열에서 빼고 목록에서도 지운다. 이미 끝난 항목은 건드리지
-        않는다. 그쪽은 '완료 항목 삭제'가 맡는다.
+        진행 중이면 중지하고 카드는 남긴다(재다운로드할 수 있다). 대기 중이면 대기열에서
+        빼고 목록에서도 지운다. 이미 끝난 것은 '완료 항목 삭제'가 맡는다.
         """
         window = self.window
         selected_items = window.ui.download_list.selectedItems()
@@ -135,8 +122,8 @@ class DownloadListController:
     def clear_completed(self):
         """끝난 카드만 걷어낸다. 아직 끝나지 않은 것은 무엇이든 남긴다.
 
-        '끝났다'의 반대를 다운로드 중으로만 보면 변환 중인 항목이 완료로 새어
-        나간다. 목록에서 사라진 뒤에도 ffmpeg는 계속 돌아 파일이 나중에 생긴다.
+        '끝났다'의 반대를 다운로드 중으로만 보면 변환 중인 항목이 완료로 새어 나가,
+        목록에서 사라진 뒤에도 ffmpeg가 계속 돈다.
         """
         window = self.window
         for i in range(window.ui.download_list.count() - 1, -1, -1):
@@ -176,12 +163,8 @@ class DownloadListController:
     def _add_file_actions(self, menu, widget):
         """파일에 관한 항목들을 구분선 뒤에 모아 붙인다.
 
-        위쪽은 이 줄을 대기열에서 어떻게 할지(중지·제거·삭제)이고, 아래쪽은 받아 둔
-        것으로 무엇을 할지다. 성격이 달라 구분선으로 가른다.
-
-        할 수 있는 것만 붙인다. 받기 전이면 재생할 파일이 없고, 썸네일을 못 가져온
-        시리즈도 있다. 누를 수 없는 항목을 흐리게 남겨 두면 메뉴만 길어진다.
-        구분선은 뒤에 실제로 붙은 것이 있을 때만 긋는다.
+        위쪽은 이 줄을 대기열에서 어떻게 할지, 아래쪽은 받아 둔 것으로 무엇을 할지다.
+        할 수 있는 것만 붙이고, 구분선은 뒤에 실제로 붙은 것이 있을 때만 긋는다.
         """
         actions = []
         if widget.thumbnail_pixmap() is not None:
@@ -200,9 +183,8 @@ class DownloadListController:
     def _save_thumbnail(self, widget):
         """카드에 걸린 썸네일 원본을 파일로 저장한다.
 
-        기본 이름은 받아 둔 영상 파일 이름을 따라간다. 영상과 나란히 두었을 때
-        어느 영상의 그림인지 바로 알 수 있고, 이미 파일 이름으로 쓸 수 있는 글자만
-        남아 있어 따로 걸러낼 것이 없다. 아직 파일이 없으면 제목에서 만든다.
+        기본 이름은 받아 둔 영상 파일 이름을 따라간다 - 나란히 두었을 때 어느 영상의
+        그림인지 알 수 있고, 이미 파일 이름으로 쓸 수 있는 글자만 남아 있다.
         """
         window = self.window
         pixmap = widget.thumbnail_pixmap()

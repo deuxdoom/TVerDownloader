@@ -1,12 +1,8 @@
 """체크 표시, 라디오 점, 스핀박스 화살표를 그려 임시 PNG로 내보낸다.
 
-앱에 스타일시트가 걸리면 Qt는 QStyleSheetStyle로 넘어가고, 표시기(subcontrol)의
-네이티브 그리기를 멈춘다. 그래서 QSS에서 배경만 칠하면 체크 표시가 사라진
-녹색 사각형이 되고, 스핀박스 버튼은 화살표 없는 빈 칸이 된다.
-모양을 직접 그려 `image:` 로 넣어 주는 것이 유일하게 확실한 방법이다.
-
-QSS의 url()은 파일 경로만 받으므로 프로세스 임시 폴더에 써 두고 경로를 넘긴다.
-고해상도 화면을 위해 1x와 @2x를 함께 만든다.
+앱에 스타일시트가 걸리면 Qt가 QStyleSheetStyle로 넘어가 표시기(subcontrol)의 네이티브
+그리기를 멈춘다. 그래서 QSS로 배경만 칠하면 체크 표시가 사라진 녹색 사각형이 된다.
+QSS의 url()은 파일 경로만 받으므로 임시 폴더에 1x와 @2x를 써 두고 경로를 넘긴다.
 """
 from __future__ import annotations
 
@@ -98,8 +94,7 @@ def _save(name: str, one_x: QPixmap, two_x: QPixmap) -> str:
 def indicator_images(theme: str, colors: dict) -> Dict[str, str]:
     """테마별 표시기 이미지를 만들고 QSS용 경로 모음을 돌려준다.
 
-    이미 만든 테마는 다시 그리지 않는다. 그리기에 실패해도 예외를 내지 않고
-    빈 경로를 돌려주므로, 그 경우 표시기는 색 채움만으로 상태를 보인다.
+    이미 만든 테마는 다시 그리지 않는다. 실패해도 빈 경로를 돌려주어 색 채움만 남는다.
     """
     cached = _cache.get(theme)
     if cached is not None:
