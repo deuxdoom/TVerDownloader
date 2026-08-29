@@ -28,6 +28,8 @@ from src.widgets import (DownloadItemWidget, apply_popup_shape,
                          COMBO_POPUP_OBJECT)
 from src.updater import maybe_show_update
 from src.threads.setup_thread import SetupThread
+from src.threads.region_thread import (RegionCheckThread, JAPAN_CODE, country_name,
+                                       STOP_WAIT_MS as REGION_STOP_WAIT_MS)
 from src.ui.main_window_ui import MainWindowUI
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
@@ -68,6 +70,7 @@ class MainWindow(QMainWindow):
         self.append_log("프로그램 시작. 환경 설정을 시작합니다...")
         for note in retired_option_notes(self.config):
             self.append_log(note)
+        self._start_region_check()
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
 
@@ -220,6 +223,7 @@ class MainWindow(QMainWindow):
             list_widget.itemSelectionChanged.connect(
                 lambda lw=list_widget: self.download_list.sync_selection_styles(lw))
         self.ui.history_list.customContextMenuRequested.connect(self.library.show_history_menu)
+        self.ui.history_del_btn.clicked.connect(self.library.remove_selected_history)
         self.ui.history_search_input.textChanged.connect(self.library.refresh_history_list)
         self.ui.fav_search_input.textChanged.connect(self.library.refresh_fav_list)
         self.ui.history_sort_combo.currentIndexChanged.connect(self.library.refresh_history_list)
@@ -328,12 +332,16 @@ class MainWindow(QMainWindow):
         return self.download_manager.add_task(url, title=title, thumbnail=thumbnail)
 
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
+        """준비가 끝났음을 알리고 대기열을 되살린다.
+
+        **'다운로드를 시작할 수 있습니다'를 덧붙이지 않는다** - 바로 위 지역 안내가 VPN이
+        없어 받을 수 없다고 말한 뒤라, 준비된 것은 프로그램이라는 뜻이 반대로 읽힌다.
+        """
         if not ok: self.append_log("[오류] 초기 준비 실패: yt-dlp/ffmpeg를 준비하지 못했습니다."); QMessageBox.critical(self, "오류", "초기 준비에 실패했습니다. 로그를 확인하세요."); return
         self.download_manager.set_paths(ytdlp_path, ffmpeg_path); self.series_parser.set_ytdlp_path(ytdlp_path); self.env_ready = True
         self._set_input_enabled(True)
-        self.append_notice("안내", ["TVer는 일본 지역 제한이 있습니다.",
-                                    "원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요."])
-        self.append_log("환경 설정 완료. 다운로드를 시작할 수 있습니다.")
+        self._show_region_notice()
+        self.append_log("환경 설정 완료.")
         self._restore_queue()
         if self.config.get("auto_update_check", True):
             QTimer.singleShot(1000, self._check_for_update)
@@ -418,36 +426,106 @@ class MainWindow(QMainWindow):
             self.history_store.add(url, title, final_filepath, series_id=series_id, thumbnail_url=thumbnail_url)
             self.history_store.save(); self.library.refresh_history_list()
 
+    def _start_region_check(self):
+        """지금 IP가 일본인지 물어보러 보낸다. 준비를 기다리지 않는 것은 yt-dlp와 무관해서다.
+
+        **끄는 설정을 두지 않는다** - VPN을 켰는지는 TVer에서 무엇을 하든 먼저 알아야 할
+        것이라 고를 일이 아니다. 스레드에 부모를 주지 않으므로 이 참조를 놓으면 도는 채로
+        파괴된다. 끝까지 들고 있는다.
+        """
+        self._region_code = ""
+        self._region_failed = False
+        self._region_notice_shown = False
+        self.region_thread = RegionCheckThread()
+        self.region_thread.resolved.connect(self._on_region_resolved)
+        self.region_thread.failed.connect(self._on_region_failed)
+        self.region_thread.start()
+
+    def _on_region_resolved(self, country_code: str):
+        """알아낸 국가를 적어 둔다. 알릴지는 준비가 끝났는지에 달렸다."""
+        self._region_code = country_code
+        self._show_region_notice()
+
+    def _on_region_failed(self):
+        """못 물어봤다고 적어 둔다. 이때는 나라를 모르므로 예전의 일반 안내로 돌아간다."""
+        self._region_failed = True
+        self._show_region_notice()
+
+    REGION_FALLBACK_LINES = ["IP 확인이 실패했습니다.",
+                             "TVer는 일본 지역 제한이 있습니다.",
+                             "원활한 다운로드를 위해 일본 VPN을 켜고 사용해주세요."]
+    """확인하지 못했을 때 내보내는 안내. 나라를 모르니 무엇을 하라고만 말한다.
+
+    **여기서 조용히 넘어가면 안 된다** - 확인이 실패하는 상황은 대개 통신이 이상할 때라,
+    VPN이 꺼져 있을 법한 자리이기도 하다. 모른다는 사실을 밝히고 예전 안내를 그대로 준다.
+    """
+
+    def _show_region_notice(self):
+        """지역 안내를 로그 맨 아래에 한 번만 붙인다. 알리기만 하고 아무것도 막지 않는다.
+
+        준비가 끝난 뒤로 미루는 것은 yt-dlp·FFmpeg 확인 줄 사이에 끼면 읽는 차례가 끊기기
+        때문이다. 답이 온 것과 준비가 끝난 것 중 늦게 오는 쪽이 이 함수를 부른다.
+        **IP는 어디에도 적지 않는다** - 로그를 그대로 붙여 도움을 청하는 자리가 있다.
+        """
+        if self._region_notice_shown or not self.env_ready:
+            return
+        if self._region_code == JAPAN_CODE:
+            lines = ["현재 일본 IP 입니다. 원활한 다운로드가 가능합니다."]
+            color_key = "log_success"
+        elif self._region_code:
+            lines = ["현재 일본 IP가 아닙니다.",
+                     f"{country_name(self._region_code)} 국가이므로 VPN을 켜주세요.",
+                     "TVer는 일본 지역 제한이 있어 VPN 없이는 받을 수 없습니다."]
+            color_key = "notice"
+        elif self._region_failed:
+            lines = list(self.REGION_FALLBACK_LINES)
+            color_key = "notice"
+        else:
+            return
+        self._region_notice_shown = True
+        self.append_notice("안내", lines, color_key=color_key)
+
+    def stop_region_check(self):
+        """지역 확인을 거둔다. 아직 답을 기다리는 중이면 그 답을 버리고 그냥 끝낸다.
+
+        오래 기다리지 않는 것은 DNS가 막힌 회선에서 십수 초가 걸리기 때문이다 - 부모 없는
+        스레드라 도는 채로 두어도 프로세스가 그대로 끝난다.
+        """
+        thread = self.region_thread
+        if thread is None:
+            return
+        thread.stop()
+        thread.wait(REGION_STOP_WAIT_MS)
+
     def append_log(self, text: str):
-        """로그 한 줄을 붙인다.
+        """로그 한 줄을 기본 글자색으로 붙인다.
 
         넣을지 말지는 부르는 쪽이 정한다. 여기 쌓을 것은 파일·대기열·네트워크뿐이고, 테마
         전환처럼 누른 결과가 화면에 바로 보이는 조작은 봐야 할 줄만 밀어낸다.
+
+        **글자에서 낱말을 찾아 색을 입히지 않는다.** 예전에는 '완료'·'성공'·'[오류]'가 든
+        줄을 칠했는데, 그 낱말은 알릴 것이 없는 줄에도 흔하다 - `ffmpeg.exe 이동 완료`,
+        `환경 설정 완료`까지 물들어 정작 색이 붙은 지역 안내가 묻혔다. 색을 쓰는 곳은
+        append_notice 하나뿐이다.
         """
-        colors = palette(self.config.get("theme", "light"))
-        color_map = {
-            "[오류]": colors["danger"], "[치명적 오류]": colors["danger"],
-            "완료": colors["log_success"], "성공": colors["log_success"],
-        }
-        color = next((c for k, c in color_map.items() if k in text), None)
-        if color:
-            self.ui.log_output.append(
-                f'<span style="color: {color};">{self._as_html(text)}</span>')
-        else:
-            self.ui.log_output.append(text)
+        self.ui.log_output.append(text)
         self._scroll_log_to_end()
 
     def append_heading(self, title: str, body: str):
         """제목을 괘선으로 두르고 그 아래 한 줄을 붙인다. 로그가 길어진 뒤 구간을 찾는 줄이다."""
         self.append_log(f"{self._log_heading(title)}\n{body}")
 
-    def append_notice(self, title: str, lines: List[str]):
-        """가장 중요한 안내를 굵은 적색으로, 위아래 괘선 사이에 넣는다. 색과 굵기만으로는 묻힌다."""
+    def append_notice(self, title: str, lines: List[str], color_key: str = "notice"):
+        """가장 중요한 안내를 굵게, 위아래 괘선 사이에 넣는다. 색과 굵기만으로는 묻힌다.
+
+        색을 고를 수 있는 것은 같은 자리에 좋은 소식도 오기 때문이다 - 지역 안내가
+        일본이냐 아니냐로 갈리는데, 둘 다 적색이면 어느 쪽인지 읽어야 알게 된다.
+        """
         colors = palette(self.config.get("theme", "light"))
         head = self._log_heading(title)
         block = "\n".join([head, *lines, self._rule_matching(head)])
         self.ui.log_output.append(
-            f'<span style="color: {colors["notice"]}; font-weight: bold;">'
+            f'<span style="color: {colors[color_key]}; font-weight: bold;">'
             f'{self._as_html(block)}</span>')
         self._scroll_log_to_end()
 

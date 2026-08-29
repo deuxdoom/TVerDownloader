@@ -111,6 +111,7 @@ class TrayController:
         window = self.window
         window.append_log("프로그램을 종료합니다...")
         self._timer.stop()
+        window.stop_region_check()
         stopped = window.download_manager.stop_all()
         if stopped:
             window.append_log(f"[대기열] 진행 중이던 작업 {stopped}개를 중지했습니다.")

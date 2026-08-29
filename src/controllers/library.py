@@ -13,9 +13,10 @@ from typing import Dict, List
 
 from PyQt6.QtWidgets import QListWidgetItem, QMessageBox
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QCursor, QGuiApplication
+from PyQt6.QtGui import QCursor
 
 from src.message import confirm
+from src.utils import open_file_location
 from src.widgets import (FavoriteItemWidget, HistoryItemWidget, RoundedMenu,
                          clear_item_widgets)
 
@@ -70,12 +71,29 @@ class LibraryController:
         item = window.ui.history_list.itemAt(pos)
         if not item: return
         url = item.data(Qt.ItemDataRole.UserRole); menu = RoundedMenu()
-        menu.addAction("URL 복사", lambda: QGuiApplication.clipboard().setText(url)); menu.addAction("다시 다운로드", lambda: window._request_add_task(url))
+        menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url)); menu.addAction("다시 다운로드", lambda: window._request_add_task(url))
+        filepath = window.history_store.get_filepath(url)
+        if filepath and os.path.exists(filepath):
+            menu.addAction("파일이 위치한 폴더 열기", lambda: open_file_location(filepath))
         menu.addAction("기록에서 제거", lambda: self.remove_from_history(url)); menu.exec(QCursor.pos())
 
     def remove_from_history(self, url: str):
         window = self.window
         window.history_store.remove(url); window.history_store.save(); self.refresh_history_list(); window.append_log(f"[알림] 기록에서 제거됨: {url}")
+
+    def remove_selected_history(self):
+        window = self.window
+        selected_items = window.ui.history_list.selectedItems()
+        if not selected_items: QMessageBox.information(window, "알림", "삭제할 항목을 목록에서 선택하세요."); return
+        if confirm(window, "삭제 확인", f"{len(selected_items)}개의 기록을 목록에서 제거할까요?\n받아 둔 파일은 남습니다.",
+                   icon_name="nav_cache", color_key="danger",
+                   theme=window.config.get("theme", "light")):
+            for item in selected_items:
+                url = item.data(Qt.ItemDataRole.UserRole)
+                if url: window.history_store.remove(url)
+            window.history_store.save()
+            self.refresh_history_list()
+            window.append_log(f"[알림] 기록에서 {len(selected_items)}개 항목을 제거했습니다.")
 
     def refresh_fav_list(self):
         """검색어에 걸리는 즐겨찾기만 다시 그린다.

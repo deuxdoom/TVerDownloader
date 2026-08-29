@@ -79,6 +79,10 @@ class HistoryStore:
         entry = self._data.get((url or "").strip(), {})
         return entry.get("title", "(제목 없음)")
 
+    def get_filepath(self, url: str) -> str:
+        entry = self._data.get((url or "").strip(), {})
+        return entry.get("filepath", "")
+
     def add(self, url: str, title: str, filepath: Optional[str] = None,
             series_id: Optional[str] = None, thumbnail_url: Optional[str] = None):
         """기록에 항목을 더한다. series_id·thumbnail_url은 있으면 함께 남긴다."""

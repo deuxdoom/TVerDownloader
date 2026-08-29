@@ -369,18 +369,22 @@ class MainWindowUI:
     def _create_history_tab(self):
         tab, layout = self._tab_page("HistoryTab")
         top_controls = QHBoxLayout()
+        self.history_del_btn = QPushButton("삭제", objectName="DangerButton")
+        self.history_del_btn.setToolTip("선택한 기록을 목록에서 제거합니다. 받아 둔 파일은 남습니다.")
         self.history_sort_combo = QComboBox()
         self.history_sort_combo.addItem("다운로드 최신순")
         self.history_sort_combo.addItem("제목 오름차순")
         self.history_search_input = self._make_search_input()
         top_controls.addWidget(self._make_pane_title("다운로드 기록"))
         top_controls.addStretch(1)
+        top_controls.addWidget(self.history_del_btn)
         top_controls.addWidget(self.history_sort_combo)
         top_controls.addWidget(self.history_search_input)
         layout.addLayout(top_controls)
         self.history_list = QListWidget(objectName="HistoryList")
         self.history_list.setSpacing(6)
         self._hide_focus_rect(self.history_list)
+        self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_empty = self._add_empty_state(
             self.history_list, "tab_history", "받은 영상이 아직 없습니다",
