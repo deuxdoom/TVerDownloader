@@ -7,6 +7,7 @@ from typing import Optional
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from src.i18n import t
 from src.utils import github_api_headers, is_rate_limited, rate_limit_message
 
 class SetupThread(QThread):
@@ -33,7 +34,7 @@ class SetupThread(QThread):
             else:
                 self.finished.emit(False, "", "")
         except Exception as e:
-            self.log.emit(f"[치명적 오류] 설정 중 예외 발생: {e}")
+            self.log.emit(t("setup.fatal", error=e))
             self.finished.emit(False, "", "")
 
     def _get_api_info(self, url: str) -> Optional[dict]:
@@ -48,28 +49,28 @@ class SetupThread(QThread):
             try:
                 response = requests.get(url, headers=headers, timeout=10)
             except requests.exceptions.RequestException as e:
-                if not self._retry_pause(attempt, f"호출 실패: {e}"):
-                    self.log.emit(f"[오류] GitHub API 호출 실패: {e}")
+                if not self._retry_pause(attempt, t("setup.call_failed", error=e)):
+                    self.log.emit(t("setup.api_failed", error=e))
                     return None
                 continue
 
             if is_rate_limited(response):
-                self.log.emit(f"[오류] {rate_limit_message(response)}")
+                self.log.emit(t("setup.api_error_prefix", message=rate_limit_message(response)))
                 return None
 
             if response.status_code == 200:
                 try:
                     return response.json()
                 except ValueError as e:
-                    self.log.emit(f"[오류] GitHub API 응답을 해석하지 못했습니다: {e}")
+                    self.log.emit(t("setup.api_parse_failed", error=e))
                     return None
 
             if response.status_code < 500:
-                self.log.emit(f"[오류] GitHub API가 {response.status_code}로 응답했습니다.")
+                self.log.emit(t("setup.api_status", status=response.status_code))
                 return None
 
-            if not self._retry_pause(attempt, f"서버 오류 {response.status_code}"):
-                self.log.emit(f"[오류] GitHub API가 {response.status_code}로 응답했습니다.")
+            if not self._retry_pause(attempt, t("setup.server_error", status=response.status_code)):
+                self.log.emit(t("setup.api_status", status=response.status_code))
                 return None
 
         return None
@@ -79,8 +80,8 @@ class SetupThread(QThread):
         if attempt >= self.API_MAX_ATTEMPTS:
             return False
         delay = self.API_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-        self.log.emit(f" ... GitHub API {reason}. {delay}초 후 재시도합니다"
-                      f" ({attempt + 1}/{self.API_MAX_ATTEMPTS}).")
+        self.log.emit(t("setup.retry_in", reason=reason, seconds=delay,
+                        attempt=attempt + 1, total=self.API_MAX_ATTEMPTS))
         self.msleep(delay * 1000)
         return True
 
@@ -88,26 +89,49 @@ class SetupThread(QThread):
         """에셋 내려받기용 헤더. 파일을 받는 요청이라 JSON Accept는 붙이지 않는다."""
         return {"User-Agent": self.API_USER_AGENT}
 
+    PARTIAL_SUFFIX = ".part"
+    """다 받기 전까지 쓰는 이름. 옮기고 나면 남지 않는다."""
+
     def _download_and_place(self, url: str, target_path: Path) -> bool:
-        self.log.emit(f" -> 다운로드 시작: {url}")
+        """받아서 제자리에 놓는다. **다 받은 뒤에 옮긴다.**
+
+        목적지에 바로 쓰면 중간에 끊겼을 때 잘린 exe가 그 이름으로 남는다. 다음 실행에서
+        GitHub API까지 실패하면 파일이 있는지만 보고 그것을 정상으로 넘겨, 받는 것마다
+        알 수 없는 이유로 실패한다. 저장소의 다른 쓰기(queue_store·favorites_store·
+        history_store)가 모두 임시 파일에 쓰고 os.replace로 바꾸는 것과 같은 이유다.
+
+        ffmpeg 쪽(_download_and_unzip)은 이렇게 하지 않아도 된다 - 임시 폴더에 받고
+        다음 실행에서 그 폴더를 통째로 지우므로 잘린 zip이 남지 않는다.
+        """
+        self.log.emit(t("setup.download_start", url=url))
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        with requests.get(url, headers=self._download_headers(), stream=True, timeout=60) as r:
-            r.raise_for_status()
-            with open(target_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+        partial = target_path.with_name(target_path.name + self.PARTIAL_SUFFIX)
+        try:
+            with requests.get(url, headers=self._download_headers(),
+                              stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(partial, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            os.replace(partial, target_path)
+        except BaseException:
+            try:
+                partial.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         return True
 
     def _download_and_unzip(self, url: str, target_dir: Path, file_name: str) -> bool:
         target_dir.mkdir(parents=True, exist_ok=True)
         zip_path = target_dir / file_name
-        self.log.emit(f" -> 다운로드 시작: {url}")
+        self.log.emit(t("setup.download_start", url=url))
         with requests.get(url, headers=self._download_headers(), stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(zip_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        self.log.emit(f" -> 압축 해제 중: {zip_path}")
+        self.log.emit(t("setup.extracting", path=zip_path))
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(target_dir)
         try:
@@ -117,7 +141,7 @@ class SetupThread(QThread):
         return True
 
     def _update_ytdlp(self) -> Optional[Path]:
-        self.log.emit("[1] yt-dlp.exe 최신 버전 확인 중...")
+        self.log.emit(t("setup.ytdlp_check"))
         ytdlp_exe_path = self.BIN_DIR / "yt-dlp.exe"
         version_file = self.BIN_DIR / "ytdlp_version.txt"
 
@@ -129,23 +153,23 @@ class SetupThread(QThread):
         current = version_file.read_text().strip() if version_file.exists() else None
 
         if latest == current and ytdlp_exe_path.exists():
-            self.log.emit(f" ... yt-dlp가 이미 최신 버전입니다 ({latest}).")
+            self.log.emit(t("setup.ytdlp_up_to_date", version=latest))
             return ytdlp_exe_path
 
         asset = next((a for a in info.get("assets", []) if isinstance(a, dict)
                       and a.get("name", "").endswith(".exe")
                       and "yt-dlp" in a.get("name", "").lower()), None)
         if not asset:
-            self.log.emit("[오류] yt-dlp.exe 에셋을 찾을 수 없습니다.")
+            self.log.emit(t("setup.ytdlp_no_asset"))
             return ytdlp_exe_path if ytdlp_exe_path.exists() else None
 
         if self._download_and_place(asset["browser_download_url"], ytdlp_exe_path):
             version_file.write_text(latest or "")
-            self.log.emit(" ... yt-dlp.exe 업데이트 완료.")
+            self.log.emit(t("setup.ytdlp_done"))
         return ytdlp_exe_path
 
     def _update_ffmpeg(self) -> Optional[Path]:
-        self.log.emit("[2] FFmpeg 최신 버전 확인 중...")
+        self.log.emit(t("setup.ffmpeg_check"))
         ffmpeg_exe_path = self.BIN_DIR / "ffmpeg.exe"
         ffprobe_exe_path = self.BIN_DIR / "ffprobe.exe"
         version_file = self.BIN_DIR / "ffmpeg_version.txt"
@@ -158,7 +182,7 @@ class SetupThread(QThread):
         current = version_file.read_text().strip() if version_file.exists() else None
 
         if latest == current and ffmpeg_exe_path.exists() and ffprobe_exe_path.exists():
-            self.log.emit(f" ... FFmpeg가 이미 최신 버전입니다 ({latest}).")
+            self.log.emit(t("setup.ffmpeg_up_to_date", version=latest))
             return ffmpeg_exe_path
 
         asset = next(
@@ -168,7 +192,7 @@ class SetupThread(QThread):
             None,
         )
         if not asset:
-            self.log.emit("[오류] FFmpeg .zip 에셋을 찾을 수 없습니다.")
+            self.log.emit(t("setup.ffmpeg_no_asset"))
             return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
 
         temp_dir = self.BIN_DIR / "ffmpeg_temp"
@@ -180,7 +204,7 @@ class SetupThread(QThread):
 
         extracted_root = next((p for p in temp_dir.iterdir() if p.is_dir()), None)
         if not extracted_root:
-            self.log.emit("[오류] FFmpeg 압축 해제 후 폴더를 찾을 수 없습니다.")
+            self.log.emit(t("setup.ffmpeg_no_folder"))
             return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
 
         source_ffmpeg = extracted_root / "bin" / "ffmpeg.exe"
@@ -193,16 +217,17 @@ class SetupThread(QThread):
             shutil.move(str(source_ffmpeg), str(ffmpeg_exe_path))
             shutil.move(str(source_ffprobe), str(ffprobe_exe_path))
 
-            self.log.emit(f" -> {ffmpeg_exe_path.name} 및 {ffprobe_exe_path.name} 이동 완료.")
+            self.log.emit(t("setup.ffmpeg_moved",
+                            names=f"{ffmpeg_exe_path.name} / {ffprobe_exe_path.name}"))
             try:
                 shutil.rmtree(temp_dir)
             except Exception:
                 pass
             version_file.write_text(latest or "")
-            self.log.emit(" ... FFmpeg 업데이트 완료.")
+            self.log.emit(t("setup.ffmpeg_done"))
             return ffmpeg_exe_path
         else:
-            self.log.emit("[오류] 압축 해제된 파일에서 ffmpeg.exe 또는 ffprobe.exe를 찾을 수 없습니다.")
+            self.log.emit(t("setup.ffmpeg_missing"))
             try:
                 shutil.rmtree(temp_dir)
             except Exception:

@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from PyQt6.QtGui import QGuiApplication
 
+from src.i18n import t
 from src.utils import is_media_url, match_tver_url
 from src.message import notify
 from src.bulk_dialog import BulkAddDialog
@@ -65,12 +66,12 @@ class InputSources:
         if self._bulk_dialog is not None:
             self._last_clipboard_url = url
             if self._bulk_dialog.append_url(url):
-                window.append_log(f"[클립보드] 다중 추가 창에 넣었습니다: {url}")
+                window.append_log(t("log.clipboard_to_bulk", url=url))
             return
         pending = match_tver_url(window.ui.url_input.text())
         if pending and pending != url:
             self._last_clipboard_url = url
-            window.append_log("[클립보드] 주소가 하나 더 들어와 다중 추가 창으로 모읍니다.")
+            window.append_log(t("log.clipboard_collect"))
             window.ui.url_input.clear()
             if not self.open_bulk_add([pending, url]):
                 window.ui.url_input.setText(pending)
@@ -79,7 +80,7 @@ class InputSources:
             return
         self._last_clipboard_url = url
         window.ui.url_input.setText(url)
-        window.append_log(f"[클립보드] 주소를 입력창에 넣었습니다: {url}")
+        window.append_log(t("log.clipboard_to_input", url=url))
 
     def urls_from_mime(self, mime) -> List[str]:
         """드롭된 데이터에서 TVer 주소만 순서대로 골라낸다.
@@ -108,9 +109,9 @@ class InputSources:
         window = self.window
         if len(urls) == 1:
             window.ui.url_input.setText(urls[0]); window.ui.url_input.setFocus()
-            window.append_log(f"[드롭] 주소를 입력창에 넣었습니다: {urls[0]}")
+            window.append_log(t("log.drop_to_input", url=urls[0]))
             return
-        window.append_log(f"[드롭] 주소 {len(urls)}개를 받았습니다. 다중 추가 창을 엽니다.")
+        window.append_log(t("log.drop_to_bulk", count=len(urls)))
         self.open_bulk_add(urls)
 
     def _notify_bad_url(self, title: str, lead: str, rejected: List[str]):
@@ -119,10 +120,8 @@ class InputSources:
                  for text in rejected[:self.BAD_URL_PREVIEW]]
         left = len(rejected) - len(shown)
         if left:
-            shown.append(f"... 외 {left}개")
-        body = "\n".join([lead, "", *shown, "",
-                          "http:// 또는 https:// 로 시작하는",
-                          "영상 페이지 주소를 넣어주세요."])
+            shown.append(t("dialog.bad_url_more", count=left))
+        body = "\n".join([lead, "", *shown, "", t("dialog.bad_url_hint")])
         notify(self.window, title, body, icon_name="info", color_key="warn",
                theme=self.window.config.get("theme", "light"))
 
@@ -140,17 +139,16 @@ class InputSources:
         url = window.ui.url_input.text().strip()
         if not url: return
         if not is_media_url(url):
-            self._notify_bad_url("주소를 확인해주세요",
-                                 "다운로드할 수 있는 주소가 아닙니다.", [url])
+            self._notify_bad_url(t("dialog.bad_url_title"), t("dialog.bad_url_lead"), [url])
             return
         self.process_url(url); window.ui.url_input.clear()
 
     def process_url(self, url: str):
         window = self.window
-        if not window.env_ready: window.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요."); return
-        if not window._ensure_download_folder(): window.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다."); return
+        if not window.env_ready: window.append_log(t("log.not_ready")); return
+        if not window._ensure_download_folder(): window.append_log(t("log.no_folder_canceled")); return
         if "/series/" in url:
-            window.append_log(f"[시리즈] 분석을 시작합니다: {url}")
+            window.append_log(t("log.series_parsing", url=url))
             window.series_parser.parse('single', [url])
         else:
             window._request_add_task(url)
@@ -164,10 +162,10 @@ class InputSources:
         """
         window = self.window
         if not window.env_ready:
-            window.append_log("[알림] 아직 프로그램 초기화가 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            window.append_log(t("log.not_ready"))
             return False
         if not window._ensure_download_folder():
-            window.append_log("[알림] 다운로드 폴더가 선택되지 않아 작업이 취소되었습니다.")
+            window.append_log(t("log.no_folder_canceled"))
             return False
         dialog = BulkAddDialog(window, initial_urls)
         self._bulk_dialog = dialog
@@ -180,9 +178,9 @@ class InputSources:
             rejected = [u for u in urls if not is_media_url(u)]
             urls = [u for u in urls if is_media_url(u)]
             if rejected:
-                window.append_log(f"[알림] 주소가 아닌 {len(rejected)}줄을 건너뜁니다.")
-                self._notify_bad_url("건너뛴 줄이 있습니다",
-                                     "주소가 아니어서 넣지 않은 줄입니다.", rejected)
+                window.append_log(t("log.bulk_skipped", count=len(rejected)))
+                self._notify_bad_url(t("dialog.bad_url_skipped_title"),
+                                     t("dialog.bad_url_skipped_lead"), rejected)
             normal_urls = [u for u in urls if "/series/" not in u]
             series_urls = [u for u in urls if "/series/" in u]
             for url in normal_urls: window._request_add_task(url)

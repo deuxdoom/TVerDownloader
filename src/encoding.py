@@ -129,13 +129,17 @@ def audio_args(codec_name: Optional[str], source_kbps: Optional[float],
     **영상을 다시 만들 때 오디오를 복사하면 안 된다.** -c:a copy가 박혀 있던 시절에는
     AV1+Opus를 AVC로 옮기면 소리가 Opus로 남아, 편집 도구가 트랙 자체를 잡지 못했다.
     소리가 없는 파일에는 아무것도 붙이지 않는다(붙여도 무시되고 로그만 헷갈린다).
+    t를 함수 안에서 가져오는 것은 이 모듈에 Qt를 들이지 않기 위해서다 - 인자를 고르는
+    계산만 있어야 값으로 검사할 수 있다.
     """
+    from src.i18n import t
     if not codec_name:
-        return [], "오디오 없음 (인자 없음)"
+        return [], t("convert.audio_none")
     if codec_name.lower() in AUDIO_COPY_CODECS:
-        return ["-c:a", "copy"], f"{codec_name} 그대로 복사 (재인코딩 없음)"
+        return ["-c:a", "copy"], t("convert.audio_copy", codec=codec_name)
     target = audio_bitrate_kbps(source_kbps, channels)
-    measured = f"{source_kbps:.0f}kbps" if source_kbps else "비트레이트 미상"
+    measured = (f"{source_kbps:.0f}kbps" if source_kbps
+                else t("convert.audio_unknown_bitrate"))
     return (["-c:a", "aac", "-b:a", f"{target}k"],
             f"{codec_name} {measured} {channels or 2}ch -> aac {target}kbps")
 

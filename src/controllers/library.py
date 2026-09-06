@@ -11,21 +11,38 @@ import os
 import webbrowser
 from typing import Dict, List
 
-from PyQt6.QtWidgets import QListWidgetItem, QMessageBox
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtWidgets import QListWidgetItem
+from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QCursor
 
-from src.message import confirm
+from src.i18n import t
+from src.message import confirm, notify
 from src.utils import open_file_location
-from src.widgets import (FavoriteItemWidget, HistoryItemWidget, RoundedMenu,
+from src.qtparts import RoundedMenu
+from src.widgets import (FavoriteItemWidget, HistoryItemWidget,
                          clear_item_widgets)
 
 
 class LibraryController:
     """기록·즐겨찾기 두 목록을 그리고 거르는 조작 묶음."""
 
-    HISTORY_MAX_DISPLAY = 100
-    """기록 탭에 한 번에 그리는 최대 개수. 수백 개를 카드로 만들면 탭을 여는 순간 멈칫한다."""
+    HISTORY_MAX_DISPLAY = 30
+    """기록 탭에 한 번에 그리는 최대 개수.
+
+    **비용이 여기 하나에 몰려 있다.** 목록을 다시 그리는 데 드는 시간은 기록이 몇 개
+    쌓였든 이 값에만 비례한다 - 정렬과 거르기는 기록 5,000개에서도 다 합쳐 3ms인데,
+    카드를 만드는 것은 100장에 108ms다(캐시된 썸네일을 읽어 푸는 값이 그 3분의 1).
+    100에서 30으로 내려 32ms가 됐다. 넘치는 것은 목록 끝의 안내 줄이 개수로 알린다.
+    """
+
+    SEARCH_DEBOUNCE_MS = 250
+    """검색어가 바뀌고 나서 목록을 다시 그리기까지 기다리는 시간.
+
+    `textChanged`에 바로 걸면 글자마다 목록을 통째로 다시 그린다. 다섯 글자를 치는
+    동안 다섯 번이니 그만큼 곱해져 멈칫한다(실측 540ms). 타자가 멎은 뒤 한 번만
+    그리면 그 값이 한 번치로 줄어든다. 250ms는 이어 치는 사이보다 길고 멈춘 것을
+    알아차리기에는 짧다.
+    """
 
     MAX_FAVORITES = 20
     """즐겨찾기에 담을 수 있는 최대 시리즈 수. 늘어나면 시작할 때 도는 분석도 길어진다."""
@@ -38,6 +55,19 @@ class LibraryController:
 
     def __init__(self, window):
         self.window = window
+        self._history_search_timer = QTimer(window)
+        self._history_search_timer.setSingleShot(True)
+        self._history_search_timer.setInterval(self.SEARCH_DEBOUNCE_MS)
+        self._history_search_timer.timeout.connect(self.refresh_history_list)
+
+    def request_history_refresh(self):
+        """검색칸이 바뀌었을 때 부른다. 타자가 멎은 뒤에 한 번만 다시 그린다.
+
+        **검색칸에서만 이 길로 온다.** 다운로드가 끝나거나 기록을 지운 뒤처럼 결과를
+        바로 봐야 하는 자리는 `refresh_history_list`를 그대로 부른다 - 그쪽은 한 번뿐이라
+        미룰 이유가 없고, 미루면 지운 항목이 잠깐 남아 있는 것처럼 보인다.
+        """
+        self._history_search_timer.start()
 
     def refresh_history_list(self):
         window = self.window
@@ -58,11 +88,12 @@ class LibraryController:
                 widget = HistoryItemWidget(url, meta, window.config.get("theme", "light")); item.setSizeHint(widget.sizeHint())
                 window.ui.history_list.addItem(item); window.ui.history_list.setItemWidget(item, widget)
             else:
-                title = meta.get("title", "(제목 없음)"); date = meta.get("date", "")
+                title = meta.get("title") or t("card.title_missing"); date = meta.get("date", "")
                 item.setText(f"{title}  •  {date}\n{url}"); item.setSizeHint(QSize(0, 90)); window.ui.history_list.addItem(item)
 
         if total_count > self.HISTORY_MAX_DISPLAY:
-            info_item = QListWidgetItem(f"... 외 {total_count - self.HISTORY_MAX_DISPLAY}개의 이전 기록이 있습니다. (검색하여 찾을 수 있습니다)")
+            info_item = QListWidgetItem(
+                t("log.history_more", count=total_count - self.HISTORY_MAX_DISPLAY))
             info_item.setFlags(Qt.ItemFlag.NoItemFlags); info_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             window.ui.history_list.addItem(info_item)
 
@@ -71,21 +102,26 @@ class LibraryController:
         item = window.ui.history_list.itemAt(pos)
         if not item: return
         url = item.data(Qt.ItemDataRole.UserRole); menu = RoundedMenu()
-        menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url)); menu.addAction("다시 다운로드", lambda: window._request_add_task(url))
+        menu.addAction(t("menu.open_in_browser"), lambda: webbrowser.open(url))
+        menu.addAction(t("menu.download_again"), lambda: window._request_add_task(url))
         filepath = window.history_store.get_filepath(url)
         if filepath and os.path.exists(filepath):
-            menu.addAction("파일이 위치한 폴더 열기", lambda: open_file_location(filepath))
-        menu.addAction("기록에서 제거", lambda: self.remove_from_history(url)); menu.exec(QCursor.pos())
+            menu.addAction(t("menu.open_location"), lambda: open_file_location(filepath))
+        menu.addAction(t("menu.remove_from_history"), lambda: self.remove_from_history(url)); menu.exec(QCursor.pos())
 
     def remove_from_history(self, url: str):
         window = self.window
-        window.history_store.remove(url); window.history_store.save(); self.refresh_history_list(); window.append_log(f"[알림] 기록에서 제거됨: {url}")
+        window.history_store.remove(url); window.history_store.save(); self.refresh_history_list(); window.append_log(t("log.history_removed", url=url))
 
     def remove_selected_history(self):
         window = self.window
         selected_items = window.ui.history_list.selectedItems()
-        if not selected_items: QMessageBox.information(window, "알림", "삭제할 항목을 목록에서 선택하세요."); return
-        if confirm(window, "삭제 확인", f"{len(selected_items)}개의 기록을 목록에서 제거할까요?\n받아 둔 파일은 남습니다.",
+        if not selected_items:
+            notify(window, t("dialog.notice_title"), t("dialog.select_items_body"),
+                   icon_name="tab_history", theme=window.config.get("theme", "light"))
+            return
+        if confirm(window, t("dialog.delete_confirm_title"),
+                   t("dialog.history_delete_body", count=len(selected_items)),
                    icon_name="nav_cache", color_key="danger",
                    theme=window.config.get("theme", "light")):
             for item in selected_items:
@@ -93,7 +129,7 @@ class LibraryController:
                 if url: window.history_store.remove(url)
             window.history_store.save()
             self.refresh_history_list()
-            window.append_log(f"[알림] 기록에서 {len(selected_items)}개 항목을 제거했습니다.")
+            window.append_log(t("log.history_removed_many", count=len(selected_items)))
 
     def refresh_fav_list(self):
         """검색어에 걸리는 즐겨찾기만 다시 그린다.
@@ -119,47 +155,54 @@ class LibraryController:
     def add_favorite(self):
         window = self.window
         if len(window.fav_store.list_series()) >= self.MAX_FAVORITES:
-            QMessageBox.information(window, "즐겨찾기 개수 초과",
-                                      f"즐겨찾기는 최대 {self.MAX_FAVORITES}개까지 추가할 수 있습니다.\n\n"
-                                      "새로운 시리즈를 추가하려면, 시청이 종료되었거나\n"
-                                      "자주 확인하지 않는 시리즈를 목록에서 먼저 삭제해주세요.")
+            notify(window, t("dialog.favorites_full_title"),
+                   t("dialog.favorites_full_body", maximum=self.MAX_FAVORITES),
+                   icon_name="tab_favorites", color_key="warn", theme=window.config.get("theme", "light"))
             return
 
         url = window.ui.fav_input.text().strip()
         if not url or "/series/" not in url:
-            QMessageBox.information(window, "알림", "유효한 TVer 시리즈 URL을 입력하세요.")
+            notify(window, t("dialog.notice_title"), t("dialog.favorite_invalid_url"),
+                   icon_name="info", color_key="warn", theme=window.config.get("theme", "light"))
             return
         if window.fav_store.exists(url):
-            QMessageBox.information(window, "알림", "이미 즐겨찾기에 등록된 시리즈입니다.")
+            notify(window, t("dialog.notice_title"), t("dialog.favorite_exists"),
+                   icon_name="tab_favorites", theme=window.config.get("theme", "light"))
             return
 
         window.fav_store.add(url)
         window.ui.fav_input.clear()
         window.ui.fav_search_input.clear()
         self.refresh_fav_list()
-        window.append_log(f"[즐겨찾기] 추가됨: {url}. 시리즈 제목 확인 중...")
+        window.append_log(t("log.fav_added", url=url))
         window.series_parser.parse('fav-add-check', [url])
 
     def remove_selected_favorite(self):
         window = self.window
         selected_items = window.ui.fav_list.selectedItems()
-        if not selected_items: QMessageBox.information(window, "알림", "삭제할 항목을 목록에서 선택하세요."); return
-        if confirm(window, "삭제 확인", f"{len(selected_items)}개의 항목을 삭제할까요?",
+        if not selected_items:
+            notify(window, t("dialog.notice_title"), t("dialog.select_items_body"),
+                   icon_name="tab_favorites", theme=window.config.get("theme", "light"))
+            return
+        if confirm(window, t("dialog.delete_confirm_title"),
+                   t("dialog.favorite_delete_body", count=len(selected_items)),
                    icon_name="nav_cache", color_key="danger",
                    theme=window.config.get("theme", "light")):
             for item in selected_items:
-                url = item.data(Qt.ItemDataRole.UserRole); window.fav_store.remove(url); window.append_log(f"[즐겨찾기] 삭제: {url}")
+                url = item.data(Qt.ItemDataRole.UserRole); window.fav_store.remove(url); window.append_log(t("log.fav_removed", url=url))
             self.refresh_fav_list()
 
     def check_all_favorites(self):
         window = self.window
         folder = window.config.get("download_folder")
-        if not folder or not os.path.isdir(folder): window.append_log("[알림] 다운로드 폴더가 설정되지 않아 시작 시 즐겨찾기 자동 확인을 건너뜁니다."); return
+        if not folder or not os.path.isdir(folder): window.append_log(t("log.fav_no_folder")); return
         urls = window.fav_store.list_series()
         if not urls:
-            if window.sender() == window.ui.fav_chk_btn: QMessageBox.information(window, "알림", "등록된 즐겨찾기가 없습니다.")
+            if window.sender() == window.ui.fav_chk_btn:
+                notify(window, t("dialog.notice_title"), t("dialog.no_favorites"),
+                       icon_name="tab_favorites", theme=window.config.get("theme", "light"))
             return
-        window.append_log(f"[즐겨찾기] 전체 확인 시작 ({len(urls)}개 시리즈)"); window.series_parser.parse('fav-check', urls); window.ui.tabs.setCurrentIndex(0)
+        window.append_log(t("log.fav_check_all", count=len(urls))); window.series_parser.parse('fav-check', urls); window.ui.tabs.setCurrentIndex(0)
 
     def show_fav_menu(self, pos):
         window = self.window
@@ -167,12 +210,13 @@ class LibraryController:
         if not item: return
         url = item.data(Qt.ItemDataRole.UserRole); menu = RoundedMenu()
         def check_this_series(): window.series_parser.parse('fav-check', [url]); window.ui.tabs.setCurrentIndex(0)
-        menu.addAction("이 시리즈 확인", check_this_series); menu.addAction("브라우저에서 열기", lambda: webbrowser.open(url))
-        menu.addAction("삭제", lambda: self.remove_favorite(url)); menu.exec(QCursor.pos())
+        menu.addAction(t("menu.check_series"), check_this_series)
+        menu.addAction(t("menu.open_in_browser"), lambda: webbrowser.open(url))
+        menu.addAction(t("menu.remove_favorite"), lambda: self.remove_favorite(url)); menu.exec(QCursor.pos())
 
     def remove_favorite(self, url: str):
         window = self.window
-        window.fav_store.remove(url); self.refresh_fav_list(); window.append_log(f"[즐겨찾기] 삭제: {url}")
+        window.fav_store.remove(url); self.refresh_fav_list(); window.append_log(t("log.fav_removed", url=url))
 
     def on_fav_check_parsed(self, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
         """확인이 끝난 즐겨찾기 시리즈에서 신규 회차를 가려낸다.
@@ -193,10 +237,10 @@ class LibraryController:
                                             thumbnail=episode.get('thumbnail_url', '')):
                     added_count += 1
             if added_count:
-                window.append_log(f"[즐겨찾기] '{label}'에서 신규 에피소드 {added_count}개를 추가했습니다.")
+                window.append_log(t("log.fav_new_added", label=label, count=added_count))
             return
-        window.append_log(f"[즐겨찾기] '{label}'에서 신규 에피소드 {len(new_episodes)}개를 찾았습니다. 받을 항목을 선택하세요.")
-        window._add_from_selection(new_episodes, f"[즐겨찾기] '{label}'에서")
+        window.append_log(t("log.fav_new_found", label=label, count=len(new_episodes)))
+        window._add_from_selection(new_episodes, t("log.fav_new_label", label=label))
 
     def on_fav_add_check_parsed(self, series_url: str, series_title: str):
         """즐겨찾기에 갓 담은 시리즈의 제목을 받아 적는다.
@@ -207,6 +251,6 @@ class LibraryController:
         if series_title:
             window.fav_store.touch_last_check(series_url, series_title)
             self.refresh_fav_list()
-            window.append_log(f"[즐겨찾기] 시리즈 제목 업데이트: {series_title}")
+            window.append_log(t("log.fav_title_updated", title=series_title))
         else:
-            window.append_log(f"[알림] 즐겨찾기 추가 시 '{series_url}'의 제목을 가져오지 못했습니다.")
+            window.append_log(t("log.fav_title_failed", url=series_url))

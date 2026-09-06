@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QLabel, QProgressBar, QPushButton,
                              QVBoxLayout, QHBoxLayout)
 
+from src.i18n import t
 from src.threads.update_thread import UpdateDownloadThread
 
 DIALOG_WIDTH = 420
@@ -23,7 +24,7 @@ class UpdateProgressDialog(QDialog):
     def __init__(self, asset_url: str, work_dir: Path, latest_tag: str,
                  parent=None, theme: str = "light"):
         super().__init__(parent)
-        self.setWindowTitle("업데이트")
+        self.setWindowTitle(t("update.dialog_title"))
         self.setModal(True)
         self.setFixedWidth(DIALOG_WIDTH)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
@@ -35,11 +36,11 @@ class UpdateProgressDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 16)
         layout.setSpacing(12)
 
-        self.title_label = QLabel(f"새 버전 {latest_tag}")
+        self.title_label = QLabel(t("update.dialog_heading", tag=latest_tag))
         self.title_label.setObjectName("UpdateTitle")
         layout.addWidget(self.title_label)
 
-        self.status_label = QLabel("준비하는 중...")
+        self.status_label = QLabel(t("update.preparing"))
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
@@ -50,7 +51,7 @@ class UpdateProgressDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.cancel_button = QPushButton("취소")
+        self.cancel_button = QPushButton(t("common.cancel"))
         self.cancel_button.clicked.connect(self._cancel)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
@@ -71,7 +72,7 @@ class UpdateProgressDialog(QDialog):
     def _cancel(self):
         """받기를 세우고 창을 닫는다. 사유는 비워 둔다(사용자가 고른 것이라서)."""
         self.cancel_button.setEnabled(False)
-        self.status_label.setText("취소하는 중...")
+        self.status_label.setText(t("update.canceling"))
         self.thread.stop()
 
     def reject(self):

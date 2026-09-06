@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import shutil
 
 import PyQt6
 from PyInstaller.utils.win32.versioninfo import (
@@ -51,7 +52,13 @@ APP_VERSION = read_app_version()
 VERSION_RESOURCE = build_version_resource(APP_VERSION)
 
 QT_TRANSLATIONS_DIR = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6", "translations")
-TRANSLATION_LANGS = ["ko", "ja"]
+TRANSLATION_LANGS = ["ko", "ja", "en", "es", "zh_CN", "zh_TW"]
+"""배포본에 실을 Qt 기본 위젯 번역. `lang/`에 있는 일곱 언어에 맞춘다.
+
+입력칸 우클릭 메뉴와 QMessageBox 기본 단추가 이 파일에서 나온다. 빠뜨린 언어는 그 자리만
+영어가 되어, 앱은 그 언어인데 메뉴만 영어인 상태가 된다. 태국어는 Qt에 qtbase 번역이 없어
+뺐고, en은 33바이트뿐이라 넣어 두면 "찾지 못했습니다" 안내가 뜨지 않는다. 여섯을 합쳐 708KB다.
+"""
 TRANSLATION_DATAS = [
     (os.path.join(QT_TRANSLATIONS_DIR, f"qtbase_{lang}.qm"), "translations")
     for lang in TRANSLATION_LANGS
@@ -82,6 +89,7 @@ a = Analysis(
         ("assets/fonts/PretendardJP-Regular.ttf", "assets/fonts"),
         ("assets/fonts/JetBrainsMono-Regular.ttf", "assets/fonts"),
         ("assets/logo", "assets/logo"),
+        ("lang", "lang"),
     ] + TRANSLATION_DATAS,
     hiddenimports=[],
     hookspath=[],
@@ -150,3 +158,24 @@ coll = COLLECT(
     upx_exclude=[],
     name=APP_NAME,
 )
+
+
+README_SOURCE = "readme.txt"
+README_SHIPPED = "도움말(README).txt"
+"""배포본에서만 이름을 바꿔 단다. 쓰는 사람 대다수가 한국어라 `readme`보다
+`도움말`이 먼저 읽히고, 괄호 안의 README가 영어권 사용자에게 같은 것임을 알린다.
+저장소 쪽은 `readme.txt` 그대로 둔다 - 도구와 편집기가 알아보는 이름이다."""
+
+
+def install_readme():
+    """안내문을 exe 바로 옆에 둔다.
+
+    datas로 넣으면 PyInstaller 6이 `_internal/` 안에 넣는데, 이 파일은 사용자가 열어
+    보라고 두는 것이라 거기 있으면 눈에 띄지 않는다. COLLECT가 끝나면 dist 폴더가
+    이미 만들어져 있으므로 그 뒤에 복사한다.
+    """
+    shutil.copyfile(os.path.join(SPECPATH, README_SOURCE),
+                    os.path.join(DISTPATH, APP_NAME, README_SHIPPED))
+
+
+install_readme()

@@ -12,10 +12,12 @@ from src import autostart, shortcuts
 from src.appicon import get_app_icon, app_icon_with_progress
 from src.titlelogo import LOGO_HEIGHT, build_logo
 from src.utils import localized_app_name
+from src.i18n import t
 from src.icons import get_icon
-from src.qss import palette
-from src.widgets import (GridListWidget, FavoriteItemWidget, RoundedMenu,
-                         EmptyStateOverlay, NoFocusDelegate)
+from src.qss import palette, SIDE_MARGIN
+from src.qtparts import (GridListWidget, RoundedMenu, NoFocusDelegate,
+                         HoverTabBar)
+from src.widgets import FavoriteItemWidget, EmptyStateOverlay
 
 class MainWindowUI:
     ICON_BUTTON_SIZE = 32
@@ -31,10 +33,11 @@ class MainWindowUI:
     DEFAULT_WIDTH = 1100
     DEFAULT_HEIGHT = 700
     """처음 뜰 때의 크기. 화면이 이보다 좁으면 `_apply_initial_geometry`가 줄인다."""
-    TAB_ICONS = (("download", "ctx_download", "받는 중인 영상 목록"),
-                 ("tab_history", "ctx_history", "지금까지 받은 영상"),
-                 ("tab_favorites", "ctx_favorites", "새 회차를 챙길 시리즈"))
-    """탭마다 (아이콘, 강조색, 툴팁). 이름만으로는 무엇이 담기는지 애매해 설명을 붙인다."""
+    TAB_ICONS = (("download", "ctx_download", "download_tab.tab_tooltip"),
+                 ("tab_history", "ctx_history", "history_tab.tab_tooltip"),
+                 ("tab_favorites", "ctx_favorites", "favorites_tab.tab_tooltip"))
+    """탭마다 (아이콘, 강조색, 툴팁 키). 문자열 값을 직접 담으면 클래스 정의 시점(모듈
+    로드 시)에 언어가 굳으므로 t()로 매번 새로 찾을 키만 담는다."""
     FAV_COLUMNS = 2
     FAV_MIN_CARD_WIDTH = 340
     LOG_PANE_WIDTH = 390
@@ -46,9 +49,13 @@ class MainWindowUI:
 
     LEFT_PANE_MIN_WIDTH = 360
 
-    TAB_MARGIN = 12
+    TAB_MARGIN = SIDE_MARGIN
     TAB_SPACING = 8
-    """세 탭이 같은 여백을 쓴다. 탭을 옮길 때 제목이 제자리에 있어야 한다."""
+    """세 탭이 같은 여백을 쓴다. 탭을 옮길 때 제목이 제자리에 있어야 한다.
+
+    가장자리 여백을 SIDE_MARGIN에서 받는 것은 헤더 · 입력바 · 탭 상자와 왼쪽 끝이
+    한 줄에 서야 하기 때문이다. 값을 여기서 따로 정하면 그 줄이 다시 어긋난다.
+    """
 
     HEADER_ROW_HEIGHT = 32
     """탭 제목 줄의 높이. 줄 안에 무엇이 들어가든 이 높이로 고정한다.
@@ -98,9 +105,13 @@ class MainWindowUI:
         self._empty_states.append(overlay)
         return overlay
 
-    def _make_search_input(self, placeholder: str = "검색...") -> QLineEdit:
-        """탭 제목 줄 오른쪽에 놓는 검색칸. 세 탭이 같은 모양을 쓴다."""
-        box = QLineEdit(placeholderText=placeholder)
+    def _make_search_input(self, placeholder: str = None) -> QLineEdit:
+        """탭 제목 줄 오른쪽에 놓는 검색칸. 세 탭이 같은 모양을 쓴다.
+
+        기본값을 None으로 두는 것은 t()를 매개변수 자리에 직접 넣으면 이 메서드를
+        정의하는 모듈 로드 시점에 언어가 굳기 때문이다 - 본문에서 매번 새로 구한다.
+        """
+        box = QLineEdit(placeholderText=placeholder or t("common.search_placeholder"))
         box.setClearButtonEnabled(True)
         box.setFixedWidth(self.SEARCH_INPUT_WIDTH)
         return box
@@ -155,7 +166,8 @@ class MainWindowUI:
         """지금 테마가 아니라 '누르면 갈 테마'를 보여준다."""
         going_dark = theme == "light"
         self.theme_button.setProperty("icon_name", "theme_dark" if going_dark else "theme_light")
-        self.theme_button.setToolTip("다크 테마로 전환" if going_dark else "라이트 테마로 전환")
+        self.theme_button.setToolTip(t("main_window.theme_dark_tooltip") if going_dark
+                                     else t("main_window.theme_light_tooltip"))
         self._paint_icon(self.theme_button)
 
     def set_primary_action_enabled(self, enabled: bool):
@@ -210,14 +222,15 @@ class MainWindowUI:
 
     def _create_header(self, root_layout):
         header = QFrame(objectName="AppHeader")
-        layout = QHBoxLayout(header); layout.setContentsMargins(16, 8, 16, 8); layout.setSpacing(4)
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(SIDE_MARGIN, 8, SIDE_MARGIN, 8); layout.setSpacing(4)
         self.app_title = QLabel(objectName="AppTitle")
         self.app_title.setFixedHeight(LOGO_HEIGHT)
         self._apply_title_logo()
-        self.settings_button = self._make_icon_button("settings", "설정")
-        self.theme_button = self._make_icon_button("theme_dark", "다크 테마로 전환")
-        self.on_top_btn = self._make_icon_button("pin", "항상 위", checkable=True)
-        self.about_button = self._make_icon_button("info", "정보")
+        self.settings_button = self._make_icon_button("settings", t("main_window.settings_tooltip"))
+        self.theme_button = self._make_icon_button("theme_dark", t("main_window.theme_dark_tooltip"))
+        self.on_top_btn = self._make_icon_button("pin", t("main_window.pin_tooltip"), checkable=True)
+        self.about_button = self._make_icon_button("info", t("main_window.about_tooltip"))
         layout.addWidget(self.app_title); layout.addStretch(1)
         for btn in (self.settings_button, self.theme_button,
                     self.on_top_btn, self.about_button):
@@ -226,13 +239,12 @@ class MainWindowUI:
 
     def _create_input_bar(self, root_layout):
         input_bar = QFrame(objectName="InputBar")
-        layout = QHBoxLayout(input_bar); layout.setContentsMargins(16, 12, 16, 12); layout.setSpacing(10)
-        self.url_input = QLineEdit(placeholderText="TVer 영상 URL 붙여넣기 또는 끌어다 놓기", objectName="UrlInput")
-        self.url_input.setToolTip(
-            "브라우저 주소창에서 주소를 끌어다 놓아도 됩니다.\n"
-            "여러 개를 한 번에 놓으면 다중 추가 창이 열립니다.")
-        self.bulk_button = QPushButton("다중 추가")
-        self.add_button = QPushButton("다운로드", objectName="PrimaryButton")
+        layout = QHBoxLayout(input_bar)
+        layout.setContentsMargins(SIDE_MARGIN, 12, SIDE_MARGIN, 12); layout.setSpacing(10)
+        self.url_input = QLineEdit(placeholderText=t("main_window.url_placeholder"), objectName="UrlInput")
+        self.url_input.setToolTip(t("main_window.url_tooltip"))
+        self.bulk_button = QPushButton(t("main_window.bulk_add_button"))
+        self.add_button = QPushButton(t("main_window.download_button"), objectName="PrimaryButton")
         self._register_icon(self.bulk_button, "bulk_add")
         self._register_icon(self.add_button, "download", color_key="primary_fg")
         for btn in (self.bulk_button, self.add_button):
@@ -243,11 +255,11 @@ class MainWindowUI:
     def _create_tabs(self, root_layout):
         self.tabs = QTabWidget(objectName="MainTabs")
         self.tabs.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
+        self.tabs.setTabBar(HoverTabBar())
         self.tabs.setDocumentMode(True)
         tab_bar = self.tabs.tabBar()
         tab_bar.setDrawBase(False)
         tab_bar.setExpanding(False)
-        tab_bar.setCursor(Qt.CursorShape.PointingHandCursor)
         self._create_download_tab()
         self._create_history_tab()
         self._create_favorites_tab()
@@ -272,10 +284,10 @@ class MainWindowUI:
             self.tabs.setTabIcon(index, get_icon(name, self._icon_colors[color_key], self.ICON_SIZE))
 
     def _apply_tab_tooltips(self):
-        for index, (_name, _ctx_key, tooltip) in enumerate(self.TAB_ICONS):
+        for index, (_name, _ctx_key, tooltip_key) in enumerate(self.TAB_ICONS):
             if index >= self.tabs.count():
                 break
-            self.tabs.setTabToolTip(index, tooltip)
+            self.tabs.setTabToolTip(index, t(tooltip_key))
 
     def _create_download_tab(self):
         """다운로드 목록과 로그를 좌우로 놓는다.
@@ -290,20 +302,16 @@ class MainWindowUI:
         left_pane = QFrame(objectName="LeftPane"); left_layout = QVBoxLayout(left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(self.TAB_SPACING); row = QHBoxLayout()
-        self.queue_start_button = QPushButton("대기열 시작", objectName="PrimaryButton")
-        self.queue_start_button.setToolTip(
-            "지난 실행에서 남은 대기 항목을 지금부터 받습니다.\n"
-            "TVer는 일본 지역 제한이 있으니 VPN을 켠 뒤에 누르십시오.")
+        self.queue_start_button = QPushButton(t("download_tab.queue_start_button"), objectName="PrimaryButton")
+        self.queue_start_button.setToolTip(t("download_tab.queue_start_tooltip"))
         self.queue_start_button.setVisible(False)
-        self.cancel_selected_button = QPushButton("선택 항목 취소", objectName="DangerButton")
-        self.cancel_selected_button.setToolTip(
-            "진행 중인 항목은 중지하고, 대기 중인 항목은 대기열에서 뺍니다.\n"
-            "여러 개를 선택하면 한 번에 처리합니다.")
+        self.cancel_selected_button = QPushButton(t("download_tab.cancel_selected_button"), objectName="DangerButton")
+        self.cancel_selected_button.setToolTip(t("download_tab.cancel_selected_tooltip"))
         self.cancel_selected_button.setEnabled(False)
-        self.clear_completed_button = QPushButton("완료 항목 삭제", objectName="CautionButton")
-        self.queue_count_label = QLabel("0 대기 / 0 진행", objectName="PaneSubtitle")
-        self.log_toggle_btn = self._make_icon_button("log", "로그 숨기기")
-        row.addWidget(self._make_pane_title("다운로드 목록")); row.addStretch(1)
+        self.clear_completed_button = QPushButton(t("download_tab.clear_completed_button"), objectName="CautionButton")
+        self.queue_count_label = QLabel(t("download_tab.queue_count", queued=0, active=0), objectName="PaneSubtitle")
+        self.log_toggle_btn = self._make_icon_button("log", t("download_tab.log_hide_tooltip"))
+        row.addWidget(self._make_pane_title(t("download_tab.pane_title"))); row.addStretch(1)
         row.addWidget(self.queue_start_button)
         row.addWidget(self.cancel_selected_button)
         row.addWidget(self.clear_completed_button)
@@ -316,17 +324,16 @@ class MainWindowUI:
         self.download_list.setSpacing(6)
         self._hide_focus_rect(self.download_list)
         self.download_empty = self._add_empty_state(
-            self.download_list, "download", "다운로드 중인 영상이 없습니다",
-            "위 다운로드 주소창에 TVer 주소를 붙여넣고 다운로드를 누르면 "
-            "여기에서 다운로드가 진행됩니다.")
+            self.download_list, "download", t("download_tab.empty_title"),
+            t("download_tab.empty_description"))
         left_layout.addWidget(self.download_list, 1)
 
         right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(self.TAB_SPACING); row_log = QHBoxLayout()
-        self.clear_log_button = QPushButton("지우기")
-        self.clear_log_button.setToolTip("로그 패널의 내용을 비웁니다.")
-        row_log.addWidget(self._make_pane_title("로그")); row_log.addStretch(1)
+        self.clear_log_button = QPushButton(t("download_tab.log_clear_button"))
+        self.clear_log_button.setToolTip(t("download_tab.log_clear_tooltip"))
+        row_log.addWidget(self._make_pane_title(t("download_tab.log_pane_title"))); row_log.addStretch(1)
         row_log.addWidget(self.clear_log_button)
         self.log_output = QTextEdit(objectName="LogOutput", readOnly=True)
         right_layout.addLayout(row_log); right_layout.addWidget(self.log_output, 1)
@@ -335,7 +342,7 @@ class MainWindowUI:
         self.log_pane = right_pane
         left_pane.setMinimumWidth(self.LEFT_PANE_MIN_WIDTH)
         panes.addWidget(left_pane, 1); panes.addWidget(right_pane)
-        layout.addLayout(panes, 1); self.tabs.addTab(tab, "다운로드")
+        layout.addLayout(panes, 1); self.tabs.addTab(tab, t("download_tab.tab_title"))
 
     def set_queue_start_visible(self, visible: bool):
         """`대기열 시작`을 되살린 항목이 있을 때만 보인다.
@@ -364,18 +371,19 @@ class MainWindowUI:
     def update_log_toggle_button(self, visible: bool):
         """지금 상태가 아니라 '누르면 일어날 일'을 알려 준다."""
         self._set_hinted_tooltip("log_toggle_btn",
-                                 "로그 숨기기" if visible else "로그 보기")
+                                 t("download_tab.log_hide_tooltip") if visible
+                                 else t("download_tab.log_show_tooltip"))
 
     def _create_history_tab(self):
         tab, layout = self._tab_page("HistoryTab")
         top_controls = QHBoxLayout()
-        self.history_del_btn = QPushButton("삭제", objectName="DangerButton")
-        self.history_del_btn.setToolTip("선택한 기록을 목록에서 제거합니다. 받아 둔 파일은 남습니다.")
+        self.history_del_btn = QPushButton(t("history_tab.delete_button"), objectName="DangerButton")
+        self.history_del_btn.setToolTip(t("history_tab.delete_tooltip"))
         self.history_sort_combo = QComboBox()
-        self.history_sort_combo.addItem("다운로드 최신순")
-        self.history_sort_combo.addItem("제목 오름차순")
+        self.history_sort_combo.addItem(t("history_tab.sort_recent"))
+        self.history_sort_combo.addItem(t("history_tab.sort_title"))
         self.history_search_input = self._make_search_input()
-        top_controls.addWidget(self._make_pane_title("다운로드 기록"))
+        top_controls.addWidget(self._make_pane_title(t("history_tab.pane_title")))
         top_controls.addStretch(1)
         top_controls.addWidget(self.history_del_btn)
         top_controls.addWidget(self.history_sort_combo)
@@ -387,23 +395,23 @@ class MainWindowUI:
         self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_empty = self._add_empty_state(
-            self.history_list, "tab_history", "받은 영상이 아직 없습니다",
-            "다운로드가 끝난 영상이 여기에 차례로 남습니다.",
-            "찾는 기록이 없습니다", "다른 낱말로 찾아보세요.")
+            self.history_list, "tab_history", t("history_tab.empty_title"),
+            t("history_tab.empty_description"),
+            t("history_tab.empty_filtered_title"), t("history_tab.empty_filtered_description"))
         layout.addWidget(self.history_list, 1)
-        self.tabs.addTab(tab, "기록")
+        self.tabs.addTab(tab, t("history_tab.tab_title"))
 
     def _create_favorites_tab(self):
         tab, layout = self._tab_page("FavoritesTab")
         row = QHBoxLayout()
-        row.addWidget(self._make_pane_title("즐겨찾기 (시리즈)"))
+        row.addWidget(self._make_pane_title(t("favorites_tab.pane_title")))
         row.addStretch(1)
         self.fav_input = QLineEdit(placeholderText="https://tver.jp/series/...")
         self.fav_input.setFixedWidth(self.FAV_INPUT_WIDTH)
-        self.fav_add_btn = QPushButton("추가", objectName="AddButton")
-        self.fav_del_btn = QPushButton("삭제", objectName="DangerButton")
-        self.fav_chk_btn = QPushButton("갱신", objectName="RefreshButton")
-        self.fav_chk_btn.setToolTip("등록한 시리즈를 모두 확인해 새로 올라온 회차를 찾습니다.")
+        self.fav_add_btn = QPushButton(t("favorites_tab.add_button"), objectName="AddButton")
+        self.fav_del_btn = QPushButton(t("favorites_tab.delete_button"), objectName="DangerButton")
+        self.fav_chk_btn = QPushButton(t("favorites_tab.refresh_button"), objectName="RefreshButton")
+        self.fav_chk_btn.setToolTip(t("favorites_tab.refresh_tooltip"))
         self.fav_search_input = self._make_search_input()
         for widget in (self.fav_input, self.fav_add_btn, self.fav_del_btn,
                        self.fav_chk_btn, self.fav_search_input):
@@ -418,11 +426,10 @@ class MainWindowUI:
         self.fav_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.fav_empty = self._add_empty_state(
-            self.fav_list, "tab_favorites", "담아 둔 시리즈가 없습니다",
-            "시리즈 주소를 담아 두고 위의 갱신을 누르면 새 회차를 찾아 줍니다. "
-            "프로그램을 켤 때 자동으로 찾게 하려면 설정 > 일반에서 켜십시오.",
-            "찾는 시리즈가 없습니다", "다른 낱말로 찾아보세요.")
-        layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, "즐겨찾기")
+            self.fav_list, "tab_favorites", t("favorites_tab.empty_title"),
+            t("favorites_tab.empty_description"),
+            t("favorites_tab.empty_filtered_title"), t("favorites_tab.empty_filtered_description"))
+        layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, t("favorites_tab.tab_title"))
 
     TRAY_GITHUB_URL = "https://github.com/deuxdoom/TVerDownloader"
 
@@ -438,29 +445,28 @@ class MainWindowUI:
         self.update_tray_status(0, 0, None)
         tray_menu = RoundedMenu()
 
-        restore_action = QAction(f"{localized_app_name()} 열기", self.main_window,
+        restore_action = QAction(t("tray.open", app_name=localized_app_name()), self.main_window,
                                  triggered=self.main_window.bring_to_front)
         bold = QFont(restore_action.font()); bold.setBold(True)
         restore_action.setFont(bold)
         tray_menu.addAction(restore_action)
         tray_menu.addSeparator()
 
-        self.autostart_action = QAction("윈도우 시작 시 실행", self.main_window, checkable=True)
+        self.autostart_action = QAction(t("tray.autostart"), self.main_window, checkable=True)
         self.autostart_action.toggled.connect(self.main_window.set_autostart)
         if not autostart.supported():
             self.autostart_action.setEnabled(False)
-            self.autostart_action.setToolTip(
-                "빌드된 실행 파일에서만 켤 수 있습니다.")
+            self.autostart_action.setToolTip(t("tray.autostart_disabled_tooltip"))
         tray_menu.addAction(self.autostart_action)
 
-        tray_menu.addAction(QAction("GitHub 페이지", self.main_window,
+        tray_menu.addAction(QAction(t("tray.github"), self.main_window,
                                     triggered=lambda: webbrowser.open(self.TRAY_GITHUB_URL)))
 
-        tray_menu.addAction(QAction("설정", self.main_window,
+        tray_menu.addAction(QAction(t("tray.settings"), self.main_window,
                                     triggered=self.main_window.open_settings))
         tray_menu.addSeparator()
 
-        tray_menu.addAction(QAction("프로그램 종료", self.main_window,
+        tray_menu.addAction(QAction(t("tray.quit"), self.main_window,
                                     triggered=self.main_window.quit_application))
 
         tray_menu.aboutToShow.connect(self.sync_autostart_check)
@@ -476,7 +482,7 @@ class MainWindowUI:
         """
         lines = [self._tray_name]
         if queued or active:
-            head = f"{queued} 대기 / {active} 진행"
+            head = t("tray.status", queued=queued, active=active)
             lines.append(f"{head} · {percent}%" if percent is not None else head)
         self.main_window.tray_icon.setToolTip("\n".join(lines))
         self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))

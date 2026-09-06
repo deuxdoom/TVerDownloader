@@ -8,6 +8,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QDialogButtonBox, QGridLayout, QMessageBox, QWidget
 
+from src.i18n import t
 from src.icons import get_icon
 from src.qss import palette
 
@@ -66,13 +67,15 @@ def _build_box(parent: QWidget | None, title: str, text: str,
 
 def notify(parent: QWidget | None, title: str, text: str, *,
            icon_name: str = "info", color_key: str = "accent",
-           theme: str = "light", ok_text: str = "확인") -> None:
+           theme: str = "light", ok_text: str | None = None) -> None:
     """단추 하나짜리 알림 창.
 
     QMessageBox.information()을 쓰지 않는 이유는 확인 창과 같다 - 나란히 놓으면 다른 앱처럼 보인다.
+    ok_text 기본값을 매개변수 자리에서 바로 t()로 채우지 않는 것은, 그러면 이 함수를
+    처음 정의하는 모듈 로드 시점(아직 i18n.setup() 전)에 언어가 굳어 버리기 때문이다.
     """
     box = _build_box(parent, title, text, icon_name, color_key, theme)
-    ok_button = box.addButton(ok_text, QMessageBox.ButtonRole.AcceptRole)
+    ok_button = box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole)
     ok_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(ok_button)
     box.exec()
@@ -80,13 +83,13 @@ def notify(parent: QWidget | None, title: str, text: str, *,
 
 def confirm(parent: QWidget | None, title: str, text: str, *,
             icon_name: str = "info", color_key: str = "accent",
-            theme: str = "light", yes_text: str = "예", no_text: str = "아니오",
+            theme: str = "light", yes_text: str | None = None, no_text: str | None = None,
             default_yes: bool = False) -> bool:
     """예/아니오 확인 창을 띄우고 '예'를 눌렀는지 돌려준다."""
     box = _build_box(parent, title, text, icon_name, color_key, theme)
 
-    yes_button = box.addButton(yes_text, QMessageBox.ButtonRole.YesRole)
-    no_button = box.addButton(no_text, QMessageBox.ButtonRole.NoRole)
+    yes_button = box.addButton(yes_text or t("common.yes"), QMessageBox.ButtonRole.YesRole)
+    no_button = box.addButton(no_text or t("common.no"), QMessageBox.ButtonRole.NoRole)
     yes_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(yes_button if default_yes else no_button)
 
@@ -113,7 +116,7 @@ class _ClosableBox(_ConfirmBox):
         X를 아예 잠근다(실측: SC_CLOSE가 GRAYED). 그래서 보이지 않는 RejectRole 단추를
         하나 두고 그것을 지정한다. 보이는 단추를 쓰면 놓쳤을 때 '지금 업데이트'가 눌린다.
         """
-        button = self.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+        button = self.addButton(t("common.close"), QMessageBox.ButtonRole.RejectRole)
         button.hide()
         self.setEscapeButton(button)
 
@@ -174,7 +177,7 @@ def confirm_single(parent: QWidget | None, title: str, text: str, *, ok_text: st
     if not icon.isNull():
         box.setIconPixmap(icon.pixmap(QSize(ICON_PX, ICON_PX)))
 
-    ok_button = box.addButton(ok_text, QMessageBox.ButtonRole.AcceptRole)
+    ok_button = box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole)
     ok_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(ok_button)
     box.arm_escape()

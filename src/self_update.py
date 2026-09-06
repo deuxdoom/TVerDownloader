@@ -14,6 +14,8 @@ import zipfile
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
+from src.i18n import t
+
 APP_EXE_NAME = "TVerDownloader.exe"
 INTERNAL_DIR_NAME = "_internal"
 
@@ -102,19 +104,19 @@ def verify_package(zip_path: Path) -> Tuple[bool, str, str]:
     CRC까지 본다(testzip). exe와 _internal이 실제로 들어 있는지도 함께 본다.
     """
     if not zip_path.exists() or zip_path.stat().st_size == 0:
-        return False, "", "내려받은 파일이 비어 있습니다."
+        return False, "", t("update.pkg_empty")
     try:
         with zipfile.ZipFile(zip_path) as archive:
             broken = archive.testzip()
             if broken is not None:
-                return False, "", f"압축 파일이 손상되었습니다: {broken}"
+                return False, "", t("update.pkg_broken", name=broken)
             root = find_payload_root(archive.namelist())
     except (zipfile.BadZipFile, OSError) as error:
-        return False, "", f"압축 파일을 열지 못했습니다: {error}"
+        return False, "", t("update.pkg_unreadable", error=error)
 
     if root is None:
-        return False, "", (f"압축 안에서 {APP_EXE_NAME}과 {INTERNAL_DIR_NAME} 폴더를 "
-                           "찾지 못했습니다.")
+        return False, "", t("update.pkg_incomplete", exe=APP_EXE_NAME,
+                            folder=INTERNAL_DIR_NAME)
     return True, root, ""
 
 
@@ -152,31 +154,44 @@ MOVE_RETRY_WAIT = 2
 SETTLE_SECONDS = 2
 """본체가 닫힌 뒤 손대기 전에 두는 뜸. 백신이 그 프로세스의 파일들을 아직 훑고 있다."""
 
+ECHO_ESCAPES = {"^": "^^", "&": "^&", "<": "^<", ">": "^>", "|": "^|", "%": "%%"}
+"""배치의 echo·title에 그대로 넣으면 cmd가 명령으로 읽는 글자들과 그 대체 표기."""
+
+
+def echo_safe(text: str) -> str:
+    """번역문을 배치의 한 줄로 쓸 수 있게 다듬는다.
+
+    lang/*.ini는 **사용자가 직접 고치는 파일이라** %나 >가 섞여 들어올 수 있고, 그대로
+    두면 cmd가 변수 확장이나 리다이렉트로 읽어 교체가 그 자리에서 어긋난다. 여러 줄로
+    적힌 값도 한 줄로 눕힌다 - 둘째 줄부터는 echo 없이 남아 그 자체가 명령이 된다.
+    """
+    flat = " ".join((text or "").split())
+    return "".join(ECHO_ESCAPES.get(ch, ch) for ch in flat) or "."
+
 
 def build_batch(app_directory: Path, work_directory: Path, pid: int,
                 exe_name: str = APP_EXE_NAME) -> str:
     """교체를 맡을 배치 내용을 만든다. 순수 함수라 눈으로 보고 검사로 고정할 수 있다.
 
-    **되돌아가는 구간(:waitloop, :move_retry_loop)에는 한국어를 쓰지 않는다.** cmd는
-    배치를 바이트 오프셋으로 되짚어, chcp 65001에서 한글이 섞이면 goto로 돌아간 뒤 줄
-    중간부터 실행되어 주석의 꼬리가 명령이 된다. 앞으로만 가는 구간의 한국어는 멀쩡하다.
+    **되돌아가는 구간(:waitloop, :move_retry_loop)에는 어느 언어도 넣지 않는다.** cmd는
+    배치를 바이트 오프셋으로 되짚어, chcp 65001에서 아스키가 아닌 글자가 섞이면 goto로
+    돌아간 뒤 줄 중간부터 실행되어 주석의 꼬리가 명령이 된다. 앞으로만 가는 구간은 멀쩡해
+    사용자가 읽을 안내를 t()로 넣는다 - 값은 반드시 echo_safe를 거친다.
     """
     app = str(app_directory)
     work = str(work_directory)
+    say = lambda key, **kw: echo_safe(t(key, **kw))
     return f"""@echo off
 chcp 65001 > nul
-title TVer Downloader 업데이트
+title {say("update_batch.title")}
 setlocal
 
-rem 이 파일은 TVer Downloader가 새 버전을 넣기 위해 만든 것입니다.
-rem 하는 일은 아래 세 가지뿐이고, 무엇도 내려받지 않습니다.
-rem   1) 프로그램이 스스로 닫히기를 기다린다
-rem   2) 기존 {exe_name}과 {INTERNAL_DIR_NAME}을 백업 폴더로 옮긴다
-rem   3) 새 파일을 제자리에 옮기고 프로그램을 다시 띄운다
-rem 옮기다 실패하면 백업을 그대로 되돌립니다.
-rem
-rem 되돌아가는 구간(:waitloop, :move_retry_loop)에는 한국어를 쓰지 않습니다.
-rem cmd가 goto로 되짚을 때 바이트 위치가 어긋나 줄 중간부터 실행되기 때문입니다.
+rem {say("update_batch.rem_made_by")}
+rem {say("update_batch.rem_scope")}
+rem   1) {say("update_batch.rem_step1")}
+rem   2) {say("update_batch.rem_step2", exe=exe_name, folder=INTERNAL_DIR_NAME)}
+rem   3) {say("update_batch.rem_step3")}
+rem {say("update_batch.rem_rollback")}
 
 set "APP_DIR={app}"
 set "WORK_DIR={work}"
@@ -185,10 +200,10 @@ set "APP_PID={pid}"
 set "MOVE_TRIES={MOVE_RETRIES}"
 
 echo.
-echo   TVer Downloader 업데이트
+echo   {say("update_batch.title")}
 echo   ================================================
 echo.
-echo   프로그램이 닫히기를 기다리는 중입니다...
+echo   {say("update_batch.waiting")}
 
 set /a WAITED=0
 
@@ -202,8 +217,8 @@ goto waitloop
 
 :give_up
 echo.
-echo   [중단] 프로그램이 닫히지 않아 업데이트를 하지 않았습니다.
-echo   파일은 하나도 건드리지 않았습니다. 프로그램을 끄고 다시 시도해 주세요.
+echo   {say("update_batch.give_up")}
+echo   {say("update_batch.give_up_hint")}
 echo.
 pause
 exit /b 1
@@ -211,27 +226,27 @@ exit /b 1
 :closed
 timeout /t {SETTLE_SECONDS} /nobreak >nul
 
-echo   기존 파일을 백업합니다...
+echo   {say("update_batch.backing_up")}
 call :move_retry "%APP_DIR%\\{INTERNAL_DIR_NAME}" "%WORK_DIR%\\{BACKUP_DIR_NAME}\\{INTERNAL_DIR_NAME}"
 if errorlevel 1 goto restore
 call :move_retry "%APP_DIR%\\%EXE_NAME%" "%WORK_DIR%\\{BACKUP_DIR_NAME}\\%EXE_NAME%"
 if errorlevel 1 goto restore
 
-echo   새 버전을 넣습니다...
+echo   {say("update_batch.installing")}
 call :move_retry "%WORK_DIR%\\{NEW_DIR_NAME}\\{INTERNAL_DIR_NAME}" "%APP_DIR%\\{INTERNAL_DIR_NAME}"
 if errorlevel 1 goto restore
 call :move_retry "%WORK_DIR%\\{NEW_DIR_NAME}\\%EXE_NAME%" "%APP_DIR%\\%EXE_NAME%"
 if errorlevel 1 goto restore
 
 echo.
-echo   업데이트를 마쳤습니다. 프로그램을 다시 시작합니다.
-echo   (남은 백업은 프로그램이 켜질 때 정리합니다)
+echo   {say("update_batch.done")}
+echo   {say("update_batch.done_hint")}
 start "" "%APP_DIR%\\%EXE_NAME%"
 exit /b 0
 
 :restore
 echo.
-echo   [실패] 교체 중 문제가 생겨 원래 버전으로 되돌립니다...
+echo   {say("update_batch.rolling_back")}
 if not exist "%WORK_DIR%\\{BACKUP_DIR_NAME}\\{INTERNAL_DIR_NAME}" goto restore_exe
 if exist "%APP_DIR%\\{INTERNAL_DIR_NAME}" rmdir /s /q "%APP_DIR%\\{INTERNAL_DIR_NAME}"
 call :move_retry "%WORK_DIR%\\{BACKUP_DIR_NAME}\\{INTERNAL_DIR_NAME}" "%APP_DIR%\\{INTERNAL_DIR_NAME}"
@@ -242,7 +257,7 @@ if exist "%APP_DIR%\\%EXE_NAME%" del /q "%APP_DIR%\\%EXE_NAME%"
 call :move_retry "%WORK_DIR%\\{BACKUP_DIR_NAME}\\%EXE_NAME%" "%APP_DIR%\\%EXE_NAME%"
 
 :restore_done
-echo   원래 버전으로 되돌렸습니다. 프로그램을 다시 시작합니다.
+echo   {say("update_batch.rolled_back")}
 start "" "%APP_DIR%\\%EXE_NAME%"
 echo.
 pause

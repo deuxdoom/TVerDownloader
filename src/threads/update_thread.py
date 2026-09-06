@@ -13,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src import self_update
+from src.i18n import t
 from src.utils import github_api_headers, is_rate_limited, rate_limit_message
 
 CHUNK_SIZE = 256 * 1024
@@ -51,30 +52,30 @@ class UpdateDownloadThread(QThread):
         try:
             ok, reason = self._execute()
         except Exception as error:
-            ok, reason = False, f"예상치 못한 오류: {error}"
+            ok, reason = False, t("update.err_unexpected", error=error)
         self.finished.emit(ok, reason)
 
     def _execute(self) -> tuple[bool, str]:
         try:
             import requests
         except ImportError:
-            return False, "requests 모듈이 없어 내려받을 수 없습니다."
+            return False, t("update.err_no_requests")
 
         zip_path = self.work_dir / "package.zip"
-        self.progress.emit(0, "새 버전을 내려받는 중...")
+        self.progress.emit(0, t("update.downloading"))
 
         try:
             response = requests.get(
                 self.asset_url, headers=github_api_headers("TVerDownloader-SelfUpdate"),
                 stream=True, timeout=DOWNLOAD_TIMEOUT)
         except Exception as error:
-            return False, f"내려받기를 시작하지 못했습니다: {error}"
+            return False, t("update.err_start", error=error)
 
         with response:
             if is_rate_limited(response):
                 return False, rate_limit_message(response)
             if response.status_code != 200:
-                return False, f"내려받기에 실패했습니다(HTTP {response.status_code})."
+                return False, t("update.err_http", status=response.status_code)
 
             total = int(response.headers.get("Content-Length") or 0)
             received = 0
@@ -91,42 +92,43 @@ class UpdateDownloadThread(QThread):
                             percent = int(received * self.DOWNLOAD_SHARE / total)
                             self.progress.emit(
                                 percent,
-                                f"새 버전을 내려받는 중... "
-                                f"{received // (1024 * 1024)}MB / {total // (1024 * 1024)}MB")
+                                t("update.downloading_progress",
+                                  done=f"{received // (1024 * 1024)}MB",
+                                  total=f"{total // (1024 * 1024)}MB"))
             except Exception as error:
-                return False, f"내려받는 중 문제가 생겼습니다: {error}"
+                return False, t("update.err_download", error=error)
 
         if self._stop_flag:
             return False, ""
 
-        self.progress.emit(self.DOWNLOAD_SHARE, "받은 파일을 확인하는 중...")
+        self.progress.emit(self.DOWNLOAD_SHARE, t("update.verifying"))
         ok, root, message = self_update.verify_package(zip_path)
         if not ok:
             return False, message
 
-        self.progress.emit(self.DOWNLOAD_SHARE + 3, "새 버전을 준비하는 중...")
+        self.progress.emit(self.DOWNLOAD_SHARE + 3, t("update.extracting"))
         span = 100 - self.DOWNLOAD_SHARE - 3
 
         def on_extract(index: int, count: int):
             self.progress.emit(self.DOWNLOAD_SHARE + 3 + int(index * span / count),
-                               "새 버전을 준비하는 중...")
+                               t("update.extracting"))
 
         try:
             self_update.extract_payload(
                 zip_path, root, self.work_dir / self_update.NEW_DIR_NAME, on_extract)
         except Exception as error:
-            return False, f"압축을 푸는 중 문제가 생겼습니다: {error}"
+            return False, t("update.err_extract", error=error)
 
         if self._stop_flag:
             return False, ""
 
         if not self_update.staged_payload_ok(self.work_dir):
-            return False, "준비된 파일이 온전하지 않아 교체를 시작하지 않았습니다."
+            return False, t("update.err_incomplete")
 
         try:
             zip_path.unlink()
         except OSError:
             pass
 
-        self.progress.emit(100, "준비를 마쳤습니다.")
+        self.progress.emit(100, t("update.ready"))
         return True, ""

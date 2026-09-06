@@ -5,35 +5,31 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from src import updater
 from src.appicon import get_app_icon
+from src.i18n import t
 from src.message import notify
 from src.qss import palette
 from src.utils import open_developer_link, open_feedback_link, localized_app_name
 
-FEATURES = [
-    "에피소드 · 시리즈 URL 분석과 다중 추가",
-    "주소 끌어다 놓기 · 클립보드 자동 인식 · 단축키",
-    "껐다 켜도 남는 대기열, 동시 다운로드와 조각 병렬 조절",
-    "즐겨찾기 시리즈 등록과 신규 회차 확인",
-    "화질 선택, 코덱 재인코딩(GPU 가속), 자막 병합",
-    "끌어놓기로 정렬하는 사용자 정의 파일명 형식",
-    "다운로드 기록과 썸네일 미리보기",
-    "트레이로 최소화, 아이콘에 진행 상황 표시",
-    "프로그램 안에서 바로 새 버전으로 업데이트",
-]
-"""정보 창에 한 줄씩 그대로 찍히는 목록.
 
-**전부 훑는 곳이 아니라 무엇을 하는 앱인지 한눈에 보는 곳이다.** 줄을 더하지 말고 기존
-줄을 고쳐 쓴다. 스크롤이 없어 줄이 늘면 창이 길어지고, 폭 520px에서 478px을 넘는 문구는
-줄바꿈 없이 잘린다.
-"""
+def features() -> list[str]:
+    """정보 창에 한 줄씩 그대로 찍히는 목록. lang/*.ini의 about.features(줄마다 한 항목).
 
-INTRO = ("TVer 콘텐츠를 개인 용도로 다운받는 윈도우 앱입니다.\n"
-         "일본 지역제한이 있는 서비스이기 때문에 일본 VPN환경이 필수입니다.")
-"""창을 열면 맨 먼저 읽는 두 줄.
+    **전부 훑는 곳이 아니라 무엇을 하는 앱인지 한눈에 보는 곳이다.** 줄을 더하지 말고 기존
+    줄을 고쳐 쓴다. 스크롤이 없어 줄이 늘면 창이 길어지고, 폭 520px에서 478px을 넘는 문구는
+    줄바꿈 없이 잘린다. 함수로 둔 것은(모듈 상수가 아니라) 호출마다 지금 언어로 다시
+    읽어야 해서다 - 상수면 이 모듈이 처음 import되는 순간의 언어로 굳는다.
+    """
+    return t("about.features").splitlines()
 
-**VPN을 권장이 아니라 필수로 적는다** - 켜지 않으면 하나도 받아지지 않아, '권장'으로 적으면
-프로그램이 고장 난 것으로 읽힌다. 빈 줄은 두지 않는다(아래 구분선과 겹쳐 문단이 갈라져 보인다).
-"""
+
+def intro() -> str:
+    """창을 열면 맨 먼저 읽는 두 줄. lang/*.ini의 about.intro.
+
+    **VPN을 권장이 아니라 필수로 적는다** - 켜지 않으면 하나도 받아지지 않아, '권장'으로 적으면
+    프로그램이 고장 난 것으로 읽힌다. 빈 줄은 두지 않는다(아래 구분선과 겹쳐 문단이 갈라져 보인다).
+    """
+    return t("about.intro")
+
 
 LINKS = [
     ("yt-dlp", "https://github.com/yt-dlp/yt-dlp"),
@@ -49,7 +45,7 @@ class AboutDialog(QDialog):
         self._colors = palette(theme)
         self._theme = theme
         self._version = version
-        self.setWindowTitle("정보")
+        self.setWindowTitle(t("about.title"))
         self.setWindowIcon(get_app_icon())
         self.setModal(True)
         self.setFixedWidth(520)
@@ -59,16 +55,16 @@ class AboutDialog(QDialog):
         root.setSpacing(14)
 
         root.addLayout(self._build_header(version))
-        root.addWidget(self._label(INTRO, wrap=True))
+        root.addWidget(self._label(intro(), wrap=True))
         root.addWidget(self._separator())
 
-        root.addWidget(self._label("주요 기능", object_name="PaneTitle"))
-        features = QVBoxLayout()
-        features.setContentsMargins(2, 0, 0, 0)
-        features.setSpacing(4)
-        for text in FEATURES:
-            features.addWidget(self._label(f"· {text}"))
-        root.addLayout(features)
+        root.addWidget(self._label(t("about.features_title"), object_name="PaneTitle"))
+        features_layout = QVBoxLayout()
+        features_layout.setContentsMargins(2, 0, 0, 0)
+        features_layout.setSpacing(4)
+        for text in features():
+            features_layout.addWidget(self._label(f"· {text}"))
+        root.addLayout(features_layout)
 
         root.addWidget(self._separator())
 
@@ -82,7 +78,7 @@ class AboutDialog(QDialog):
         root.addWidget(links)
 
         root.addWidget(self._label(
-            "콘텐츠 제공자의 약관과 저작권을 지키는 범위에서 사용해 주세요.",
+            t("about.terms_notice"),
             object_name="PaneSubtitle", wrap=True,
         ))
 
@@ -99,15 +95,15 @@ class AboutDialog(QDialog):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         title_box.addWidget(self._label(localized_app_name(), object_name="SectionTitle"))
-        title_box.addWidget(self._label(f"버전 {version}", object_name="PaneSubtitle"))
+        title_box.addWidget(self._label(t("about.version", version=version), object_name="PaneSubtitle"))
 
         header.addWidget(icon_label)
         header.addLayout(title_box)
         header.addStretch(1)
         return header
 
-    CHECK_LABEL = "업데이트 확인"
-    CHECKING_LABEL = "확인 중..."
+    CHECK_LABEL_KEY = "about.check_update"
+    CHECKING_LABEL_KEY = "about.checking"
 
     def _build_buttons(self) -> QHBoxLayout:
         """왼쪽에 할 일 셋, 오른쪽에 닫기.
@@ -116,16 +112,16 @@ class AboutDialog(QDialog):
         """
         row = QHBoxLayout()
         row.setSpacing(6)
-        youtube_btn = QPushButton("제작자 유투브", objectName="AboutYouTube")
+        youtube_btn = QPushButton(t("about.youtube"), objectName="AboutYouTube")
         youtube_btn.clicked.connect(open_developer_link)
-        contact_btn = QPushButton("문의하기", objectName="AboutContact")
+        contact_btn = QPushButton(t("about.contact"), objectName="AboutContact")
         contact_btn.clicked.connect(open_feedback_link)
 
-        self.check_btn = QPushButton(self.CHECK_LABEL, objectName="AboutUpdate")
+        self.check_btn = QPushButton(t(self.CHECK_LABEL_KEY), objectName="AboutUpdate")
         self.check_btn.clicked.connect(self._check_update)
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close_box.button(QDialogButtonBox.StandardButton.Close).setText("닫기")
+        close_box.button(QDialogButtonBox.StandardButton.Close).setText(t("common.close"))
         close_box.rejected.connect(self.reject)
 
         row.addWidget(youtube_btn)
@@ -143,13 +139,13 @@ class AboutDialog(QDialog):
         잠그고, 그 변화가 화면에 실제로 찍히도록 한 번 처리한 뒤 물어본다.
         """
         self.check_btn.setEnabled(False)
-        self.check_btn.setText(self.CHECKING_LABEL)
+        self.check_btn.setText(t(self.CHECKING_LABEL_KEY))
         QApplication.processEvents()
         try:
             release = updater.fetch_latest(self._log)
         finally:
             self.check_btn.setEnabled(True)
-            self.check_btn.setText(self.CHECK_LABEL)
+            self.check_btn.setText(t(self.CHECK_LABEL_KEY))
         self._on_checked(release is not None, release or {})
 
     def _on_checked(self, ok: bool, release: dict):
@@ -158,18 +154,17 @@ class AboutDialog(QDialog):
         시작할 때 도는 확인과 달리, 눌러서 한 확인이 조용하면 아무 일도 안 일어난 것으로 보인다.
         """
         self.check_btn.setEnabled(True)
-        self.check_btn.setText(self.CHECK_LABEL)
+        self.check_btn.setText(t(self.CHECK_LABEL_KEY))
 
         if not ok:
-            notify(self, "업데이트 확인",
-                   "새 버전이 있는지 확인하지 못했습니다.\n\n"
-                   "인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+            notify(self, t(self.CHECK_LABEL_KEY),
+                   t("about.check_failed_body"),
                    icon_name="info", color_key="warn", theme=self._theme)
             return
 
         if not updater.has_newer(release, self._version):
-            notify(self, "업데이트 확인",
-                   f"이미 최신 버전입니다. (v{self._version})",
+            notify(self, t(self.CHECK_LABEL_KEY),
+                   t("about.up_to_date", version=self._version),
                    icon_name="info", theme=self._theme)
             return
 

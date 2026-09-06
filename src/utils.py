@@ -14,17 +14,22 @@ from PyQt6.QtWidgets import QMessageBox
 from src.shortcuts import defaults as default_shortcuts
 
 APP_NAME_FALLBACK = "TVer Downloader"
-APP_NAME_BY_LANGUAGE = {
-    QLocale.Language.Korean: "티버 다운로더",
-    QLocale.Language.Japanese: "TVer ダウンローダー",
+APP_NAME_BY_CODE = {
+    "ko": "티버 다운로더",
+    "jp": "TVer ダウンローダー",
 }
+"""i18n 언어 코드 -> 앱 이름. i18n.py를 여기서 최상단 import하면 순환(i18n.py가
+이미 이 파일의 get_resource_path를 쓴다)이 생겨 함수 안에서 지연 import한다 -
+titlelogo.py의 build_logo가 get_resource_path를 지연 import하는 것과 같은 이유다.
+"""
 
 
 def localized_app_name(language: QLocale.Language | None = None) -> str:
-    """OS 표시 언어에 맞는 앱 이름. 모르는 언어면 영문. language를 넘기면 그 언어로(검증용)."""
-    if language is None:
-        language = QLocale.system().language()
-    return APP_NAME_BY_LANGUAGE.get(language, APP_NAME_FALLBACK)
+    """앱이 지금 쓰는 언어에 맞는 이름. language를 넘기면 그 OS 언어로 가정한다(검증용)."""
+    from src import i18n
+    code = (i18n.code_for_os_language(language)
+           if language is not None else i18n.current_code())
+    return APP_NAME_BY_CODE.get(code, APP_NAME_FALLBACK)
 
 
 CONFIG_FILE = "downloader_config.json"
@@ -72,7 +77,23 @@ RETIRED_PREFERRED_CODECS = {"vp9": "original", "av1": "original"}
 말없이 바꾸지 않는다 - retired_option_notes()가 로그에 남길 문장을 만든다.
 """
 
-NO_AUDIO_STATUS = "음성 없음"
+STATUS_QUEUED = "queued"
+STATUS_DOWNLOADING = "downloading"
+STATUS_CANCELING = "canceling"
+STATUS_CONVERTING = "converting"
+STATUS_SUBTITLE_CONVERTING = "subtitle_converting"
+STATUS_MERGING = "merging"
+STATUS_EMBEDDING_SUBS = "embedding_subs"
+STATUS_DONE = "done"
+STATUS_ERROR = "error"
+STATUS_CANCELED = "canceled"
+STATUS_CONVERT_ERROR = "convert_error"
+"""내부에서 주고받는 상태 코드(영어). 화면 문구가 곧 비교값이던 3.6.0까지의 방식을
+버렸다 - widgets.py가 이 코드를 t()로 번역해서 보여준다. queue.json/urlhistory.json
+에는 이 값이 저장되지 않으므로(전수 확인) 파일 마이그레이션은 필요 없다.
+"""
+
+NO_AUDIO_STATUS = "no_audio"
 """내려받기는 끝났지만 음성 트랙이 빠진 상태.
 
 파일은 남으니 실패는 아니다. 재다운로드 대상이라 ERROR_STATUSES에 넣되 색은 따로 구분한다.
@@ -106,15 +127,16 @@ def format_duration(seconds) -> str:
         return ""
     if value <= 0:
         return ""
+    from src.i18n import t
     total = round(value)
     if total < 60:
-        return f"{max(1, total)}초"
-    return f"{round(total / 60)}분"
+        return t("card.duration_seconds", value=max(1, total))
+    return t("card.duration_minutes", value=round(total / 60))
 
 
-ERROR_STATUSES = {"오류", "취소됨", "실패", "중단", "변환 오류", NO_AUDIO_STATUS}
+ERROR_STATUSES = {STATUS_ERROR, STATUS_CANCELED, STATUS_CONVERT_ERROR, NO_AUDIO_STATUS}
 
-FINISHED_STATUSES = {"완료", NO_AUDIO_STATUS}
+FINISHED_STATUSES = {STATUS_DONE, NO_AUDIO_STATUS}
 """파일이 손에 남는 종료 상태. 재생·폴더 열기 버튼을 띄울지 판단한다."""
 
 
@@ -192,10 +214,15 @@ def rate_limit_reset_text(response) -> str:
 
 
 def rate_limit_message(response) -> str:
-    """한도 초과 안내 문구. 리셋 시각을 알 수 있으면 함께 붙인다."""
+    """한도 초과 안내 문구. 리셋 시각을 알 수 있으면 함께 붙인다.
+
+    두 조각을 코드에서 이어 붙이는 것은 configparser가 값 앞의 공백을 지워, 뒷문장을
+    ' 제한은...'처럼 띄어쓰기로 시작하게 적어 둘 수 없기 때문이다.
+    """
+    from src.i18n import t
     reset = rate_limit_reset_text(response)
-    tail = f" 제한은 {reset} 이후에 풀립니다." if reset else ""
-    return f"GitHub API 호출 한도를 초과했습니다(인증 없이 시간당 60회).{tail}"
+    head = t("common.rate_limited")
+    return f"{head} {t('common.rate_limit_reset', reset=reset)}" if reset else head
 
 
 def get_resource_path(relative_path) -> Path:
@@ -214,6 +241,7 @@ def load_config() -> Dict[str, Any]:
     """설정 파일 로드(없으면 기본값). dict 병합으로 부분 업데이트 허용."""
     config = {
         "theme": "light",
+        "language": "system",
         "download_folder": "",
         "max_concurrent_downloads": DEFAULT_PARALLEL,
         "concurrent_fragments": DEFAULT_FRAGMENTS,
@@ -363,10 +391,13 @@ def retired_option_notes(config: Dict[str, Any]) -> List[str]:
     **load_config에서 갈아 끼우지 않는 이유가 이것이다** - 거기서 고치면 원래 무엇이었는지가
     사라져 알릴 내용이 남지 않는다. 설정 파일에 되쓰지도 않는다.
     """
+    from src.i18n import t
     notes: List[str] = []
     for key, allowed, retired, kind in (
-        ("hardware_encoder", HARDWARE_ENCODERS, RETIRED_HARDWARE_ENCODERS, "코덱 변환 가속"),
-        ("preferred_codec", PREFERRED_CODECS, RETIRED_PREFERRED_CODECS, "선호 코덱"),
+        ("hardware_encoder", HARDWARE_ENCODERS, RETIRED_HARDWARE_ENCODERS,
+         t("log.retired_encoder_kind")),
+        ("preferred_codec", PREFERRED_CODECS, RETIRED_PREFERRED_CODECS,
+         t("log.retired_codec_kind")),
     ):
         raw = config.get(key)
         if raw is None:
@@ -377,10 +408,10 @@ def retired_option_notes(config: Dict[str, Any]) -> List[str]:
         replacement = retired.get(value)
         was = RETIRED_OPTION_LABELS.get(value, str(raw))
         if replacement is None:
-            notes.append(f"[설정] {kind} 설정값 '{was}'을(를) 알 수 없어 기본값으로 되돌립니다.")
+            notes.append(t("log.retired_unknown", kind=kind, was=was))
         else:
-            notes.append(f"[설정] {kind} '{was}'은(는) 더 이상 지원하지 않습니다. "
-                         f"'{replacement}'(으)로 대신 진행합니다.")
+            notes.append(t("log.retired_replaced", kind=kind, was=was,
+                           replacement=replacement))
     return notes
 
 
@@ -405,15 +436,16 @@ def open_file_location(filepath: str):
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
+    from src.i18n import t
     error_message = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     log_file = "TVerDownloader_crash.log"
     with open(log_file, "w", encoding="utf-8") as f:
         f.write(error_message)
     error_box = QMessageBox()
     error_box.setIcon(QMessageBox.Icon.Critical)
-    error_box.setWindowTitle("오류")
-    error_box.setText("치명적인 오류가 발생했습니다.")
-    error_box.setInformativeText(f"오류 상세가 '{log_file}' 파일에 저장되었습니다.")
+    error_box.setWindowTitle(t("dialog.crash_title"))
+    error_box.setText(t("dialog.crash_text"))
+    error_box.setInformativeText(t("dialog.crash_detail", path=log_file))
     error_box.setStandardButtons(QMessageBox.StandardButton.Ok)
     error_box.exec()
 

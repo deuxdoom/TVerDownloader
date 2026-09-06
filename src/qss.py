@@ -18,6 +18,14 @@ UI_FONT_STACK = ", ".join(f'"{name}"' for name in UI_FONT_FAMILIES)
 SCROLLBAR_WIDTH = 10
 """스크롤바 두께. 목록의 칸 폭 계산이 이 값을 통해 뷰포트 폭에 반영된다."""
 
+SIDE_MARGIN = 12
+"""창 가장자리에서 내용까지의 여백. 위에서 아래까지 세로로 줄이 맞아야 하는 값이다.
+
+헤더 · 입력바 · 탭 상자 · 탭 안쪽이 각자 숫자를 들고 있어 위 두 줄만 16이었다(실측:
+16/16/12/12). 눈에 잘 띄지 않으면서 한 번 어긋나면 창을 넓힐수록 도드라지므로 한
+곳에서 낸다 - QSS의 tab-bar left와 `MainWindowUI.TAB_MARGIN`이 모두 이 값을 받는다.
+"""
+
 
 def blend(fg: str, bg: str, ratio: float) -> str:
     """fg를 bg 위에 ratio 만큼 섞은 색. 은은한 선택 배경을 만드는 데 쓴다."""
@@ -320,7 +328,7 @@ def build_qss(theme: str = "dark") -> str:
        본체 서체를 물려받지 않는다. 크기를 명시해야 설정창 안에서 일관되게 보인다.
 
        **여기서 그리는 둥근 상자가 실제로 보이는 팝업의 전부다.** 그것을 담은
-       바깥 창은 apply_combo_popup_shape(src/widgets.py)가 투명으로 만든다.
+       바깥 창은 apply_combo_popup_shape(src/qtparts.py)가 투명으로 만든다.
        그 처리가 빠지면 이 둥근 상자 바깥에 사각형 창이 그대로 남아 테두리가
        이중으로 보인다. 모서리 값은 메뉴와 같은 것을 쓴다. */
     QComboBox {{
@@ -405,7 +413,7 @@ def build_qss(theme: str = "dark") -> str:
 
     /* 메뉴 — 트레이 우클릭과 목록 우클릭이 같은 모양을 쓴다.
        모서리를 둥글게 보이려면 QSS만으로는 안 되고 창 배경이 투명해야 한다.
-       그쪽은 RoundedMenu(src/widgets.py)가 맡는다. */
+       그쪽은 RoundedMenu(src/qtparts.py)가 맡는다. */
     QMenu {{
         background: {colors["surface"]};
         border: 1px solid {colors["border"]};
@@ -502,7 +510,7 @@ def build_qss(theme: str = "dark") -> str:
     /* 세그먼트 컨트롤 — 알약 배경 안에서 선택된 항목만 떠오른다 (UI_REDESIGN.md 4항).
        QTabWidget 구조는 그대로 두고 탭 바 모양만 다시 그린다. */
     #MainTabs::pane {{ border: none; }}
-    #MainTabs::tab-bar {{ alignment: left; left: 12px; }}
+    #MainTabs::tab-bar {{ alignment: left; left: {SIDE_MARGIN}px; }}
     #MainTabs QTabBar {{
         background: transparent;
         border: none;
@@ -548,7 +556,7 @@ def build_qss(theme: str = "dark") -> str:
 
        고른 행에 생기던 사각 자국은 여기서 고칠 수 없다. 그것은 배경이 아니라
        초점 사각형이고, `outline: none`을 넣어 봐야 그대로 그려진다(실측).
-       `NoFocusDelegate`(src/widgets.py)가 맡는다. */
+       `NoFocusDelegate`(src/qtparts.py)가 맡는다. */
     QListWidget#DownloadList::item, QListWidget#HistoryList::item,
     QListWidget#FavoritesList::item {{ background: transparent; border-radius: 10px; }}
     QListWidget#DownloadList::item:selected {{ background: {tint_dl}; }}

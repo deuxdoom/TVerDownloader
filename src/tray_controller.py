@@ -9,8 +9,11 @@
 
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
 from PyQt6.QtCore import QTimer
+from PyQt6.QtNetwork import QLocalServer
 
+from src import app_restart
 from src.utils import localized_app_name
+from src.i18n import t
 from src.message import confirm
 
 
@@ -36,7 +39,7 @@ class TrayController:
     def on_queue_changed(self, queued: int, active: int):
         """대기·진행 개수가 바뀌면 화면 라벨과 트레이를 함께 맞춘다."""
         self._queue_counts = (queued, active)
-        self.window.ui.queue_count_label.setText(f"{queued} 대기 / {active} 진행")
+        self.window.ui.queue_count_label.setText(t("download_tab.queue_count", queued=queued, active=active))
         self.refresh_status()
 
     def refresh_status(self):
@@ -70,8 +73,10 @@ class TrayController:
     def notify_all_finished(self):
         """묶음이 다 끝났음을 로그와 풍선 알림으로 알린다."""
         window = self.window
-        window.append_log("모든 다운로드가 완료되었습니다.")
-        window.tray_icon.showMessage("다운로드 완료", "모든 작업이 끝났습니다!", window.windowIcon(), 5000)
+        window.append_log(t("log.all_finished"))
+        window.tray_icon.showMessage(t("dialog.tray_message_title"),
+                                     t("dialog.tray_message_body"),
+                                     window.windowIcon(), 5000)
 
     def handle_minimized(self):
         """최소화를 트레이로 내려가는 동작으로 바꾼다.
@@ -80,7 +85,7 @@ class TrayController:
         """
         window = self.window
         window.hide()
-        window.tray_icon.showMessage(localized_app_name(), "프로그램이 트레이로 이동했습니다.",
+        window.tray_icon.showMessage(localized_app_name(), t("dialog.tray_minimized"),
                                      window.windowIcon(), 2000)
 
     def handle_close(self, event):
@@ -92,10 +97,10 @@ class TrayController:
         if window.force_quit: event.accept(); return
         if window.config.get("close_action", "exit") == "tray":
             event.ignore(); window.hide()
-            window.tray_icon.showMessage(localized_app_name(), "프로그램이 트레이로 이동했습니다.",
+            window.tray_icon.showMessage(localized_app_name(), t("dialog.tray_minimized"),
                                          window.windowIcon(), 2000)
             return
-        if confirm(window, "종료 확인", "종료하시겠습니까?",
+        if confirm(window, t("dialog.quit_title"), t("dialog.quit_body"),
                    icon_name="cancel", color_key="danger",
                    theme=window.config.get("theme", "light")):
             self.quit_application(); event.accept()
@@ -109,10 +114,29 @@ class TrayController:
         훑어서, 변환만 남은 항목이 걸리지 않아 창이 닫힌 뒤에도 ffmpeg가 계속 돌았다.
         """
         window = self.window
-        window.append_log("프로그램을 종료합니다...")
+        window.append_log(t("log.app_quit"))
         self._timer.stop()
         window.stop_region_check()
         stopped = window.download_manager.stop_all()
         if stopped:
-            window.append_log(f"[대기열] 진행 중이던 작업 {stopped}개를 중지했습니다.")
+            window.append_log(t("log.queue_stopped", count=stopped))
         window.force_quit = True; window.tray_icon.hide(); QApplication.instance().quit()
+
+    def restart_for_language_change(self) -> bool:
+        """언어를 바꾼 뒤 앱을 다시 띄운다. 성공 여부를 돌려준다.
+
+        **되돌릴 수 있는 일(소켓 비우기)을 먼저 하고, 되돌릴 수 없는 정리는 새 프로세스가
+        확실히 뜬 뒤에만 한다.** 새 프로세스가 뜨는 시점에 소켓 자리가 이미 비어 있으므로
+        PID가 죽기를 기다릴 필요가 없고, spawn이 실패해도 소켓을 되살려 그대로 계속 쓴다 -
+        '새것도 못 띄우고 기존 것도 잃는' 상황이 설계적으로 나오지 않는다.
+        """
+        server = getattr(self.window, "_local_server", None)
+        if server is not None:
+            server.close()
+            QLocalServer.removeServer(app_restart.SOCKET_NAME)
+        if not app_restart.spawn_new_instance():
+            if server is not None:
+                server.listen(app_restart.SOCKET_NAME)
+            return False
+        self.quit_application()
+        return True

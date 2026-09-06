@@ -3,7 +3,11 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.utils import (get_startupinfo, FILENAME_TITLE_MAX_LENGTH,
-                       NO_AUDIO_STATUS, resolve_ffprobe_path)
+                       NO_AUDIO_STATUS, resolve_ffprobe_path,
+                       STATUS_DOWNLOADING, STATUS_CANCELING, STATUS_SUBTITLE_CONVERTING,
+                       STATUS_MERGING, STATUS_EMBEDDING_SUBS,
+                       STATUS_DONE, STATUS_ERROR, STATUS_CANCELED)
+from src.i18n import t
 from src.threads import ytdlp_run
 
 MAX_PATH_LEN = 250
@@ -75,8 +79,11 @@ class DownloadThread(QThread):
     TVer는 늘 둘로 준다. 1로 두면 영상만으로 100%가 찼다가 소리를 받으며 0으로 떨어진다.
     """
 
-    COMPONENT_NAMES = ("비디오", "오디오")
-    """조각을 둘로 나눠 받을 때 화면에 보일 이름. 하나로 받으면 붙이지 않는다."""
+    COMPONENT_KEYS = ("download.component_video", "download.component_audio")
+    """조각을 둘로 나눠 받을 때 화면에 보일 이름의 번역 키. 하나로 받으면 붙이지 않는다.
+
+    문구가 아니라 키를 담는 것은 클래스 상수라 값이 모듈 로드 시점에 굳기 때문이다.
+    """
 
     SIDECAR_WRITE_RE = re.compile(r"^\[info\]\s+Writing\s+.+?\s+to:\s*(.+)$")
     """본편이 아닌 파일을 만들기 직전에 yt-dlp가 내는 줄. 그 경로를 잡아낸다.
@@ -124,7 +131,7 @@ class DownloadThread(QThread):
     def stop(self):
         if self._stop_flag: return
         self._stop_flag = True
-        try: self.progress.emit(self.url, {"status": "취소 중...", "log": "사용자 중단 요청"})
+        try: self.progress.emit(self.url, {"status": STATUS_CANCELING, "log": t("download.stop_requested")})
         except RuntimeError: pass
         self._kill_process_tree()
 
@@ -149,20 +156,25 @@ class DownloadThread(QThread):
         try: is_successful = self._execute_download()
         except Exception as e:
             is_successful = False
-            log_msg = f"다운로드 스레드 예외 발생: {e}"
-            self.progress.emit(self.url, {"status": "오류", "log": log_msg})
+            self.progress.emit(self.url, {"status": STATUS_ERROR,
+                                          "log": t("download.thread_error", error=e)})
         self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
 
     def _convert_vtt_to_srt(self, vtt_filepath: Path):
-        """VTT를 SRT로 바꾸고 원본 VTT를 지운다."""
+        """VTT를 SRT로 바꾸고 원본 VTT를 지운다.
+
+        **출력 인코딩을 반드시 지정한다** - ffmpeg는 입력 경로를 UTF-8로 stderr에
+        내놓는데, TVer 제목은 일본어라 cp949로 읽으면 리더 스레드가 죽고 stderr가
+        통째로 None이 된다. 그러면 실패했을 때 이유 대신 `None`이 로그에 찍힌다.
+        """
         if not vtt_filepath.exists():
-            self.progress.emit(self.url, {"log": f"[오류] SRT 변환 대상 VTT 파일을 찾지 못함: {vtt_filepath}"})
+            self.progress.emit(self.url, {"log": t("download.srt_no_vtt", path=vtt_filepath)})
             return
 
         srt_filepath = vtt_filepath.with_suffix('.srt')
 
         if srt_filepath.exists():
-            self.progress.emit(self.url, {"log": "SRT 파일이 이미 존재합니다."})
+            self.progress.emit(self.url, {"log": t("download.srt_exists")})
             return
 
         command = [
@@ -173,24 +185,26 @@ class DownloadThread(QThread):
         ]
 
         try:
-            proc = subprocess.run(command, capture_output=True, text=True, startupinfo=get_startupinfo(), timeout=15)
+            proc = subprocess.run(command, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  startupinfo=get_startupinfo(), timeout=15)
             if proc.returncode == 0:
-                self.progress.emit(self.url, {"log": "자막을 SRT로 변환했습니다."})
+                self.progress.emit(self.url, {"log": t("download.srt_done")})
                 try:
                     vtt_filepath.unlink()
                 except OSError as e:
-                    self.progress.emit(self.url, {"log": f"[오류] 원본 VTT 파일 삭제 실패: {e}"})
+                    self.progress.emit(self.url, {"log": t("download.srt_vtt_delete_failed", error=e)})
             else:
-                self.progress.emit(self.url, {"log": f"[오류] SRT 변환 실패: {proc.stderr}"})
+                self.progress.emit(self.url, {"log": t("download.srt_failed", error=proc.stderr)})
         except Exception as e:
-            self.progress.emit(self.url, {"log": f"[오류] SRT 변환 중 예외 발생: {e}"})
+            self.progress.emit(self.url, {"log": t("download.srt_exception", error=e)})
 
     def _execute_download(self) -> bool:
         self._metadata = self._preloaded_metadata or self._get_metadata() or {}
         if not self._metadata:
-            self.progress.emit(self.url, {"status": "오류", "log": "메타데이터를 가져올 수 없습니다."}); return False
+            self.progress.emit(self.url, {"status": STATUS_ERROR, "log": t("download.metadata_failed")}); return False
 
-        self.progress.emit(self.url, {"title": self._metadata.get("title", "제목 없음"),
+        self.progress.emit(self.url, {"title": self._metadata.get("title") or t("download.title_unknown"),
                                       "thumbnail": self._metadata.get("thumbnail"),
                                       "duration": self._metadata.get("duration")})
         self._final_filepath = self._build_final_filepath(self._metadata)
@@ -199,35 +213,33 @@ class DownloadThread(QThread):
         if os.name == 'nt': popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         else: popen_kwargs['start_new_session'] = True
 
-        self.progress.emit(self.url, {"status": "다운로드 중", "log": "yt-dlp 프로세스 시작..."})
+        self.progress.emit(self.url, {"status": STATUS_DOWNLOADING, "log": t("download.ytdlp_start")})
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="ignore", **popen_kwargs)
 
         if self.process and self.process.stdout:
             for line in iter(self.process.stdout.readline, ""):
-                if self._stop_flag: self.progress.emit(self.url, {"status": "취소됨"}); return False
+                if self._stop_flag: self.progress.emit(self.url, {"status": STATUS_CANCELED}); return False
                 self._parse_line(line)
         if self._stop_flag: return False
         rc = self.process.wait(timeout=5) if self.process else 1
 
         if not os.path.exists(self._final_filepath):
-             self.progress.emit(self.url, {"log": f"[오류] 최종 파일이 지정된 경로에 없습니다: {self._final_filepath}"})
+             self.progress.emit(self.url, {"log": t("download.final_missing", path=self._final_filepath)})
 
         success = (rc == 0) and os.path.exists(self._final_filepath)
 
         if (not success and self._thumbnail_embed_failed
                 and rc != 0 and os.path.exists(self._final_filepath)):
-            self.progress.emit(self.url, {"log": (
-                "[알림] 썸네일을 영상에 넣지 못했지만 영상 자체는 정상입니다. "
-                "완료로 처리합니다.")})
+            self.progress.emit(self.url, {"log": t("download.thumbnail_embed_failed")})
             self._cleanup_thumbnail_sidecars()
             success = True
 
         if success and self.download_subtitles and not self.embed_subtitles and self.subtitle_format == 'srt':
-            self.progress.emit(self.url, {"status": "자막 변환 중 (SRT)..."})
+            self.progress.emit(self.url, {"status": STATUS_SUBTITLE_CONVERTING})
             vtt_path = Path(self._final_filepath).with_suffix('.ja.vtt')
             self._convert_vtt_to_srt(vtt_path)
 
-        final_status = "완료" if success else "오류"
+        final_status = STATUS_DONE if success else STATUS_ERROR
         if success and self._has_audio_stream(self._final_filepath) is False:
             final_status = NO_AUDIO_STATUS
             self._warn_missing_audio()
@@ -247,8 +259,8 @@ class DownloadThread(QThread):
             return
         self._aside = False
         self._part_index += 1
-        self._current_component = (self.COMPONENT_NAMES[self._part_index]
-                                   if self._parts > 1 and self._part_index < len(self.COMPONENT_NAMES)
+        self._current_component = (t(self.COMPONENT_KEYS[self._part_index])
+                                   if self._parts > 1 and self._part_index < len(self.COMPONENT_KEYS)
                                    else "")
 
     def _overall_percent(self, raw: float) -> Optional[float]:
@@ -277,7 +289,7 @@ class DownloadThread(QThread):
             except OSError:
                 pass
         if removed:
-            self.progress.emit(self.url, {"log": f"남은 표지 이미지를 정리했습니다: {', '.join(removed)}"})
+            self.progress.emit(self.url, {"log": t("download.cover_cleaned", names=", ".join(removed))})
 
     def _has_audio_stream(self, filepath: str) -> Optional[bool]:
         """음성 트랙이 들어 있는지 본다. True/False, 확인 불가면 None.
@@ -286,7 +298,7 @@ class DownloadThread(QThread):
         """
         ffprobe_path = resolve_ffprobe_path(self.ffmpeg_full_exe_path)
         if not ffprobe_path:
-            self.progress.emit(self.url, {"log": "[알림] ffprobe를 찾지 못해 음성 확인을 건너뜁니다."})
+            self.progress.emit(self.url, {"log": t("download.no_ffprobe")})
             return None
 
         command = [
@@ -300,11 +312,12 @@ class DownloadThread(QThread):
                                   encoding="utf-8", errors="ignore",
                                   startupinfo=get_startupinfo(), timeout=20)
         except Exception as e:
-            self.progress.emit(self.url, {"log": f"[알림] 음성 확인을 건너뜁니다(ffprobe 실행 실패: {e})."})
+            self.progress.emit(self.url, {"log": t("download.ffprobe_run_failed", error=e)})
             return None
 
         if proc.returncode != 0:
-            self.progress.emit(self.url, {"log": f"[알림] 음성 확인을 건너뜁니다(ffprobe 오류: {(proc.stderr or '').strip()})."})
+            self.progress.emit(self.url, {"log": t("download.ffprobe_error",
+                                                   error=(proc.stderr or "").strip())})
             return None
 
         return bool(proc.stdout.strip())
@@ -317,12 +330,8 @@ class DownloadThread(QThread):
         """
         length = len(self._final_filepath)
         self.progress.emit(self.url, {"log": (
-            f"[오류] 음성 트랙이 없습니다: {self._final_filepath}\n"
-            f"저장 경로가 {length}자입니다. TVer는 영상과 음성을 따로 받아 합치는데 "
-            f"음성 쪽 임시 파일명이 더 길어, 경로가 길면 음성만 저장에 실패하고 "
-            f"영상만 남을 수 있습니다.\n"
-            f"저장 폴더를 더 짧은 경로로 옮기거나 설정 > 파일명에서 구성 요소를 줄인 뒤 "
-            f"재다운로드해 주세요.")})
+            t("download.no_audio", path=self._final_filepath) + "\n"
+            + t("download.no_audio_hint", length=length))})
 
     METADATA_TIMEOUT = 60
     """제목·썸네일을 물어보는 데 주는 제한 시간.
@@ -336,10 +345,11 @@ class DownloadThread(QThread):
         if self.ignore_ssl_errors:
             cmd.append("--no-check-certificate")
         cmd.append(self.url)
-        ok, out, err = ytdlp_run.run(cmd, self.METADATA_TIMEOUT, "영상 정보 확인",
+        ok, out, err = ytdlp_run.run(cmd, self.METADATA_TIMEOUT, t("download.metadata_label"),
                                      lambda msg: self.progress.emit(self.url, {"log": msg}))
         if not ok:
-            self.progress.emit(self.url, {"log": f"[오류] 영상 정보 확인 실패: {(err or '').strip()}"})
+            self.progress.emit(self.url, {"log": t("download.metadata_error",
+                                                   error=(err or "").strip())})
             return None
         try:
             return json.loads(out)
@@ -381,7 +391,7 @@ class DownloadThread(QThread):
         final_ext = metadata.get('ext', ext)
         full_path, shortened = shorten_long_path(full_dir, path_without_ext, final_ext)
         if shortened:
-            self.progress.emit(self.url, {"log": f"[알림] 경로가 너무 길어 이름을 축소했습니다: {shortened}"})
+            self.progress.emit(self.url, {"log": t("download.path_shortened", name=shortened)})
 
         return full_path
 
@@ -461,13 +471,13 @@ class DownloadThread(QThread):
         m_progress = re.search(r"\[download\]\s+([0-9.]+)% of.*?at (.*?/s)\s+ETA\s+(.*)", line)
         if m_progress:
             eta = m_progress.group(3).split("(")[0].strip()
-            payload.update({"status": "다운로드 중", "speed": m_progress.group(2),
+            payload.update({"status": STATUS_DOWNLOADING, "speed": m_progress.group(2),
                             "eta": eta, "component": self._current_component})
             overall = self._overall_percent(float(m_progress.group(1)))
             if overall is not None:
                 payload["percent"] = overall
 
-        if "Merging formats" in line: payload["status"] = "후처리 중 (병합)"
-        elif "Embedding subtitles" in line: payload["status"] = "후처리 중 (자막)"
+        if "Merging formats" in line: payload["status"] = STATUS_MERGING
+        elif "Embedding subtitles" in line: payload["status"] = STATUS_EMBEDDING_SUBS
 
         if payload: self.progress.emit(self.url, payload)

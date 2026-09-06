@@ -29,25 +29,40 @@ TYPING_MODIFIERS = (Qt.KeyboardModifier.ControlModifier
 FUNCTION_KEYS = range(Qt.Key.Key_F1.value, Qt.Key.Key_F35.value + 1)
 
 
+def _t(key: str) -> str:
+    """i18n의 t()를 함수 안에서 끌어온다.
+
+    utils.py가 이 모듈의 defaults()를 모듈 최상단에서 가져가고 i18n.py는 그 utils.py를
+    가져가므로, 여기서 위로 import하면 순환이 된다(실측: ImportError로 pytest 수집 자체가
+    멈췄다). localized_app_name이 쓰는 것과 같은 회피다.
+    """
+    from src.i18n import t
+    return t(key)
+
+
 class ShortcutDef(NamedTuple):
-    """동작 하나의 이름표와 기본 조합, 듣는 범위."""
+    """동작 하나의 기본 조합과 듣는 범위.
+
+    이름표와 설명은 문구가 아니라 **번역 키**를 담는다. 이 목록이 모듈 상수라 값을 담으면
+    i18n.setup()보다 먼저 평가되어 언어가 굳는다 - label()/hint()가 부를 때마다 새로 찾는다.
+    """
 
     key: str
-    label: str
     default: str
     scope: str
-    hint: str
+
+    def label(self) -> str:
+        return _t(f"shortcuts.{self.key}")
+
+    def hint(self) -> str:
+        return _t(f"shortcuts.{self.key}_hint")
 
 
 SHORTCUT_DEFS: tuple[ShortcutDef, ...] = (
-    ShortcutDef("open_settings", "설정 열기", "Ctrl+,", WINDOW,
-                "창 어디에서나 설정 창을 엽니다."),
-    ShortcutDef("toggle_log", "로그 패널 열고 닫기", "Ctrl+L", WINDOW,
-                "오른쪽 로그 패널을 접거나 폽니다."),
-    ShortcutDef("delete_selected", "목록에서 선택 항목 삭제", "Del", DOWNLOAD_LIST,
-                "다운로드 목록에 포커스가 있을 때만 동작합니다. 진행 중인 항목은 남습니다."),
-    ShortcutDef("clear_search", "검색어 지우기", "Esc", SEARCH_INPUT,
-                "기록·즐겨찾기 탭의 검색칸에 포커스가 있을 때만 동작합니다."),
+    ShortcutDef("open_settings", "Ctrl+,", WINDOW),
+    ShortcutDef("toggle_log", "Ctrl+L", WINDOW),
+    ShortcutDef("delete_selected", "Del", DOWNLOAD_LIST),
+    ShortcutDef("clear_search", "Esc", SEARCH_INPUT),
 )
 
 DEF_BY_KEY: dict[str, ShortcutDef] = {d.key: d for d in SHORTCUT_DEFS}
@@ -73,7 +88,7 @@ def display(text: str) -> str:
     저장은 PortableText로 하되 보여 줄 때는 OS 표기를 쓴다(macOS에서 Ctrl은 ⌘로 보인다).
     """
     seq = QKeySequence(text or "")
-    return seq.toString(QKeySequence.SequenceFormat.NativeText) or "사용 안 함"
+    return seq.toString(QKeySequence.SequenceFormat.NativeText) or _t("shortcuts.none")
 
 
 def resolve(config: dict) -> dict[str, str]:

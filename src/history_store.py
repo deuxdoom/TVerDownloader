@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+LEGACY_NO_TITLE = ("", "(제목 없음)")
+"""제목이 없다는 뜻으로 파일에 남아 있을 수 있는 값들. **화면 문구가 아니라 자료값이다.**
+
+지금은 빈 문자열로 적고 보여 줄 때 번역하지만, 4.0.0 전에 받은 기록에는 한국어 문구가
+그대로 저장돼 있다. 그 줄까지 알아봐야 언어를 바꾼 뒤에도 한국어가 섞여 나오지 않는다.
+"""
+
+
 class HistoryStore:
     DEFAULT_BAK_DIR = Path("historybak")
     DEFAULT_KEEP = 30
@@ -76,8 +84,10 @@ class HistoryStore:
         return (url or "").strip() in self._data
 
     def get_title(self, url: str) -> str:
+        from src.i18n import t
         entry = self._data.get((url or "").strip(), {})
-        return entry.get("title", "(제목 없음)")
+        stored = entry.get("title", "")
+        return t("card.title_missing") if stored in LEGACY_NO_TITLE else stored
 
     def get_filepath(self, url: str) -> str:
         entry = self._data.get((url or "").strip(), {})
@@ -90,7 +100,7 @@ class HistoryStore:
         if not url: return
 
         self._data[url] = {
-            "title": title or "(제목 없음)",
+            "title": title or "",
             "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "filepath": filepath or "",
             "series_id": series_id,

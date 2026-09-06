@@ -3,6 +3,7 @@ from typing import List, Dict
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from src.i18n import t
 from src.threads import ytdlp_run
 
 class SeriesParseThread(QThread):
@@ -39,7 +40,7 @@ class SeriesParseThread(QThread):
         for meta in entries:
             if not isinstance(meta, dict): continue
             url = meta.get("webpage_url") or meta.get("url")
-            title = meta.get("title", "제목 없음")
+            title = meta.get("title") or t("download.title_unknown")
             thumbnail_url = meta.get("thumbnail")
             if url and title and not self._is_excluded(title):
                 results.append({
@@ -81,12 +82,13 @@ class SeriesParseThread(QThread):
         --flat-playlist는 회차를 하나씩 열어 보지 않는다 - 72화 기준 60초가 4초로 준다.
         회차 목록은 '신규 영상 확인'을 누르거나 다음 실행 때 어차피 다시 훑는다.
         """
-        self.log.emit(f"[시리즈] 제목 확인 중: {self.series_url}")
+        self.log.emit(t("series_parse.title_checking", url=self.series_url))
         command = [self.ytdlp_exe_path, "--flat-playlist", "--playlist-items", "1", "-J", "--skip-download",
                    *ytdlp_run.network_options(), self.series_url]
-        ok, out, err = ytdlp_run.run(command, self.TITLE_ONLY_TIMEOUT, "시리즈 제목 확인", self.log.emit)
+        ok, out, err = ytdlp_run.run(command, self.TITLE_ONLY_TIMEOUT,
+                                     t("series_parse.title_label"), self.log.emit)
         if not ok:
-            self.log.emit(f"[오류] 시리즈 제목 확인 실패:\n{(err or '').strip()}")
+            self.log.emit(t("series_parse.title_failed", error=(err or "").strip()))
             self.finished.emit("", [])
             return
 
@@ -102,10 +104,11 @@ class SeriesParseThread(QThread):
             if self.title_only:
                 self._run_title_only()
                 return
-            self.log.emit(f"[시리즈] 분석 중 (1/2): {self.series_url}")
+            self.log.emit(t("series_parse.first_pass", url=self.series_url))
             command1 = [self.ytdlp_exe_path, "-J", "--skip-download",
                         *ytdlp_run.network_options(), self.series_url]
-            ok1, out1, err1 = ytdlp_run.run(command1, self.PARSE_TIMEOUT, "시리즈 1차 분석", self.log.emit)
+            ok1, out1, err1 = ytdlp_run.run(command1, self.PARSE_TIMEOUT,
+                                            t("series_parse.first_label"), self.log.emit)
 
             series_title = ""
             episodes = []
@@ -118,25 +121,28 @@ class SeriesParseThread(QThread):
                     pass
                 episodes = self._parse_json_output(out1)
             else:
-                self.log.emit(f"[오류] 시리즈 1차 분석 실패:\n{(err1 or '').strip()}");
+                self.log.emit(t("series_parse.first_failed", error=(err1 or "").strip()));
                 self.finished.emit("", []); return
 
             if not episodes:
-                self.log.emit("[시리즈] 1차 분석 결과 없음. 2차 분석 시도...")
+                self.log.emit(t("series_parse.first_empty"))
                 command2 = [self.ytdlp_exe_path, "--flat-playlist",
                             "--print", "%(url)s\t%(title)s", "--skip-download",
                             *ytdlp_run.network_options(), self.series_url]
-                ok2, out2, err2 = ytdlp_run.run(command2, self.PARSE_TIMEOUT, "시리즈 2차 분석", self.log.emit)
+                ok2, out2, err2 = ytdlp_run.run(command2, self.PARSE_TIMEOUT,
+                                                t("series_parse.second_label"), self.log.emit)
 
                 if not ok2:
-                    self.log.emit(f"[오류] 시리즈 2차 분석 실패:\n{(err2 or '').strip()}");
+                    self.log.emit(t("series_parse.second_failed", error=(err2 or "").strip()));
                     self.finished.emit(series_title, []); return
 
                 episodes = self._parse_flat_output(out2)
-                if not episodes and err2: self.log.emit(f"[진단] 2차 분석 결과 없음. 오류 스트림: {(err2 or '없음').strip()}")
+                if not episodes and err2:
+                    self.log.emit(t("series_parse.second_empty",
+                                    error=err2.strip() or t("series_parse.none")))
 
-            self.log.emit(f"최종 {len(episodes)}개 에피소드 정보 추출 완료.")
+            self.log.emit(t("series_parse.extracted", count=len(episodes)))
             self.finished.emit(series_title, episodes)
         except Exception as e:
-            self.log.emit(f"[오류] 시리즈 분석 중 예외: {e}");
+            self.log.emit(t("series_parse.exception", error=e));
             self.finished.emit("", [])

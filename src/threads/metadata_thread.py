@@ -14,6 +14,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from src.i18n import t
 from src.threads import ytdlp_run
 
 
@@ -72,7 +73,7 @@ class MetadataThread(QThread):
         if self.ignore_ssl_errors:
             cmd.append("--no-check-certificate")
         cmd.append(self.url)
-        ok, out, err = ytdlp_run.run(cmd, self.TIMEOUT, "영상 정보 미리 확인",
+        ok, out, err = ytdlp_run.run(cmd, self.TIMEOUT, t("series_parse.metadata_label"),
                                      on_spawn=self._on_spawn,
                                      should_stop=lambda: self._stop_flag)
         if self._stop_flag:
@@ -84,9 +85,9 @@ class MetadataThread(QThread):
         try:
             metadata = json.loads(out)
         except json.JSONDecodeError:
-            self.failed.emit(self.url, "영상 정보를 읽지 못했습니다.")
+            self.failed.emit(self.url, t("series_parse.metadata_unreadable"))
             return
         if not isinstance(metadata, dict):
-            self.failed.emit(self.url, "영상 정보 형식이 예상과 다릅니다.")
+            self.failed.emit(self.url, t("series_parse.metadata_malformed"))
             return
         self.loaded.emit(self.url, metadata)

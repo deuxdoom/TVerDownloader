@@ -12,8 +12,10 @@ from typing import Dict, Optional
 from PyQt6.QtWidgets import QListWidgetItem, QFileDialog, QWidget
 from PyQt6.QtGui import QCursor
 
+from src.i18n import t
 from src.utils import open_file_location, ERROR_STATUSES, FILENAME_TITLE_MAX_LENGTH
-from src.widgets import DownloadItemWidget, RoundedMenu
+from src.qtparts import RoundedMenu
+from src.widgets import DownloadItemWidget
 
 
 class DownloadListController:
@@ -111,10 +113,11 @@ class DownloadListController:
                     self.remove_row(row)
                     removed += 1
         parts = []
-        if stopped: parts.append(f"진행 중 {stopped}개 중지")
-        if removed: parts.append(f"대기 중 {removed}개 제거")
-        window.append_log("[대기열] " + (", ".join(parts) if parts
-                                        else "선택한 항목 중 중지하거나 뺄 것이 없습니다."))
+        if stopped: parts.append(t("log.queue_cancel_stopped", count=stopped))
+        if removed: parts.append(t("log.queue_cancel_removed", count=removed))
+        window.append_log(t("log.queue_cancel_summary",
+                            parts=", ".join(parts) if parts
+                            else t("log.queue_cancel_nothing")))
 
     def sync_cancel_button(self):
         self.window.ui.cancel_selected_button.setEnabled(bool(self.window.ui.download_list.selectedItems()))
@@ -140,23 +143,23 @@ class DownloadListController:
         selected = window.ui.download_list.selectedItems()
         if len(selected) > 1 and item in selected:
             menu = RoundedMenu()
-            menu.addAction(f"선택한 {len(selected)}개 중지 · 대기열에서 제거",
+            menu.addAction(t("menu.cancel_selected", count=len(selected)),
                            self.cancel_selected)
-            menu.addAction(f"선택한 {len(selected)}개 목록에서 삭제",
+            menu.addAction(t("menu.delete_selected", count=len(selected)),
                            self.delete_selected)
             menu.exec(QCursor.pos())
             return
         url = widget.url; menu = RoundedMenu()
         if window.download_manager.is_busy(url):
-            menu.addAction("중지", lambda: window.download_manager.stop_task(url))
+            menu.addAction(t("menu.stop"), lambda: window.download_manager.stop_task(url))
         elif window.download_manager.is_queued(url):
             def remove_from_queue():
                 if window.download_manager.remove_task_from_queue(url): self.remove_row(window.ui.download_list.row(item))
-            menu.addAction("대기열에서 제거", remove_from_queue)
+            menu.addAction(t("menu.remove_from_queue"), remove_from_queue)
         else:
             if widget.status in ERROR_STATUSES:
-                menu.addAction("재다운로드", lambda: self.retry_download(url))
-            menu.addAction("목록에서 삭제", lambda: self.remove_row(window.ui.download_list.row(item)))
+                menu.addAction(t("menu.redownload"), lambda: self.retry_download(url))
+            menu.addAction(t("menu.delete_from_list"), lambda: self.remove_row(window.ui.download_list.row(item)))
         self._add_file_actions(menu, widget)
         menu.exec(QCursor.pos())
 
@@ -168,17 +171,15 @@ class DownloadListController:
         """
         actions = []
         if widget.thumbnail_pixmap() is not None:
-            actions.append(("썸네일 다운로드", lambda: self._save_thumbnail(widget)))
+            actions.append((t("menu.save_thumbnail"), lambda: self._save_thumbnail(widget)))
         if widget.final_filepath and os.path.exists(widget.final_filepath):
-            actions.append(("파일 재생", lambda: self.window.play_file(widget.final_filepath)))
-            actions.append(("파일 위치 열기", lambda: open_file_location(widget.final_filepath)))
+            actions.append((t("menu.play_file"), lambda: self.window.play_file(widget.final_filepath)))
+            actions.append((t("menu.open_location"), lambda: open_file_location(widget.final_filepath)))
         if not actions:
             return
         menu.addSeparator()
         for label, handler in actions:
             menu.addAction(label, handler)
-
-    THUMBNAIL_SAVE_FILTER = "PNG 이미지 (*.png);;JPEG 이미지 (*.jpg *.jpeg)"
 
     def _save_thumbnail(self, widget):
         """카드에 걸린 썸네일 원본을 파일로 저장한다.
@@ -189,7 +190,7 @@ class DownloadListController:
         window = self.window
         pixmap = widget.thumbnail_pixmap()
         if pixmap is None:
-            window.append_log("[알림] 저장할 썸네일이 아직 없습니다.")
+            window.append_log(t("log.thumbnail_missing"))
             return
         if widget.final_filepath:
             suggested = Path(widget.final_filepath).with_suffix(".png").name
@@ -197,13 +198,14 @@ class DownloadListController:
             suggested = self._safe_filename(widget.title_label.text()) + ".png"
         folder = window.config.get("download_folder") or ""
         path, _ = QFileDialog.getSaveFileName(
-            window, "썸네일 저장", os.path.join(folder, suggested), self.THUMBNAIL_SAVE_FILTER)
+            window, t("dialog.thumbnail_save_title"), os.path.join(folder, suggested),
+            t("dialog.thumbnail_save_filter"))
         if not path:
             return
         if pixmap.save(path):
-            window.append_log(f"[성공] 썸네일을 저장했습니다: {path}")
+            window.append_log(t("log.thumbnail_saved", path=path))
         else:
-            window.append_log(f"[오류] 썸네일을 저장하지 못했습니다: {path}")
+            window.append_log(t("log.thumbnail_save_failed", path=path))
 
     FILENAME_FORBIDDEN = '<>:"/\\|?*'
     """윈도우가 파일 이름에 허용하지 않는 글자."""
@@ -220,7 +222,7 @@ class DownloadListController:
         if window.download_manager.is_pending(url):
             return
         if not window._ensure_download_folder():
-            window.append_log("[알림] 다운로드 폴더가 설정되지 않아 재다운로드를 취소했습니다.")
+            window.append_log(t("log.retry_no_folder"))
             return
         window.download_manager.reset_for_redownload(url)
         widget = self.find_item_widget(url)

@@ -7,21 +7,22 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QDialogButtonBox
 )
-from src.widgets import start_thumbnail_download, THUMBNAIL_CACHE_DIR
+from src.i18n import t
+from src.thumbnails import start_thumbnail_download, THUMBNAIL_CACHE_DIR
 
 class SeriesSelectionDialog(QDialog):
     """시리즈의 회차 목록에서 받을 것을 고르는 창."""
 
     def __init__(self, episode_info: List[Dict[str, str]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("시리즈 에피소드 선택")
+        self.setWindowTitle(t("series.title"))
         self.setMinimumSize(720, 540)
 
         self._pending_thumbs: Dict[str, List[tuple[QListWidgetItem, Path]]] = {}
         THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
         root = QVBoxLayout(self); root.setContentsMargins(16, 16, 16, 16); root.setSpacing(10)
-        desc_label = QLabel(f"다운로드할 에피소드를 선택하세요. (총 {len(episode_info)}개)"); root.addWidget(desc_label)
+        desc_label = QLabel(t("series.description", count=len(episode_info))); root.addWidget(desc_label)
 
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.ListMode)
@@ -37,13 +38,13 @@ class SeriesSelectionDialog(QDialog):
             self._load_or_download_thumbnail(item, episode)
 
         button_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("전체 선택")
-        self.deselect_all_btn = QPushButton("전체 해제")
+        self.select_all_btn = QPushButton(t("series.select_all"))
+        self.deselect_all_btn = QPushButton(t("series.deselect_all"))
         button_layout.addWidget(self.select_all_btn); button_layout.addWidget(self.deselect_all_btn); button_layout.addStretch(1)
         self.dialog_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setText("선택한 항목 추가")
+        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setText(t("series.add_selected"))
         self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName("PrimaryButton")
-        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
+        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(t("common.cancel"))
         button_layout.addWidget(self.dialog_buttons); root.addLayout(button_layout)
 
         self.select_all_btn.clicked.connect(lambda: self._toggle_all_checkboxes(check=True))

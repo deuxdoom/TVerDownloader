@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional, Tuple
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from src.i18n import t
 from src.threads.series_parse_thread import SeriesParseThread
 
 class SeriesParser(QObject):
@@ -34,7 +35,7 @@ class SeriesParser(QObject):
         확인 중에는 대기열이 길어서, 뒤에 붙이면 방금 붙여넣은 시리즈가 몇 분씩 밀린다.
         """
         if not self.ytdlp_path:
-            self.log.emit(context, "[오류] yt-dlp 경로가 설정되지 않아 시리즈를 분석할 수 없습니다.")
+            self.log.emit(context, t("series_parse.no_ytdlp"))
             return
 
         items = [(context, url) for url in urls]

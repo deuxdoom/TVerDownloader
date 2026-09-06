@@ -10,6 +10,7 @@ import subprocess
 import time
 from typing import Callable, List, Optional, Tuple
 
+from src.i18n import t
 from src.utils import get_startupinfo
 
 SOCKET_TIMEOUT = "30"
@@ -73,10 +74,11 @@ def is_retriable(stderr: str) -> bool:
     return any(marker in text for marker in RETRIABLE_MARKERS)
 
 
-ABORTED = "중단했습니다."
-"""부르는 쪽이 그만두라고 해서 끝났을 때의 오류 문구.
+ABORTED = "aborted"
+"""부르는 쪽이 그만두라고 해서 끝났을 때의 오류 **코드**.
 
-실패와 구별하려고 둔다. 받은 쪽은 아무것도 알리지 않고 조용히 물러난다.
+실패와 구별하려고 둔다. 받는 곳(metadata_prefetch._on_failed)이 아무것도 알리지 않고
+물러나므로 화면에 나가지 않는다 - 문구가 아니라 코드인 것이 그래서다(상태 코드와 같다).
 """
 
 
@@ -102,7 +104,7 @@ def run(command: List[str], timeout: int, label: str,
                 encoding="utf-8", errors="ignore"
             )
         except OSError as e:
-            return False, "", f"yt-dlp를 실행하지 못했습니다: {e}"
+            return False, "", t("ytdlp.spawn_failed", error=e)
         if on_spawn:
             on_spawn(proc)
 
@@ -111,7 +113,7 @@ def run(command: List[str], timeout: int, label: str,
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            return False, "", f"{label}이(가) 제한 시간 {timeout}초를 넘겨 중단했습니다."
+            return False, "", t("ytdlp.timeout", label=label, seconds=timeout)
 
         if proc.returncode == 0:
             return True, out, err
@@ -122,7 +124,6 @@ def run(command: List[str], timeout: int, label: str,
 
         delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
         if on_log:
-            on_log(f" ... 통신이 원활하지 않습니다. {delay}초 후 다시 시도합니다"
-                   f" ({attempt + 1}/{MAX_ATTEMPTS}).")
+            on_log(t("ytdlp.retry", seconds=delay, attempt=attempt + 1, total=MAX_ATTEMPTS))
         time.sleep(delay)
     return False, out, err

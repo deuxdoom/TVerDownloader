@@ -4,34 +4,32 @@ from PyQt6.QtWidgets import (
     QTextEdit, QPushButton
 )
 
+from src.i18n import t
+
 
 class BulkAddDialog(QDialog):
     def __init__(self, parent=None, initial_urls: list[str] | None = None):
         super().__init__(parent)
-        self.setWindowTitle("다중 다운로드")
+        self.setWindowTitle(t("bulk.title"))
         self.resize(600, 420)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        self.desc = QLabel(
-            "각 줄에 하나의 URL을 입력하세요.\n"
-            "- 일반 에피소드 URL은 그대로 추가됩니다.\n"
-            "- 시리즈 URL은 에피소드로 확장되어 여러 항목으로 추가됩니다."
-        )
+        self.desc = QLabel(t("bulk.description"))
         self.desc.setWordWrap(True)
         layout.addWidget(self.desc)
 
         self.text = QTextEdit(self)
-        self.text.setPlaceholderText("예:\nhttps://tver.jp/episodes/...\nhttps://tver.jp/series/...")
+        self.text.setPlaceholderText(t("bulk.placeholder"))
         layout.addWidget(self.text, 1)
 
         btns = QHBoxLayout()
         btns.setSpacing(8)
         btns.addStretch(1)
-        self.ok_btn = QPushButton("추가", objectName="PrimaryButton")
-        self.cancel_btn = QPushButton("취소")
+        self.ok_btn = QPushButton(t("bulk.add"), objectName="PrimaryButton")
+        self.cancel_btn = QPushButton(t("common.cancel"))
         self.ok_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)
         btns.addWidget(self.ok_btn)

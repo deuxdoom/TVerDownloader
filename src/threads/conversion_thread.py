@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src import encoding
+from src.i18n import t
 from src.utils import get_startupinfo, resolve_ffprobe_path
 
 class ConversionThread(QThread):
@@ -83,7 +84,7 @@ class ConversionThread(QThread):
         try:
             output_path.unlink()
         except OSError as e:
-            self.log.emit(f"[오류] 중단된 파일을 지우지 못했습니다 ('{output_path.name}'): {e}")
+            self.log.emit(t("convert.discard_failed", path=output_path.name, error=e))
 
     def _run_ffprobe(self, args: List[str]) -> Optional[str]:
         """ffprobe를 한 번 돌리고 표준 출력을 돌려준다. 실패하면 None.
@@ -193,7 +194,8 @@ class ConversionThread(QThread):
             self.target_codec, self.hw_encoder_setting, video, output_path.suffix)
         audio_opts, audio_summary = encoding.audio_args(
             audio["codec_name"], audio["kbps"], audio["channels"])
-        self.plan_notes = [f"영상 인코더: {video_summary}", f"오디오: {audio_summary}"]
+        self.plan_notes = [t("convert.plan_video", encoder=video_summary),
+                           t("convert.plan_audio", audio=audio_summary)]
         args = ['-vf', encoding.color_filter(
             video["primaries"], video["transfer"], video["space"])]
         args.extend(video_opts)
@@ -212,7 +214,7 @@ class ConversionThread(QThread):
                           and p.name.startswith(prefix)
                           and p.suffix.lower() in (".srt", ".vtt")]
         except OSError as e:
-            self.log.emit(f"[오류] 자막 파일 확인 실패: {e}")
+            self.log.emit(t("convert.subtitle_check_failed", error=e))
             return
 
         for sub in candidates:
@@ -222,16 +224,16 @@ class ConversionThread(QThread):
             try:
                 if self.delete_original:
                     sub.rename(target)
-                    self.log.emit(f"자막 파일 이동: '{sub.name}' -> '{target.name}'")
+                    self.log.emit(t("convert.subtitle_moved", name=sub.name, target=target.name))
                 else:
                     shutil.copy2(sub, target)
-                    self.log.emit(f"자막 파일 복사: '{sub.name}' -> '{target.name}'")
+                    self.log.emit(t("convert.subtitle_copied", name=sub.name, target=target.name))
             except OSError as e:
-                self.log.emit(f"[오류] 자막 파일 처리 실패 ({sub.name}): {e}")
+                self.log.emit(t("convert.subtitle_failed", name=sub.name, error=e))
 
     def run(self):
         if not self.target_codec:
-            self.log.emit("[오류] 변환할 코덱이 지정되지 않았습니다.")
+            self.log.emit(t("convert.no_codec"))
             self.finished.emit(False, self.url, ""); return
 
         output_path = self.input_path.with_name(f"{self.input_path.stem}_{self.target_codec}.mp4")
@@ -243,33 +245,33 @@ class ConversionThread(QThread):
             self.command_text = subprocess.list2cmdline(command)
             proc = self._spawn(command)
             if proc is None:
-                self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
+                self.log.emit(t("convert.stopped"))
                 self.finished.emit(False, self.url, ""); return
 
             _, stderr_text = proc.communicate()
             returncode = proc.returncode
 
             if self._stop_flag:
-                self.log.emit("[알림] 사용자 요청으로 변환을 중단했습니다.")
+                self.log.emit(t("convert.stopped"))
                 self._discard_output(output_path)
                 self.finished.emit(False, self.url, ""); return
 
             if returncode == 0:
-                self.log.emit("파일 변환 성공")
+                self.log.emit(t("convert.success"))
                 self._handle_sidecar_subtitles(self.input_path, output_path)
                 if self.delete_original and self.input_path.exists():
                     try:
                         self.input_path.unlink()
                     except OSError as e:
-                        self.log.emit(f"[오류] 원본 파일 삭제 실패: {e}")
+                        self.log.emit(t("convert.source_delete_failed", error=e))
                 self.finished.emit(True, self.url, str(output_path))
             else:
-                self.log.emit(f"[오류] 파일 변환 실패: {stderr_text}")
+                self.log.emit(t("convert.failed", error=stderr_text))
                 self._log_plan()
                 self._discard_output(output_path)
                 self.finished.emit(False, self.url, "")
         except Exception as e:
-            self.log.emit(f"[오류] 파일 변환 중 예외 발생: {e}")
+            self.log.emit(t("convert.exception", error=e))
             self._log_plan()
             self._discard_output(output_path)
             self.finished.emit(False, self.url, "")
@@ -282,4 +284,4 @@ class ConversionThread(QThread):
         for note in self.plan_notes:
             self.log.emit(note)
         if self.command_text:
-            self.log.emit(f"ffmpeg 명령: {self.command_text}")
+            self.log.emit(t("convert.command", command=self.command_text))

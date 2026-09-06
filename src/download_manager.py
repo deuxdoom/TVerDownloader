@@ -7,10 +7,12 @@ from src.threads.download_thread import DownloadThread
 from src.threads.conversion_thread import ConversionThread
 from src.history_store import HistoryStore
 from src.metadata_prefetch import MetadataPrefetcher
+from src.i18n import t
 from src.queue_store import QueueStore
 from src.utils import (get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path,
                        item_percent, canonicalize_config_fragments,
-                       canonicalize_config_codec, canonicalize_config_encoder)
+                       canonicalize_config_codec, canonicalize_config_encoder,
+                       STATUS_CONVERTING, STATUS_DONE, STATUS_CONVERT_ERROR)
 
 class DownloadManager(QObject):
     log = pyqtSignal(str)
@@ -116,7 +118,7 @@ class DownloadManager(QObject):
         deadline = QDeadlineTimer(self.STOP_WAIT_MS)
         for thread in threads:
             if not thread.wait(deadline):
-                self.log.emit("[알림] 정리가 끝나기 전에 종료합니다. 받다 만 파일이 남을 수 있습니다.")
+                self.log.emit(t("queue.shutdown_early"))
                 break
         self._update_queue_counter()
         return len(threads)
@@ -137,10 +139,10 @@ class DownloadManager(QObject):
         """
         url = (url or "").strip()
         if not url or url in self._active_urls:
-            if url in self._active_urls: self.log.emit(f"[알림] 이미 대기열/작업 중인 URL입니다: {url}")
+            if url in self._active_urls: self.log.emit(t("queue.already_queued", url=url))
             return False
         self._active_urls.add(url); self._task_queue.append(url)
-        self.item_added.emit(url); self.log.emit(f"[대기열] 추가됨: {url}")
+        self.item_added.emit(url); self.log.emit(t("queue.added", url=url))
         self._emit_preview(url, title, thumbnail)
         self._update_queue_counter(); self.check_queue_and_start()
         if self.is_queued(url) and not title:
@@ -192,7 +194,7 @@ class DownloadManager(QObject):
             return False
         self._active_urls.discard(url); self._queue_meta.pop(url, None)
         self._prefetch.cancel(url)
-        self._update_queue_counter(); self.log.emit(f"[대기열] 제거됨: {url}")
+        self._update_queue_counter(); self.log.emit(t("queue.removed", url=url))
         return True
 
     def restore_task(self, url: str, title: str = "", thumbnail: str = "") -> bool:
@@ -237,7 +239,7 @@ class DownloadManager(QObject):
         max_concurrent = self.config.get("max_concurrent_downloads", DEFAULT_PARALLEL)
         if self._task_queue and not self._concurrency_logged:
             self._concurrency_logged = True
-            self.log.emit(f"동시 다운로드 최대 {max_concurrent}개로 진행합니다.")
+            self.log.emit(t("queue.parallel", count=max_concurrent))
         while len(self._active_threads) < max_concurrent and self._task_queue:
             url = self._task_queue.pop(0); self._start_download(url)
         self._update_queue_counter()
@@ -275,16 +277,17 @@ class DownloadManager(QObject):
     def _on_progress(self, url: str, payload: Dict[str, Any]):
         if url not in self._logged_start and 'log' in payload:
             self._logged_start.add(url)
-            self.heading.emit("다운로드 시작", url)
+            self.heading.emit(t("log.heading_download_start"), url)
         self._remember_meta(url, payload.get("title") or "", payload.get("thumbnail") or "")
         self._item_percent[url] = item_percent(payload.get("percent"),
                                                self._item_percent.get(url, 0))
         self.progress_updated.emit(url, payload)
 
     def _get_video_codec(self, filepath: str) -> Optional[str]:
+        """받아 둔 영상의 코덱 이름. 못 알아내면 None이고 부르는 쪽은 변환을 건너뛴다."""
         ffprobe_path = resolve_ffprobe_path(self.ffmpeg_path)
         if not ffprobe_path:
-            self.log.emit("[오류] ffprobe를 찾지 못해 코덱을 확인할 수 없습니다.")
+            self.log.emit(t("queue.no_ffprobe"))
             return None
 
         command = [
@@ -294,14 +297,16 @@ class DownloadManager(QObject):
             filepath
         ]
         try:
-            proc = subprocess.run(command, capture_output=True, text=True, startupinfo=get_startupinfo(), timeout=10)
+            proc = subprocess.run(command, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace",
+                                  startupinfo=get_startupinfo(), timeout=10)
             if proc.returncode == 0:
                 return proc.stdout.strip()
             else:
-                self.log.emit(f"[오류] ffprobe 코덱 확인 실패: {proc.stderr}")
+                self.log.emit(t("queue.ffprobe_failed", error=proc.stderr))
                 return None
         except Exception as e:
-            self.log.emit(f"[오류] ffprobe 실행 중 예외 발생: {e}")
+            self.log.emit(t("queue.ffprobe_exception", error=e))
             return None
 
     def _on_download_finished(self, url: str, success: bool, final_filepath: str, metadata: dict):
@@ -309,11 +314,11 @@ class DownloadManager(QObject):
         if thread: thread.deleteLater()
 
         if not success or not final_filepath or not os.path.exists(final_filepath):
-            self.log.emit(f"[실패] 다운로드 실패 또는 파일 없음: {url}")
+            self.log.emit(t("queue.download_failed", url=url))
             self.task_finished.emit(url, False, "", metadata)
             self._check_completion(); return
 
-        self.log.emit(f"[성공] 다운로드 완료: {final_filepath}")
+        self.log.emit(t("queue.download_done", path=final_filepath))
         self._conversion_meta_cache[url] = metadata
 
         preferred_codec_key = canonicalize_config_codec(self.config)
@@ -329,7 +334,7 @@ class DownloadManager(QObject):
         target_codec = codec_map.get(preferred_codec_key)
 
         if current_codec and target_codec and current_codec != target_codec:
-            self.log.emit(f"변환 시작: {current_codec} -> {target_codec}")
+            self.log.emit(t("convert.start", source=current_codec, target=target_codec))
             self._start_conversion(url, final_filepath, target_codec)
         else:
             self.task_finished.emit(url, True, final_filepath, metadata)
@@ -337,7 +342,7 @@ class DownloadManager(QObject):
 
     def _start_conversion(self, url: str, input_path: str, target_codec: str):
         """재인코딩만 남았으므로 원본은 늘 지운다 - 같은 영상이 코덱만 다르게 둘 남는다."""
-        self.progress_updated.emit(url, {"status": f"{target_codec.upper()} 변환 중..."})
+        self.progress_updated.emit(url, {"status": STATUS_CONVERTING, "codec": target_codec.upper()})
 
         thread = ConversionThread(url, input_path, self.ffmpeg_path,
                                   target_codec=target_codec,
@@ -351,7 +356,7 @@ class DownloadManager(QObject):
         thread = self._active_conversions.pop(url, None)
         if thread: thread.deleteLater()
         meta = self._conversion_meta_cache.pop(url, {})
-        final_status = "완료" if success else "변환 오류"
+        final_status = STATUS_DONE if success else STATUS_CONVERT_ERROR
         payload = {"status": final_status}
         if success: payload["final_filepath"] = new_filepath
         self.progress_updated.emit(url, payload)
