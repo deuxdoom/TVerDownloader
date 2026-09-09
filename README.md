@@ -1,5 +1,11 @@
 ![TVerDownloader 메인 UI](docs/img/app-light.png)
 
+<p align="center">
+  <a href="https://deuxdoom.github.io/TVerDownloader/">
+    <img src="https://img.shields.io/badge/%EA%B3%B5%EC%8B%9D%20%ED%99%88%ED%8E%98%EC%9D%B4%EC%A7%80-%EB%B0%94%EB%A1%9C%EA%B0%80%EA%B8%B0-0078F0?style=for-the-badge&logo=github&logoColor=white&labelColor=2f353a" alt="TVer Downloader 공식 홈페이지 바로가기">
+  </a>
+</p>
+
 # <img src="assets/applogo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
 
 [![NordVPN 74%할인 + 3개월 무료](https://img.shields.io/badge/NORDVPN-74%25%ED%95%A0%EC%9D%B8%203개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white)](https://refer-nordvpn.com/RRXwGuSQXTe)
