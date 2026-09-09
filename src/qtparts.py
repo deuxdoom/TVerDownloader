@@ -6,10 +6,10 @@
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize, QEvent
+from PyQt6.QtCore import Qt, QSize, QEvent, QObject
 from PyQt6.QtWidgets import (
     QWidget, QMenu, QListWidget, QListView, QTabBar,
-    QStyledItemDelegate, QStyle,
+    QAbstractItemView, QStyledItemDelegate, QStyle,
 )
 
 
@@ -95,6 +95,45 @@ class NoFocusDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         option.state &= ~QStyle.StateFlag.State_HasFocus
         super().paint(painter, option, index)
+
+
+WHEEL_VIEWPORT_RATIO = 0.35
+"""휠을 한 칸 굴렸을 때 목록이 움직이는 양. 뷰포트 높이에 대한 비율이다.
+
+**윈도우의 휠 줄 수 설정을 일부러 따르지 않는다.** Qt 기본값(`ScrollPerItem`)에서 한
+줄은 카드 한 장이라, 5줄로 둔 화면에서는 한 칸에 520px이 지나간다 - 뷰포트 476px보다
+많아 굴리는 순간 이전 화면이 통째로 사라지고 그 사이 항목은 눈에 닿지도 않는다.
+"""
+
+
+class _SmoothWheelFilter(QObject):
+    """휠 한 칸의 이동량을 뷰포트 높이에서 정한다. 목록이 아니라 viewport에 걸어야 한다."""
+
+    def __init__(self, view: QAbstractItemView, ratio: float):
+        super().__init__(view.viewport())
+        self._view = view
+        self._ratio = ratio
+
+    def eventFilter(self, obj, event):
+        """터치패드와 수식키 조합은 건드리지 않는다 - 이미 픽셀 단위로 오거나 확대를 뜻한다."""
+        if event.type() != QEvent.Type.Wheel: return False
+        if not event.pixelDelta().isNull(): return False
+        if event.modifiers() != Qt.KeyboardModifier.NoModifier: return False
+        steps = event.angleDelta().y() / 120.0
+        if not steps: return False
+        bar = self._view.verticalScrollBar()
+        bar.setValue(bar.value() - round(steps * self._view.viewport().height() * self._ratio))
+        return True
+
+
+def apply_smooth_wheel(view: QAbstractItemView, ratio: float = WHEEL_VIEWPORT_RATIO):
+    """목록을 픽셀 단위로 굴리고 휠 한 칸의 이동량을 지금 창 크기에서 정한다.
+
+    **스크롤 모드만 바꾸면 거의 그대로다**(실측 109% → 100%). Qt가 이동 단위를 카드
+    높이로 다시 잡아서, 한 칸이 몇 픽셀인지까지 우리가 정해야 값이 달라진다.
+    """
+    view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    view.viewport().installEventFilter(_SmoothWheelFilter(view, ratio))
 
 
 class HoverTabBar(QTabBar):

@@ -1,6 +1,6 @@
 """헤더의 앱 이름을 그림 로고로 바꿔 준다.
 
-assets/logo/에 언어 3종 × 테마 2종의 완성된 PNG가 있다. 표시 높이의 3배(462x90)로
+assets/title/에 언어 3종 × 테마 2종의 완성된 PNG가 있다. 표시 높이의 3배(462x90)로
 만들어져 어떤 배율에서도 축소만 일어난다. 팔레트의 text 색을 바꿔도 로고 글자 색은
 따라오지 않으므로 그때는 원본에서 다시 만들어 넣어야 한다.
 
@@ -23,7 +23,7 @@ from src import i18n
 
 LOGO_HEIGHT = 30
 
-LOGO_DIR = Path("assets") / "logo"
+LOGO_DIR = Path("assets") / "title"
 LANGUAGE_FALLBACK = "en"
 
 LOGO_LANGUAGES = ("ko", "jp", "en")

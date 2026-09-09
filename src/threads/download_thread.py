@@ -1,4 +1,4 @@
-import os, re, json, signal, subprocess
+import os, re, json, signal, subprocess, threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -22,6 +22,71 @@ MIN_NAME_LEN = 10
 여기까지 줄여도 길면 더 깎지 않는다 - 두 글자짜리 이름은 어느 회차인지 알아볼 수 없다.
 """
 
+DRIVE_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:)+")
+"""맨 앞 구간에 붙은 드라이브 지정자. 'C:이름'은 그 드라이브의 현재 폴더를 가리킨다.
+
+**한 번만 떼면 `C:C:/x`가 `C:/x`로 남아 그대로 빠져나간다**(실측). 연달아 붙은 것을
+한꺼번에 떼지만, 이것으로 모든 모양이 막히지는 않는다(`C: C:/x`처럼 사이에 공백이 들어가면
+남는다) - 마지막 보장은 `_inside`가 선다.
+"""
+
+UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*]')
+"""윈도우가 파일 이름에 허용하지 않는 글자. 벗어난 이름을 한 덩이로 접을 때 지운다."""
+
+
+def sanitize_relative_path(path_without_ext: str) -> str:
+    """이름을 지키면서 흔한 이탈을 걷어낸다. **폴더 안이라는 보장은 여기서 서지 않는다.**
+
+    **시리즈 이름이 비면 앞이 '/'로 남는데, 윈도우의 os.path.join은 그것을 드라이브 루트로
+    읽어 지정한 폴더 밖에 파일을 떨어뜨린다**(실측: 'F:/제목.mp4'). series와 playlist_title이
+    둘 다 없는 곳의 영상을 받으면 그대로 나오는 값이라, 사용자는 파일이 어디로 갔는지도
+    모른 채 드라이브 최상위가 영상으로 찬다. 빈 구간과 '.'만으로 이루어진 구간을 걷어내면
+    그 흔한 모양이 막히고, **폴더와 회차 이름은 그대로 남는다** - 이것이 이 함수의 몫이다.
+
+    **드라이브 지정자를 먼저 떼고 점 구간을 나중에 본다.** 순서가 반대이면 `C:../probe`가
+    점 검사를 `C:..`인 채로 통과한 뒤 `..`만 남아 그대로 빠져나간다(실측: `F:\\probe.mp4`).
+
+    **여기서 모든 모양을 막으려 들지 않는다.** 글자를 다듬는 것만으로는 경계 입력이 끝없이
+    나온다 - `C:../x`를 막으면 `C:C:/x`가, 그것을 막으면 `C: C:/x`가 남는다(셋 다 실측으로
+    폴더를 벗어났다). 마지막 보장은 `shorten_long_path`가 결과를 보고 세운다.
+    """
+    parts: List[str] = []
+    for part in path_without_ext.replace("\\", "/").split("/"):
+        cleaned = part.strip()
+        if not parts:
+            cleaned = DRIVE_PREFIX_RE.sub("", cleaned).strip()
+        if not cleaned or set(cleaned) == {"."}:
+            continue
+        parts.append(cleaned)
+    return "/".join(parts)
+
+
+def inside_folder(full_dir: str, full_path: str) -> bool:
+    """완성된 경로가 저장 폴더 안에 있는가.
+
+    **접두사로 견주면 저장 폴더가 드라이브 루트일 때 무너진다** - `F:\\`에 os.sep을 더하면
+    구분자가 둘이 되어 정상 경로까지 탈락하고, `flatten_name`이 헛돌아 시리즈 폴더가
+    사라졌다(실측). commonpath는 구분자 개수와 대소문자에 흔들리지 않는다.
+    """
+    root = os.path.normcase(os.path.abspath(full_dir))
+    target = os.path.normcase(os.path.abspath(full_path))
+    if root == target:
+        return False
+    try:
+        return os.path.commonpath([root, target]) == root
+    except ValueError:
+        return False
+
+
+def flatten_name(path_without_ext: str) -> str:
+    """폴더 구조를 버리고 한 덩이 이름으로 접는다.
+
+    **글자를 가리지 않는다.** 여기 오는 것은 다듬기를 거치고도 폴더를 벗어난 값이라 이미
+    정상 입력이 아니고, 이름이 조금 뭉개지는 것보다 엉뚱한 드라이브에 쓰는 쪽이 훨씬 나쁘다.
+    """
+    flat = UNSAFE_NAME_RE.sub("_", path_without_ext).strip(" .")
+    return flat or "video"
+
 
 def shorten_long_path(full_dir: str, path_without_ext: str, ext: str,
                       max_len: int = MAX_PATH_LEN):
@@ -30,8 +95,20 @@ def shorten_long_path(full_dir: str, path_without_ext: str, ext: str,
     줄이지 않았으면 둘째 값이 None이다. **회차 이름부터 줄이고 시리즈 폴더는 마지막에
     손댄다** - 폴더를 먼저 깎으면 같은 시리즈가 서로 다른 폴더로 흩어진다. 폴더 구분자는
     그대로 둔다(잃으면 파일이 최상위에 쏟아진다).
+
+    경로를 만드는 관문이 여기 하나뿐이라 다듬는 일도 여기서 시작한다. 다듬은 것만으로는
+    안내하지 않는다 - 시리즈가 없어 폴더가 안 생기는 것은 사용자가 볼 때 당연한 결과다.
+
+    **보장은 글자를 다듬는 것이 아니라 결과를 보는 것으로 세운다.** 문자열만 손보면 경계
+    입력이 끝없이 나온다(`C:../x`를 막으면 `C:C:/x`가, 그것을 막으면 `C: C:/x`가 남는다 -
+    셋 다 실측으로 폴더를 벗어났다). 다듬은 뒤에도 밖을 가리키면 한 덩이 이름으로 접어,
+    **어떤 입력이 와도 저장 폴더 안**이 되게 한다.
     """
+    path_without_ext = sanitize_relative_path(path_without_ext)
     full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
+    if not inside_folder(full_dir, full_path):
+        path_without_ext = flatten_name(path_without_ext)
+        full_path = os.path.join(full_dir, f"{path_without_ext}.{ext}")
     if len(full_path) <= max_len:
         return full_path, None
 
@@ -117,6 +194,18 @@ class DownloadThread(QThread):
         self.concurrent_fragments = concurrent_fragments
 
         self.process: Optional[subprocess.Popen] = None
+        self._probe_process: Optional[subprocess.Popen] = None
+        """제목을 물어보는 yt-dlp. 받는 쪽(process)과 슬롯을 나눠 둔다.
+
+        죽이는 법이 달라서다 - 이쪽은 ytdlp_run이 띄워 프로세스 그룹이 우리와 같으므로
+        CTRL_BREAK_EVENT를 보내면 그 신호가 앱 자신에게도 간다.
+        """
+        self._process_lock = threading.Lock()
+        """stop()과 프로세스를 띄우는 자리가 함께 쓴다.
+
+        없으면 stop()이 플래그만 세우고 지나간 **뒤에** yt-dlp가 떠서 끝까지 받는다.
+        ConversionThread가 같은 이유로 같은 것을 쓴다.
+        """
         self._stop_flag = False; self._current_component: str = ""; self._final_filepath: str = ""
         self._parts = self.DEFAULT_PARTS; self._part_index = -1; self._aside = False
         self._sidecar_paths: set = set()
@@ -129,11 +218,55 @@ class DownloadThread(QThread):
         """
 
     def stop(self):
-        if self._stop_flag: return
-        self._stop_flag = True
+        """받기를 그만둔다. **제목을 물어보는 중이었으면 그 프로세스도 함께 끊는다.**
+
+        예전에는 조회를 모르고 지나가, 조회가 끝난 뒤 취소 여부를 보지 않고 yt-dlp를 새로
+        띄웠다. 사용자가 중지를 누른 뒤에 다운로드가 시작되는 셈이었다.
+        """
+        with self._process_lock:
+            if self._stop_flag: return
+            self._stop_flag = True
+            probe = self._probe_process
         try: self.progress.emit(self.url, {"status": STATUS_CANCELING, "log": t("download.stop_requested")})
         except RuntimeError: pass
+        self._kill_probe(probe)
         self._kill_process_tree()
+
+    @staticmethod
+    def _kill_probe(proc: Optional[subprocess.Popen]):
+        """조회 프로세스를 끊는다.
+
+        **CTRL_BREAK_EVENT를 쓰지 않는다.** 이쪽은 ytdlp_run이 새 프로세스 그룹 없이 띄워
+        우리와 그룹이 같아서, 그 신호를 보내면 앱 자신도 함께 받는다.
+        """
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    def _on_probe_spawn(self, proc: subprocess.Popen):
+        """갓 뜬 조회 프로세스를 붙잡아 둔다. 이미 그만두라고 했으면 그 자리에서 죽인다."""
+        with self._process_lock:
+            self._probe_process = proc
+            stopping = self._stop_flag
+        if stopping:
+            self._kill_probe(proc)
+
+    def _spawn_download(self, command: List[str], popen_kwargs: Dict[str, Any]) -> bool:
+        """받는 yt-dlp를 띄운다. 이미 그만두라고 했으면 띄우지 않는다.
+
+        stop()과 같은 자물쇠를 써서 어느 쪽이 먼저 들어와도 결과가 하나다 - 없으면 플래그만
+        선 채 그 뒤에 떠서 끝까지 받는다.
+        """
+        with self._process_lock:
+            if self._stop_flag:
+                return False
+            self.process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True,
+                                            encoding="utf-8", errors="ignore", **popen_kwargs)
+        return True
 
     def _kill_process_tree(self):
         p = self.process
@@ -200,7 +333,14 @@ class DownloadThread(QThread):
             self.progress.emit(self.url, {"log": t("download.srt_exception", error=e)})
 
     def _execute_download(self) -> bool:
+        """제목을 물어보고 받는다. **조회와 받기 사이에 취소를 두 번 본다.**
+
+        조회는 몇 초에서 몇십 초까지 걸려 그 사이에 중지를 누르는 일이 흔한데, 예전에는
+        그것을 보지 않고 곧장 yt-dlp를 띄워 취소한 항목을 실제로 받았다.
+        """
         self._metadata = self._preloaded_metadata or self._get_metadata() or {}
+        if self._stop_flag:
+            self.progress.emit(self.url, {"status": STATUS_CANCELED}); return False
         if not self._metadata:
             self.progress.emit(self.url, {"status": STATUS_ERROR, "log": t("download.metadata_failed")}); return False
 
@@ -213,14 +353,19 @@ class DownloadThread(QThread):
         if os.name == 'nt': popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         else: popen_kwargs['start_new_session'] = True
 
+        if not self._spawn_download(command, popen_kwargs):
+            self.progress.emit(self.url, {"status": STATUS_CANCELED}); return False
         self.progress.emit(self.url, {"status": STATUS_DOWNLOADING, "log": t("download.ytdlp_start")})
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="ignore", **popen_kwargs)
 
         if self.process and self.process.stdout:
             for line in iter(self.process.stdout.readline, ""):
-                if self._stop_flag: self.progress.emit(self.url, {"status": STATUS_CANCELED}); return False
+                if self._stop_flag:
+                    self._kill_process_tree()
+                    self.progress.emit(self.url, {"status": STATUS_CANCELED}); return False
                 self._parse_line(line)
-        if self._stop_flag: return False
+        if self._stop_flag:
+            self._kill_process_tree()
+            return False
         rc = self.process.wait(timeout=5) if self.process else 1
 
         if not os.path.exists(self._final_filepath):
@@ -340,13 +485,24 @@ class DownloadThread(QThread):
     """
 
     def _get_metadata(self) -> Optional[Dict[str, Any]]:
-        """받기 전에 제목·썸네일을 미리 물어본다. 통신이 밀리면 ytdlp_run이 다시 건다."""
+        """받기 전에 제목·썸네일을 미리 물어본다. 통신이 밀리면 ytdlp_run이 다시 건다.
+
+        **두 갈고리를 함께 넘긴다.** on_spawn이 없으면 중지를 눌러도 communicate()가
+        제한 시간(60초)까지 붙잡히고, should_stop이 없으면 죽인 뒤 오류 문구가 통신 문제로
+        읽혀 다시 건다. MetadataThread가 같은 것을 같은 이유로 쓴다.
+        """
         cmd = [self.ytdlp_exe_path, "-J", "--skip-download", *ytdlp_run.network_options()]
         if self.ignore_ssl_errors:
             cmd.append("--no-check-certificate")
         cmd.append(self.url)
         ok, out, err = ytdlp_run.run(cmd, self.METADATA_TIMEOUT, t("download.metadata_label"),
-                                     lambda msg: self.progress.emit(self.url, {"log": msg}))
+                                     lambda msg: self.progress.emit(self.url, {"log": msg}),
+                                     on_spawn=self._on_probe_spawn,
+                                     should_stop=lambda: self._stop_flag)
+        with self._process_lock:
+            self._probe_process = None
+        if self._stop_flag:
+            return None
         if not ok:
             self.progress.emit(self.url, {"log": t("download.metadata_error",
                                                    error=(err or "").strip())})

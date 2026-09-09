@@ -62,13 +62,22 @@ _strings: Dict[str, Dict[str, str]] = {}
 
 
 def _parse_ini(path: Path) -> Optional[LanguageFile]:
-    """ini 하나를 읽는다. [meta] code가 없거나 깨진 파일은 조용히 건너뛴다."""
+    """ini 하나를 읽는다. [meta] code가 없거나 깨진 파일은 조용히 건너뛴다.
+
+    **읽기는 utf-8-sig다.** 사용자가 직접 고치는 파일이라 메모장이 붙인 BOM이 섞여
+    들어오는데, utf-8로 읽으면 그것이 첫 섹션 이름에 붙어 파일이 통째로 밀린다
+    (실측: MissingSectionHeaderError, `'﻿[meta]'`). BOM이 없는 파일도 그대로 읽힌다.
+
+    **UnicodeDecodeError를 함께 잡는다.** configparser.Error가 아니라서 빠져나가는데,
+    _scan_dir이 폴더의 ini를 전부 훑으므로 고르지도 않은 언어 파일 하나가 cp949로
+    저장돼 있으면 앱이 아예 시작하지 못했다.
+    """
     if not path.is_file():
         return None
     parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read(path, encoding="utf-8")
-    except configparser.Error:
+        parser.read(path, encoding="utf-8-sig")
+    except (configparser.Error, UnicodeDecodeError, OSError):
         return None
     if "meta" not in parser:
         return None
@@ -248,6 +257,11 @@ def t(key: str, **kwargs) -> str:
 
     자리표시자가 안 맞아도(옛 lang/에 새 인자가 없는 서식이 남아 있는 경우) 예외
     대신 서식을 채우지 못한 원문을 그대로 돌려준다.
+
+    **서식 실패를 종류로 가르지 않는다.** 사용자가 고친 ini에서는 짝이 안 맞는 `{`
+    (ValueError), 없는 속성(AttributeError), 맞지 않는 서식 지정자(TypeError)가 모두
+    나올 수 있는데 결론은 하나같이 '원문을 그대로 준다'이다. 종류를 늘어놓으면 언젠가
+    하나를 빠뜨리고, 그 하나가 이 함수의 계약인 '절대 죽지 않는다'를 깬다.
     """
     section, _, option = key.partition(".")
     template = _strings.get(section, {}).get(option)
@@ -255,5 +269,5 @@ def t(key: str, **kwargs) -> str:
         return key
     try:
         return template.format(**kwargs)
-    except (KeyError, IndexError):
+    except Exception:
         return template

@@ -7,4 +7,4 @@
 숫자로 견주므로(src/updater.py의 _norm) 새 버전이 나와도 알아보지 못한다.
 """
 
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.1.0"

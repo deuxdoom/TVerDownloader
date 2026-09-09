@@ -10,7 +10,7 @@ from src.metadata_prefetch import MetadataPrefetcher
 from src.i18n import t
 from src.queue_store import QueueStore
 from src.utils import (get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path,
-                       item_percent, canonicalize_config_fragments,
+                       item_percent, canonical_url, canonicalize_config_fragments,
                        canonicalize_config_codec, canonicalize_config_encoder,
                        STATUS_CONVERTING, STATUS_DONE, STATUS_CONVERT_ERROR)
 
@@ -33,8 +33,20 @@ class DownloadManager(QObject):
         self.ytdlp_path: Optional[str] = None; self.ffmpeg_path: Optional[str] = None
         self._task_queue: List[str] = []; self._active_threads: Dict[str, DownloadThread] = {}
         self._active_conversions: Dict[str, ConversionThread] = {}
+        self._conversion_queue: List[Dict[str, str]] = []
+        """변환 차례를 기다리는 것들. url·path·codec을 담는다.
+
+        **밖에서는 변환 중과 가르지 않는다**(`_converting_urls`). 가르면 여기 있는 항목만
+        `is_busy`에서 새어 나가, 목록에서 지운 뒤에도 변환이 뒤늦게 시작된다.
+        """
         self._active_urls: set[str] = set(); self._logged_start: set[str] = set()
         self._conversion_meta_cache: Dict[str, Dict] = {}
+        """변환이 끝났을 때 task_finished에 실어 보낼 영상 정보.
+
+        **실제로 변환할 항목만 담는다.** 변환 스레드는 메타데이터를 모르므로 넘겨받을 자리가
+        여기뿐인데, 받는 것마다 담으면 기본값인 `원본 유지`에서는 지우는 자리에 닿지 않아
+        yt-dlp의 -J 출력(formats 배열 때문에 항목당 수십 KB)이 끝없이 쌓인다.
+        """
         self._concurrency_logged = False
         self._shutting_down = False
         self._item_percent: Dict[str, int] = {}
@@ -71,13 +83,27 @@ class DownloadManager(QObject):
     빠져나오며 한다. 스레드마다 따로 세지 않고 전체에 한 번 건다.
     """
 
+    MAX_CONCURRENT_CONVERSIONS = 1
+    """동시에 돌릴 재인코딩 수. **동시 다운로드 수와 별개다.**
+
+    하나가 이미 모든 코어를 쓴다(libx264 preset slow). NVENC도 처리량이 하드웨어에 고정돼
+    있어, 여러 개를 겹쳐 돌린다고 총 시간이 줄지 않고 서로 느려지기만 한다. 세지 않던
+    때에는 다운로드가 끝날 때마다 ffmpeg가 하나씩 늘어, 변환이 다운로드보다 느리면
+    프로세스가 무제한으로 쌓였다.
+    """
+
+    def _converting_urls(self) -> set:
+        """변환 중이거나 변환 차례를 기다리는 주소. 밖에서는 둘을 가르지 않는다."""
+        return set(self._active_conversions) | {item["url"] for item in self._conversion_queue}
+
     def is_busy(self, url: str) -> bool:
-        """받는 중이거나 변환 중. 밖에서 프로세스가 돌고 있다는 뜻이다.
+        """받는 중이거나 변환 단계에 있다. 밖에서 아직 끝나지 않았다는 뜻이다.
 
         변환은 별도 스레드라 _active_threads에 없다. 다운로드만 보면 변환 중인 항목이
-        새어 나가, 목록에서 지워도 ffmpeg는 계속 돈다.
+        새어 나가, 목록에서 지워도 ffmpeg는 계속 돈다. **차례를 기다리는 것도 여기 든다** -
+        빼면 지운 뒤에 변환이 뒤늦게 시작된다.
         """
-        return url in self._active_threads or url in self._active_conversions
+        return url in self._active_threads or url in self._converting_urls()
 
     def is_queued(self, url: str) -> bool:
         """차례를 기다리는 중. 아직 아무 프로세스도 뜨지 않았다.
@@ -96,8 +122,8 @@ class DownloadManager(QObject):
         되살려 세워 둔 것(_held)은 빼고 센다 - 껐다 켜도 같은 자리에 다시 서므로, 세면
         되살린 것을 두는 사람에게 '진행 중인 작업이 있다'는 거짓 경고가 뜬다.
         """
-        return (len(self._task_queue)
-                + len(self._active_threads) + len(self._active_conversions))
+        return (len(self._task_queue) + len(self._active_threads)
+                + len(self._active_conversions) + len(self._conversion_queue))
 
     def stop_all(self) -> int:
         """진행 중인 다운로드와 변환을 모두 멈추고, 멈춘 개수를 돌려준다. 대기열을 먼저 비운다.
@@ -109,6 +135,7 @@ class DownloadManager(QObject):
         self._persist_queue()
         self._shutting_down = True
         self._task_queue.clear()
+        self._conversion_queue.clear()
         self._held.clear()
         self._item_percent.clear()
         self._prefetch.stop_all()
@@ -136,8 +163,11 @@ class DownloadManager(QObject):
         """대기열에 하나 넣는다. 제목·표지 그림을 이미 알면 함께 넘긴다.
 
         시리즈 선택·즐겨찾기 확인은 그 둘을 손에 들고 있다. 모르는 채로 들어온 것만 미리 묻는다.
+
+        **주소는 들어오는 자리에서 한 번 다듬는다**(`canonical_url`). 뒤에 붙은 쿼리만 다른
+        같은 회차가 대기열에 둘 서면 한 파일을 두 프로세스가 함께 쓴다.
         """
-        url = (url or "").strip()
+        url = canonical_url(url)
         if not url or url in self._active_urls:
             if url in self._active_urls: self.log.emit(t("queue.already_queued", url=url))
             return False
@@ -178,8 +208,20 @@ class DownloadManager(QObject):
         self._persist_queue()
 
     def stop_task(self, url: str):
+        """하나를 멈춘다. 변환 차례를 기다리던 것은 시작하지 않고 그대로 실패로 닫는다.
+
+        대기열에서 빼기만 하면 카드가 `변환 중`인 채로 남아 영영 끝나지 않는다.
+        """
         if url in self._active_threads: self._active_threads[url].stop()
         if url in self._active_conversions: self._active_conversions[url].stop()
+        elif self._drop_queued_conversion(url):
+            self._on_conversion_finished(False, url, "")
+
+    def _drop_queued_conversion(self, url: str) -> bool:
+        """변환 대기열에서 하나를 뺀다. 있었으면 True."""
+        before = len(self._conversion_queue)
+        self._conversion_queue = [item for item in self._conversion_queue if item["url"] != url]
+        return len(self._conversion_queue) < before
 
     def remove_task_from_queue(self, url: str):
         """대기 중인 것 하나를 뺀다. 되살려 세워 둔 것도 같은 길로 빠진다.
@@ -204,7 +246,7 @@ class DownloadManager(QObject):
         check_queue_and_start가 앞에 선 것까지 통째로 띄우기 때문이다. 저절로 시작하지 않는
         근거는 지역 제한이다 - `--tray`로 뜨면 앱이 VPN보다 먼저 서서 전부 실패로 끝난다.
         """
-        url = (url or "").strip()
+        url = canonical_url(url)
         if not url or url in self._active_urls:
             return False
         self._active_urls.add(url); self._held.append(url)
@@ -319,7 +361,6 @@ class DownloadManager(QObject):
             self._check_completion(); return
 
         self.log.emit(t("queue.download_done", path=final_filepath))
-        self._conversion_meta_cache[url] = metadata
 
         preferred_codec_key = canonicalize_config_codec(self.config)
 
@@ -334,6 +375,7 @@ class DownloadManager(QObject):
         target_codec = codec_map.get(preferred_codec_key)
 
         if current_codec and target_codec and current_codec != target_codec:
+            self._conversion_meta_cache[url] = metadata
             self.log.emit(t("convert.start", source=current_codec, target=target_codec))
             self._start_conversion(url, final_filepath, target_codec)
         else:
@@ -341,20 +383,38 @@ class DownloadManager(QObject):
             self._check_completion()
 
     def _start_conversion(self, url: str, input_path: str, target_codec: str):
-        """재인코딩만 남았으므로 원본은 늘 지운다 - 같은 영상이 코덱만 다르게 둘 남는다."""
-        self.progress_updated.emit(url, {"status": STATUS_CONVERTING, "codec": target_codec.upper()})
+        """변환 줄에 세운다. 한도에 여유가 있으면 곧바로 시작한다.
 
+        재인코딩만 남았으므로 원본은 늘 지운다 - 같은 영상이 코덱만 다르게 둘 남는다.
+        **차례를 기다리는 동안에도 카드는 `변환 중`이다** - 사용자가 할 일이 기다리는 것으로
+        같고, 상태를 하나 더 만들면 일곱 언어에 문구가 늘어난다.
+        """
+        self.progress_updated.emit(url, {"status": STATUS_CONVERTING, "codec": target_codec.upper()})
+        self._conversion_queue.append({"url": url, "path": input_path, "codec": target_codec})
+        self._pump_conversions()
+        self.check_queue_and_start()
+
+    def _pump_conversions(self):
+        """변환 줄에서 한도만큼 꺼내 띄운다. 다운로드 쪽 check_queue_and_start와 짝이다."""
+        if self._shutting_down:
+            return
+        while (len(self._active_conversions) < self.MAX_CONCURRENT_CONVERSIONS
+               and self._conversion_queue):
+            item = self._conversion_queue.pop(0)
+            self._spawn_conversion(item["url"], item["path"], item["codec"])
+
+    def _spawn_conversion(self, url: str, input_path: str, target_codec: str):
         thread = ConversionThread(url, input_path, self.ffmpeg_path,
                                   target_codec=target_codec,
                                   delete_original=True,
                                   hw_encoder_setting=canonicalize_config_encoder(self.config))
         thread.log.connect(self.log); thread.finished.connect(self._on_conversion_finished)
         self._active_conversions[url] = thread; thread.start()
-        self.check_queue_and_start()
 
     def _on_conversion_finished(self, success: bool, url:str, new_filepath: str):
         thread = self._active_conversions.pop(url, None)
         if thread: thread.deleteLater()
+        self._pump_conversions()
         meta = self._conversion_meta_cache.pop(url, {})
         final_status = STATUS_DONE if success else STATUS_CONVERT_ERROR
         payload = {"status": final_status}
@@ -369,7 +429,8 @@ class DownloadManager(QObject):
 
         self.check_queue_and_start()
 
-        if not self._task_queue and not self._active_threads and not self._active_conversions:
+        if (not self._task_queue and not self._active_threads
+                and not self._active_conversions and not self._conversion_queue):
             self._active_urls = set(self._held); self._logged_start.clear()
             self._item_percent.clear()
             self._queue_meta = {url: meta for url, meta in self._queue_meta.items()
@@ -397,6 +458,7 @@ class DownloadManager(QObject):
         변환 중, 받는 중, 기다리는 중 순으로 두면 다음 실행의 위아래가 지금과 같아진다.
         """
         urls = (list(self._held) + list(self._active_conversions)
+                + [item["url"] for item in self._conversion_queue]
                 + list(self._active_threads) + list(self._task_queue))
         return [{"url": url,
                  "title": self._queue_meta.get(url, {}).get("title", ""),
@@ -420,16 +482,22 @@ class DownloadManager(QObject):
         저장할 자리를 따로 세면 언젠가 한 곳을 빠뜨린다.
         """
         queued = len(self._task_queue) + len(self._held)
-        active = len(self._active_threads) + len(self._active_conversions)
+        active = (len(self._active_threads) + len(self._active_conversions)
+                  + len(self._conversion_queue))
         self._persist_queue()
         self.queue_changed.emit(queued, active)
 
     def reset_for_redownload(self, url: str):
+        """다시 받으려고 흔적을 지운다. 변환 줄에 서 있던 것도 함께 뺀다.
+
+        빼지 않으면 새로 받아 둔 파일 위로 예전 차례의 변환이 뒤늦게 돌아간다.
+        """
         if not url: return
         try:
             if url in self._task_queue: self._task_queue.remove(url)
             if url in self._held: self._held.remove(url)
         except ValueError: pass
+        self._drop_queued_conversion(url)
         self._active_urls.discard(url)
         self._logged_start.discard(url)
         self._item_percent.pop(url, None)

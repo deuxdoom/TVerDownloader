@@ -613,6 +613,15 @@ class SettingsDialog(QDialog):
         return False
 
     def _save_settings(self):
+        """설정을 파일에 쓰고 창을 닫는다.
+
+        **바뀐 값을 self.config에 곧바로 적지 않는다.** 그 사전은 메인 창과 같은 것을
+        가리켜서, 파일 저장이 실패한 뒤 사용자가 창을 닫으면 **파일과 다른 값이 실행 중인
+        앱에만 남는다.** 다 모아 두었다가 성공한 뒤 한 번에 옮긴다.
+
+        저장에는 `merged`를 넘긴다 - pending만 쓰면 창이 다루지 않는 설정(창 크기·테마
+        같은 것)이 통째로 사라진다.
+        """
         shortcut_table = self._shortcut_table()
         if shortcuts.conflicts(shortcut_table):
             self.nav.setCurrentRow(self._shortcut_page_row)
@@ -624,39 +633,44 @@ class SettingsDialog(QDialog):
         if not self._check_connection_total():
             return
         language = self.language_combo.currentData()
-        self.language_changed = i18n.resolve_code(language) != i18n.current_code()
-        self.config["language"] = language
-        self.config[shortcuts.CONFIG_KEY] = shortcut_table
-        self.config["download_folder"] = self.folder_path_edit.text()
-        self.config["max_concurrent_downloads"] = self.concurrent_spinbox.value()
-        self.config["concurrent_fragments"] = self.fragments_spinbox.value()
+        pending: dict = {}
+        pending["language"] = language
+        pending[shortcuts.CONFIG_KEY] = shortcut_table
+        pending["download_folder"] = self.folder_path_edit.text()
+        pending["max_concurrent_downloads"] = self.concurrent_spinbox.value()
+        pending["concurrent_fragments"] = self.fragments_spinbox.value()
         if self.close_action_group.checkedButton():
-            self.config["close_action"] = self.close_action_group.checkedButton().property("config_value")
-        self.config["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
-        self.config["auto_check_favorites_on_start"] = self.fav_autocheck_checkbox.isChecked()
-        self.config["auto_update_check"] = self.auto_update_checkbox.isChecked()
+            pending["close_action"] = self.close_action_group.checkedButton().property("config_value")
+        pending["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
+        pending["auto_check_favorites_on_start"] = self.fav_autocheck_checkbox.isChecked()
+        pending["auto_update_check"] = self.auto_update_checkbox.isChecked()
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
-        self.config["filename_parts"] = filename_parts; self.config["filename_order"] = filename_order
+        pending["filename_parts"] = filename_parts; pending["filename_order"] = filename_order
 
-        if self.quality_button_group.checkedButton(): self.config["quality"] = self.quality_button_group.checkedButton().property("config_value")
-        self.config["preferred_codec"] = self.codec_combo.currentData()
-        self.config["hardware_encoder"] = self.hw_encoder_combo.currentData()
+        if self.quality_button_group.checkedButton(): pending["quality"] = self.quality_button_group.checkedButton().property("config_value")
+        pending["preferred_codec"] = self.codec_combo.currentData()
+        pending["hardware_encoder"] = self.hw_encoder_combo.currentData()
 
-        self.config["download_subtitles"] = self.download_subs_checkbox.isChecked()
-        self.config["embed_subtitles"] = self.embed_subs_checkbox.isChecked()
+        pending["download_subtitles"] = self.download_subs_checkbox.isChecked()
+        pending["embed_subtitles"] = self.embed_subs_checkbox.isChecked()
         if self.subtitle_format_button_group.checkedButton():
-            self.config["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
+            pending["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
 
-        self.config["embed_thumbnail"] = self.embed_thumbnail_checkbox.isChecked()
-        self.config["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()
+        pending["embed_thumbnail"] = self.embed_thumbnail_checkbox.isChecked()
+        pending["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()
         keywords_str = self.exclude_keywords_edit.text()
-        self.config["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
+        pending["series_exclude_keywords"] = [k.strip() for k in keywords_str.split(',') if k.strip()]
 
-        if not save_config(self.config):
+        merged = dict(self.config)
+        merged.update(pending)
+        if not save_config(merged):
             notify(self, t("settings.save_failed_title"),
                    t("settings.save_failed_body"),
                    icon_name="info", color_key="warn", theme=self._theme)
+            return
+        self.config.update(pending)
+        self.language_changed = i18n.resolve_code(language) != i18n.current_code()
         self.accept()

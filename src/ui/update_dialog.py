@@ -32,6 +32,9 @@ class UpdateProgressDialog(QDialog):
         self.failure_reason = ""
         """실패 사유. 사용자가 취소했으면 빈 문자열로 남는다."""
 
+        self._work_done = False
+        """스레드가 결론을 냈는가. 창을 닫아도 되는지를 이 값으로 가른다."""
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 16)
         layout.setSpacing(12)
@@ -67,17 +70,27 @@ class UpdateProgressDialog(QDialog):
 
     def _on_finished(self, ok: bool, reason: str):
         self.failure_reason = reason
+        self._work_done = True
         self.accept() if ok else self.reject()
 
     def _cancel(self):
-        """받기를 세우고 창을 닫는다. 사유는 비워 둔다(사용자가 고른 것이라서)."""
+        """받기를 세운다. **창은 여기서 닫지 않는다** - 스레드가 빠져나온 뒤에 닫힌다."""
         self.cancel_button.setEnabled(False)
         self.status_label.setText(t("update.canceling"))
         self.thread.stop()
 
     def reject(self):
-        """Esc로도 여기를 지나가므로 스레드를 세우는 자리를 여기로 모은다."""
-        if self.thread.isRunning():
-            self.thread.stop()
-            self.thread.wait(3000)
-        super().reject()
+        """Esc·X도 취소 단추와 같은 길로 보낸다. 사유는 비워 둔다(사용자가 고른 것이라서).
+
+        **끝나기를 기다리지 않고 닫으면 안 된다.** 닫는 순간 호출부가 작업 폴더를 지우는데,
+        받기는 응답이 끊기면 DOWNLOAD_TIMEOUT(30초)까지 매달려 있어 그 사이에 지우면 쓰는
+        중인 파일과 부딪힌다. 예전에는 3초만 기다리고 결과와 무관하게 닫았다. 창이 스레드의
+        부모라 도는 채로 파괴될 위험도 함께 없앤다.
+
+        `_work_done`이 필요한 것은 finished 시그널이 도착한 시점에 QThread가 아직
+        `isRunning()`으로 보일 수 있어서다 - 그것만 보면 정작 끝났을 때 창이 닫히지 않는다.
+        """
+        if self._work_done or not self.thread.isRunning():
+            super().reject()
+            return
+        self._cancel()

@@ -5,6 +5,18 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+from src.utils import canonical_url
+
+def _key(url: str) -> str:
+    """기록을 찾고 담을 때 쓰는 키. TVer 주소는 쿼리를 뗀 형태로 모은다.
+
+    같은 회차라도 공유 경로에 따라 `?utm_source=...`가 붙어 오는데, 글자 그대로 견주면
+    이미 받은 것을 또 받는다. **utils는 위에서 가져와도 된다** - 이 모듈로 되돌아오는
+    고리가 없다(늦춰 가져오는 것은 화면 문구를 다루는 i18n뿐이다).
+    """
+    return canonical_url(url)
+
+
 LEGACY_NO_TITLE = ("", "(제목 없음)")
 """제목이 없다는 뜻으로 파일에 남아 있을 수 있는 값들. **화면 문구가 아니라 자료값이다.**
 
@@ -34,19 +46,41 @@ class HistoryStore:
         try:
             obj = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(obj, dict):
-                self._data = obj
+                self._data = self._merge_by_key(obj)
             elif isinstance(obj, list):
-                self._data = {
+                self._data = self._merge_by_key({
                     item.get("url"): {
                         "title": item.get("title", ""), "date": item.get("date", ""),
                         "filepath": item.get("filepath", ""), "series_id": item.get("series_id"),
                         "thumbnail_url": item.get("thumbnail_url")
                     } for item in obj if isinstance(item, dict) and item.get("url")
-                }
+                })
             else: self._data = {}
             return True
         except (json.JSONDecodeError, IOError):
             self._data = {}; return False
+
+    @staticmethod
+    def _merge_by_key(raw: Dict[str, dict]) -> Dict[str, dict]:
+        """읽어 들인 것을 같은 회차끼리 한 키로 모은다. 겹치면 날짜가 최신인 것을 남긴다.
+
+        **담는 쪽만 다듬으면 옛 기록과 어긋난다.** 4.1.0 전에는 주소를 글자 그대로 담아
+        같은 회차가 `?utm_source=...` 유무로 두 줄 남을 수 있었는데, 읽을 때 모으지 않으면
+        새 코드가 찾는 키와 맞지 않아 **이미 받은 것을 다시 받고 파일 경로도 못 찾는다.**
+        최신을 남기는 것은 그쪽에 지금 쓰는 파일 경로가 들어 있어서다.
+
+        값이 사전이 아닌 줄은 버린다 - 손으로 고친 파일에서 `null`이 들어오면 그 뒤의
+        모든 조회가 AttributeError로 넘어진다.
+        """
+        merged: Dict[str, dict] = {}
+        for url, entry in raw.items():
+            key = _key(url if isinstance(url, str) else "")
+            if not key or not isinstance(entry, dict):
+                continue
+            kept = merged.get(key)
+            if kept is None or entry.get("date", "") >= kept.get("date", ""):
+                merged[key] = entry
+        return merged
 
     def save(self) -> None:
         """비동기로 저장한다. 디스크 쓰기에 UI가 멈추지 않게 하려는 것."""
@@ -81,22 +115,22 @@ class HistoryStore:
         except OSError: pass
 
     def exists(self, url: str) -> bool:
-        return (url or "").strip() in self._data
+        return _key(url) in self._data
 
     def get_title(self, url: str) -> str:
         from src.i18n import t
-        entry = self._data.get((url or "").strip(), {})
+        entry = self._data.get(_key(url), {})
         stored = entry.get("title", "")
         return t("card.title_missing") if stored in LEGACY_NO_TITLE else stored
 
     def get_filepath(self, url: str) -> str:
-        entry = self._data.get((url or "").strip(), {})
+        entry = self._data.get(_key(url), {})
         return entry.get("filepath", "")
 
     def add(self, url: str, title: str, filepath: Optional[str] = None,
             series_id: Optional[str] = None, thumbnail_url: Optional[str] = None):
         """기록에 항목을 더한다. series_id·thumbnail_url은 있으면 함께 남긴다."""
-        url = (url or "").strip()
+        url = _key(url)
         if not url: return
 
         self._data[url] = {
@@ -108,8 +142,9 @@ class HistoryStore:
         }
 
     def remove(self, url: str) -> None:
-        url = (url or "").strip()
-        if url and url in self._data: self._data.pop(url)
+        """기록 하나를 뺀다. 찾는 키는 담을 때와 같아야 한다 - 다르면 지워지지 않는다."""
+        key = _key(url)
+        if key and key in self._data: self._data.pop(key)
 
     def sorted_entries(self) -> List[Tuple[str, dict]]:
         return sorted(self._data.items(), key=lambda item: item[1].get("date", ""), reverse=True)

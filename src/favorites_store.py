@@ -147,16 +147,22 @@ class FavoritesStore:
             return (meta.get("added") or "", url)
         return sorted(self._data.items(), key=key, reverse=False)
 
-    def touch_last_check(self, series_url: str, series_title: Optional[str] = None) -> None:
-        u = (series_url or "").strip()
-        if not u:
-            return
+    def touch_last_check(self, series_url: str, series_title: Optional[str] = None) -> bool:
+        """마지막 확인 시각을 적는다. 목록에 없으면 아무것도 하지 않고 False.
 
-        now = _now_str()
-        if u not in self._data:
-            self._data[u] = {"added": now, "last_check": now, "title": series_title or ""}
-        else:
-            self._data[u]["last_check"] = now
-            if series_title and self._data[u].get("title") != series_title:
-                self._data[u]["title"] = series_title
+        **없는 것을 새로 만들지 않는다.** 분석은 72화 시리즈에서 60초까지 걸리고 그동안
+        사용자가 그 시리즈를 지울 수 있는데, 늦게 도착한 결과가 만들어 버리면 **지운 것이
+        되살아난다.** 담는 일은 add() 한 곳에서만 한다.
+
+        돌려주는 값은 '아직 유효한 요청인가'라는 뜻이다 - 부르는 쪽이 그 뒤의 일(신규 회차를
+        대기열에 넣는 것)을 이어갈지 이 값으로 정한다.
+        """
+        u = (series_url or "").strip()
+        if not u or u not in self._data:
+            return False
+
+        self._data[u]["last_check"] = _now_str()
+        if series_title and self._data[u].get("title") != series_title:
+            self._data[u]["title"] = series_title
         self.save()
+        return True

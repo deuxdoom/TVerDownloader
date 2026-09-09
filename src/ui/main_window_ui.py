@@ -16,7 +16,7 @@ from src.i18n import t
 from src.icons import get_icon
 from src.qss import palette, SIDE_MARGIN
 from src.qtparts import (GridListWidget, RoundedMenu, NoFocusDelegate,
-                         HoverTabBar)
+                         HoverTabBar, apply_smooth_wheel)
 from src.widgets import FavoriteItemWidget, EmptyStateOverlay
 
 class MainWindowUI:
@@ -323,6 +323,7 @@ class MainWindowUI:
         self.download_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.download_list.setSpacing(6)
         self._hide_focus_rect(self.download_list)
+        apply_smooth_wheel(self.download_list)
         self.download_empty = self._add_empty_state(
             self.download_list, "download", t("download_tab.empty_title"),
             t("download_tab.empty_description"))
@@ -392,6 +393,7 @@ class MainWindowUI:
         self.history_list = QListWidget(objectName="HistoryList")
         self.history_list.setSpacing(6)
         self._hide_focus_rect(self.history_list)
+        apply_smooth_wheel(self.history_list)
         self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_empty = self._add_empty_state(
@@ -422,6 +424,7 @@ class MainWindowUI:
         self.fav_list.setObjectName("FavoritesList")
         self.fav_list.setSpacing(6)
         self._hide_focus_rect(self.fav_list)
+        apply_smooth_wheel(self.fav_list)
         self.fav_list.set_item_height(FavoriteItemWidget.CARD_HEIGHT)
         self.fav_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

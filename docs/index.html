@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TVer Downloader — 일본 TVer 영상 다운로더</title>
+<meta name="description" content="일본 TVer 스트리밍 영상을 받아 두는 윈도우용 프로그램입니다. 시리즈 일괄 받기, 자막 추출, 코덱 변환, 7개 국어를 지원합니다.">
+<link rel="canonical" href="https://deuxdoom.github.io/TVerDownloader/">
+<meta name="theme-color" content="#080c14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fafbfe" media="(prefers-color-scheme: light)">
+
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:title" content="TVer Downloader — 일본 TVer 영상 다운로더">
+<meta property="og:description" content="시리즈 일괄 받기, 자막 추출, 코덱 변환까지. 윈도우용 무료 프로그램입니다.">
+<meta property="og:url" content="https://deuxdoom.github.io/TVerDownloader/">
+<meta property="og:image" content="https://deuxdoom.github.io/TVerDownloader/img/app-light.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="img/logo.png">
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+
+<script>
+try {
+  const savedTheme = localStorage.getItem('tver-page-theme');
+  if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
+} catch {}
+</script>
+<style>
+@layer reset, tokens, base, layout, components, motion;
+
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+  img, svg { display: block; max-width: 100%; }
+  img { height: auto; }
+  button, input { font: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  button { color: inherit; }
+  a { color: inherit; text-decoration: none; }
+  ul, ol { list-style: none; padding: 0; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  [hidden] { display: none !important; }
+}
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#fafbfe, #080c14);
+    --surface: light-dark(#fff, #101722);
+    --surface-soft: light-dark(#f3f6fb, #131c2a);
+    --ink: light-dark(#171f30, #eff4ff);
+    --muted: light-dark(#59687f, #97a6bd);
+    --faint: light-dark(#66758b, #8090a7);
+    --line: light-dark(#dce4ef, #233044);
+    --line-soft: light-dark(#e8edf5, #1a2434);
+    --accent: light-dark(#0067d9, #5baaff);
+    --accent-soft: light-dark(#e8f2ff, #122c4c);
+    --card: linear-gradient(145deg, light-dark(#fff, #111a29), light-dark(#f6f9ff, #0c121e));
+    --glass: light-dark(rgb(250 251 254 / .84), rgb(8 12 20 / .84));
+    --shadow: 0 32px 90px -24px light-dark(#2b4c7a30, #000b);
+    --radius: 22px;
+    --shell: 1120px;
+    --pad: clamp(20px, 4.5vw, 48px);
+  }
+  :root[data-theme='light'] { color-scheme: light; }
+  :root[data-theme='dark'] { color-scheme: dark; }
+}
+
+@layer base {
+  html { scroll-behavior: smooth; scroll-padding-top: 100px; }
+  body {
+    font-family: Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.65;
+    word-break: keep-all; overflow-wrap: break-word; overflow-x: clip;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3 { font-weight: 700; line-height: 1.22; letter-spacing: -.045em; text-wrap: balance; }
+  p { text-wrap: pretty; }
+  ::selection { background: #238dff40; color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 5px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .85em; overflow-wrap: anywhere; }
+  .icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .skip { position: fixed; top: 12px; left: 12px; z-index: 100; padding: 10px 18px; translate: 0 -200%; border-radius: 10px; background: var(--surface); }
+  .skip:focus { translate: 0 0; }
+  dialog { color: var(--ink); }
+  html:has(dialog[open]) { overflow: hidden; }
+}
+
+@layer layout {
+  .shell { width: min(calc(100% - var(--pad) * 2), var(--shell)); margin-inline: auto; }
+  .section { padding-block: clamp(72px, 9vw, 120px); }
+  .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .16em; text-transform: uppercase; }
+  .eyebrow::before { content: ''; width: 17px; height: 1px; background: currentColor; }
+  .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 40px; }
+  .section-heading h2 { margin-top: 16px; font-size: clamp(30px, 3.5vw, 43px); }
+  .section-heading > p { max-width: 320px; color: var(--muted); font-size: 15px; }
+  .section-heading.center { display: block; text-align: center; }
+  .section-heading.center .eyebrow { justify-content: center; }
+  .section-heading.center > p { max-width: none; margin-top: 16px; }
+}
+
+@layer components {
+  .topbar { position: sticky; top: 0; z-index: 40; background: var(--glass); backdrop-filter: blur(20px) saturate(1.4); border-bottom: 1px solid var(--line-soft); }
+  .topbar-inner { height: 76px; display: flex; align-items: center; gap: 28px; }
+  .mark { display: inline-flex; align-items: center; gap: 10px; flex: none; font-weight: 720; letter-spacing: -.035em; font-size: 17px; }
+  .mark img { width: 31px; height: 31px; }
+  .mark span { white-space: nowrap; }
+  .topbar nav { display: flex; gap: 28px; margin-left: auto; font-size: 13px; color: var(--muted); }
+  .topbar nav a { transition: color .2s; }
+  .topbar nav a:hover { color: var(--ink); }
+  .nav-actions { display: flex; gap: 10px; align-items: center; }
+  .icon-button { width: 36px; height: 36px; border: 1px solid transparent; border-radius: 9px; background: transparent; display: grid; place-items: center; color: var(--muted); transition: background .2s, color .2s; }
+  .icon-button:hover { background: var(--surface-soft); color: var(--ink); }
+  .icon-button .icon { width: 18px; height: 18px; }
+  .theme-toggle .moon { display: none; }
+  :root[data-theme='light'] .theme-toggle .moon { display: block; }
+  :root[data-theme='light'] .theme-toggle .sun { display: none; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme]) .theme-toggle .moon { display: block; }
+    :root:not([data-theme]) .theme-toggle .sun { display: none; }
+  }
+  .nav-download { font-size: 12px; font-weight: 650; padding: 8px 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); transition: border-color .2s; white-space: nowrap; }
+  .nav-download:hover { border-color: var(--accent); }
+
+  .hero-wrap { position: relative; isolation: isolate; overflow: clip; }
+  .hero-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; }
+  .hero-atmosphere::before { content: ''; position: absolute; width: 1150px; height: 900px; left: 50%; top: 340px; translate: -50% 0; border-radius: 50%; background: radial-gradient(ellipse, light-dark(#348cff1d, #106aff26), transparent 68%); }
+  .hero-atmosphere::after { content: ''; position: absolute; inset: 0; opacity: .3; background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 80px 80px; mask-image: radial-gradient(ellipse 75% 50% at 50% 40%, #000, transparent); }
+  .beam { position: absolute; top: 320px; width: 32vw; max-width: 470px; height: 880px; background: linear-gradient(180deg, transparent, light-dark(#4e9bff0e, #3f92ff10), transparent); transform: skewX(-27deg); border-right: 1px solid light-dark(#74adff16, #74adff12); }
+  .beam.one { left: -7%; }
+  .beam.two { right: -5%; transform: skewX(27deg); }
+  .hero { text-align: center; padding-block: clamp(58px, 7vw, 90px) 0; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--glass); font-size: 11px; letter-spacing: .025em; transition: color .2s, border-color .2s, background .2s; }
+  .pill:hover { color: light-dark(#805d00, #f4cf68); border-color: light-dark(#dfb64d, #917638); background: light-dark(#fff7d6, #282214); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px #368eff7a; transition: background .2s, box-shadow .2s; }
+  .pill:hover .dot { background: #f4c542; box-shadow: 0 0 10px #f4c54270; }
+  .pill .icon { width: 13px; height: 13px; margin-left: 2px; }
+  .hero h1 { margin: 27px auto 0; font-size: clamp(32px, 4.65vw, 65px); font-weight: 740; line-height: 1.2; letter-spacing: -.055em; }
+  .hero h1 .grad { background: linear-gradient(110deg, light-dark(#065bc2, #e1f0ff) 5%, light-dark(#086ed4, #73baff) 50%, light-dark(#1388e6, #4b93f6) 90%); background-clip: text; -webkit-background-clip: text; color: transparent; }
+  .lead { max-width: 540px; margin: 24px auto 0; font-size: clamp(15px, 1.45vw, 18px); color: var(--muted); line-height: 1.8; }
+  .lead span { display: inline-block; }
+  .cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 28px; }
+  .btn { min-height: 48px; display: inline-flex; justify-content: center; align-items: center; gap: 11px; padding: 12px 22px; border-radius: 10px; font-size: 14px; font-weight: 650; border: 1px solid transparent; transition: translate .2s, background .2s, box-shadow .2s, border-color .2s; }
+  .btn:hover { translate: 0 -2px; }
+  .btn:active { translate: 0 0; }
+  .btn.primary { color: light-dark(#fff, #10233c); background: light-dark(#1269df, #edf5ff); border-color: light-dark(#1269df, #fff); box-shadow: 0 1px 1px #0001, 0 7px 24px -8px #137fff40; }
+  .btn.primary:hover { box-shadow: 0 8px 30px -6px #137fff70; }
+  .btn.primary .icon { width: 17px; height: 17px; }
+  .btn.quiet { color: var(--muted); border-color: var(--line); background: var(--glass); }
+  .btn.quiet:hover { color: var(--ink); border-color: var(--faint); }
+  .btn.quiet .icon { width: 15px; height: 15px; }
+  .facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 20px; font-size: 11px; color: var(--faint); }
+  .facts li { display: inline-flex; align-items: center; gap: 7px; }
+  .facts li + li::before { content: ''; width: 2px; height: 2px; border-radius: 50%; background: var(--faint); margin-right: 8px; }
+  .facts .icon { width: 12px; height: 12px; }
+
+  .showcase { padding-block: 60px 34px; scroll-margin-top: 90px; }
+  .showcase-header { display: flex; align-items: center; justify-content: space-between; padding-inline: 45px; margin-bottom: 13px; font-size: 10px; color: var(--faint); }
+  .showcase-header p { letter-spacing: .15em; text-transform: uppercase; }
+  .showcase-header p span { display: inline-block; width: 4px; height: 4px; margin-right: 8px; border-radius: 50%; background: #45bca0; vertical-align: middle; }
+  .zoom-button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); padding: 7px 0 7px 12px; font-size: 11px; }
+  .zoom-button .icon { width: 13px; height: 13px; }
+  .zoom-button:hover { color: var(--accent); }
+  .gallery { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 16px; }
+  .gallery:has(.arrow[hidden]) { grid-template-columns: minmax(0, 1fr); }
+  .rail { display: grid; position: relative; grid-auto-flow: column; grid-auto-columns: 100%; gap: 18px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: none; border-radius: 16px; cursor: grab; box-shadow: var(--shadow); }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail.dragging { cursor: grabbing; scroll-snap-type: none; scroll-behavior: auto; user-select: none; }
+  .rail > figure { display: grid; place-items: center; scroll-snap-align: center; aspect-ratio: 3 / 2; padding: 8px; border: 1px solid light-dark(#afc7e5, #45638a); border-radius: 16px; overflow: hidden; background: linear-gradient(150deg, light-dark(#dde9f9, #234065), light-dark(#eff4fc, #111b2d) 45%, light-dark(#dde5f2, #182945)); }
+  .rail img { width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; border-radius: 9px; }
+  .arrow { display: grid; place-items: center; min-height: 48px; padding: 0; background: none; border: none; color: var(--muted); transition: color .2s, translate .2s; }
+  .arrow .icon { width: 24px; height: 24px; }
+  .arrow:hover:not(:disabled) { color: var(--accent); }
+  .arrow.prev:hover:not(:disabled) { translate: -3px 0; }
+  .arrow.next:hover:not(:disabled) { translate: 3px 0; }
+  .arrow:disabled { opacity: .25; }
+  .gallery-footer { display: flex; gap: 20px; justify-content: space-between; align-items: center; margin: 20px 44px 0; min-height: 40px; }
+  .gallery-meta { display: flex; align-items: flex-start; gap: 13px; max-width: 420px; }
+  .gallery-count { color: var(--accent); font-size: 10px; font-variant-numeric: tabular-nums; letter-spacing: .08em; padding-top: 3px; white-space: nowrap; }
+  .caption { text-align: left; font-size: 12px; color: var(--muted); }
+  .dots { display: flex; align-items: center; gap: 5px; }
+  .dots button { border: none; background: none; border-radius: 8px; min-width: 28px; min-height: 32px; padding: 12px 6px; display: grid; place-items: center; }
+  .dots button span { width: 5px; height: 5px; border-radius: 999px; background: var(--faint); opacity: .45; transition: width .2s, opacity .2s, background .2s; }
+  .dots button[aria-current='true'] span { width: 23px; background: var(--accent); opacity: 1; }
+  .dots button:hover span { opacity: 1; }
+  .feature-ribbon { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 32px; padding-block: 31px 35px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line-soft); }
+  .feature-ribbon span { display: flex; align-items: center; gap: 9px; }
+  .feature-ribbon .icon { width: 15px; height: 15px; color: var(--faint); }
+  .notice { display: flex; align-items: center; gap: 12px; padding: 19px 0 0; font-size: 12px; color: var(--muted); }
+  .notice .icon { width: 16px; height: 16px; color: light-dark(#b47b22, #d3a761); }
+  .notice strong { font-weight: 600; color: var(--ink); margin-right: 8px; }
+
+  .bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+  .card { position: relative; isolation: isolate; grid-column: span 4; overflow: hidden; padding: 29px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); min-width: 0; }
+  .card::after { content: ''; position: absolute; z-index: -1; inset: 0; opacity: 0; transition: opacity .35s; background: radial-gradient(420px circle at var(--pointer-x, 50%) var(--pointer-y, 30%), light-dark(#208bff0a, #348dff10), transparent 70%); pointer-events: none; }
+  .card:hover::after { opacity: 1; }
+  .card .card-icon { display: grid; place-items: center; width: 33px; height: 33px; margin-bottom: 22px; border: 1px solid var(--line); border-radius: 9px; color: var(--accent); background: var(--surface); }
+  .card .card-icon .icon { width: 17px; height: 17px; }
+  .card h3 { font-size: 21px; line-height: 1.3; letter-spacing: -.035em; }
+  .card p { color: var(--muted); font-size: 13px; line-height: 1.8; margin-top: 10px; }
+  .card-series { grid-column: span 7; min-height: 346px; display: grid; grid-template-columns: 1.06fr 1fr; gap: 20px; align-items: center; }
+  .card-series h3, .card-favorites h3 { font-size: 27px; }
+  .card-series p { max-width: 265px; }
+  .card-kicker { display: inline-block; color: var(--faint); font-size: 10px; letter-spacing: .1em; margin-top: 25px; }
+  .queue-visual { perspective: 800px; padding: 16px 0; }
+  .queue-stack { transform: rotateY(-12deg) rotateZ(3deg); transform-style: preserve-3d; }
+  .queue-url { padding: 11px 13px; display: flex; align-items: center; gap: 10px; font-size: 10px; font-family: ui-monospace, Consolas, monospace; background: var(--surface-soft); color: var(--faint); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 17px; box-shadow: 0 10px 30px #00000008; white-space: nowrap; }
+  .queue-url .icon { width: 13px; height: 13px; color: var(--accent); }
+  .queue-row { display: flex; align-items: center; gap: 11px; padding: 13px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; margin-top: 8px; box-shadow: 0 6px 12px #00000009; }
+  .queue-row:nth-child(3) { translate: 8px 0; }
+  .queue-row:nth-child(4) { translate: 16px 0; }
+  .queue-number { display: grid; place-items: center; width: 30px; height: 35px; flex: none; color: var(--accent); background: var(--accent-soft); border-radius: 5px; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .queue-file { flex: 1; min-width: 0; }
+  .queue-file b { display: block; font-weight: 550; font-size: 10px; margin-bottom: 6px; }
+  .progress-track { display: block; height: 3px; border-radius: 9px; background: var(--line-soft); overflow: hidden; }
+  .progress-track i { display: block; height: 100%; width: var(--progress); background: linear-gradient(90deg, #176de2, #57bcff); border-radius: inherit; }
+  .queue-row .icon { width: 13px; height: 13px; color: #34a58f; }
+  .card-favorites { grid-column: span 5; min-height: 346px; }
+  .card-favorites p { max-width: 330px; }
+  .favorites-visual { position: absolute; bottom: -43px; right: -4px; width: 280px; height: 150px; transform: rotate(-12deg); pointer-events: none; }
+  .favorite-sheet { position: absolute; width: 192px; height: 135px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+  .favorite-sheet:first-child { top: 0; left: 22px; transform: rotate(-12deg); background: var(--surface-soft); }
+  .favorite-sheet:last-child { top: 10px; left: 77px; transform: rotate(9deg); }
+  .favorite-sheet .icon { color: light-dark(#bd8738, #e7bc73); width: 21px; height: 21px; margin-bottom: 12px; }
+  .favorite-sheet b { display: block; font-size: 12px; font-weight: 600; }
+  .favorite-sheet small { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+  .favorite-tag { display: inline-block; margin-top: 18px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--faint); font-size: 10px; }
+  .card-small { min-height: 310px; display: flex; flex-direction: column; }
+  .card-small .card-icon { margin-bottom: 17px; }
+  .card-small h3 { font-size: 20px; }
+  .mini-visual { margin-top: auto; padding-top: 26px; }
+  .subtitle-demo { padding: 16px 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+  .subtitle-demo div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .subtitle-demo b { font-size: 12px; font-weight: 500; }
+  .subtitle-demo small { display: inline-block; border: 1px solid var(--line); padding: 0 5px; font-size: 9px; color: var(--faint); border-radius: 3px; }
+  .subtitle-demo > span { display: block; margin-top: 10px; font-size: 9px; letter-spacing: .1em; color: var(--accent); }
+  .codec-flow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 79px; }
+  .codec-flow b { display: grid; place-items: center; min-width: 56px; height: 48px; padding-inline: 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-weight: 550; background: var(--surface); }
+  .codec-flow .original { min-width: 67px; color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 25%, var(--line)); }
+  .codec-flow .icon { width: 12px; height: 12px; color: var(--faint); }
+  .codec-pair { display: grid; gap: 5px; }
+  .codec-pair b { height: 32px; }
+  .filename-parts { display: flex; gap: 5px; }
+  .filename-parts span { padding: 7px 10px; font-size: 10px; border-radius: 5px; white-space: nowrap; }
+  .filename-parts span:nth-child(1) { color: light-dark(#7751bd, #c2a2ff); background: light-dark(#f0eafb, #281f3e); }
+  .filename-parts span:nth-child(2) { color: var(--accent); background: var(--accent-soft); }
+  .filename-parts span:nth-child(3) { color: light-dark(#178c73, #76d5c1); background: light-dark(#e0f5ef, #142f2c); }
+  .filename-preview { padding: 12px 2px 3px; font-size: 9px; color: var(--faint); border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .personalize { grid-column: 1 / -1; display: grid; grid-template-columns: 1.05fr 1.1fr .85fr; gap: 28px; align-items: center; padding-block: 30px; }
+  .personalize h3 { font-size: 21px; }
+  .personalize p { margin-top: 7px; }
+  .languages { display: flex; flex-wrap: wrap; align-content: center; gap: 7px; }
+  .languages span { color: var(--muted); font-size: 11px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  .languages span:first-child { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+  .theme-sample { display: flex; gap: 12px; align-items: center; justify-content: flex-end; }
+  .theme-swatch { width: 42px; height: 42px; border-radius: 50%; border: 5px solid var(--surface); background: linear-gradient(135deg, #eef3fb 0 49%, #1c293d 51% 100%); box-shadow: 0 0 0 1px var(--line); flex: none; }
+  .theme-sample b { display: block; font-size: 12px; font-weight: 600; }
+  .theme-sample small { display: block; font-size: 10px; color: var(--faint); margin-top: 2px; }
+
+  .start-section { border-top: 1px solid var(--line-soft); }
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px; counter-reset: step; margin-top: 52px; }
+  .step { counter-increment: step; position: relative; border-top: 1px solid var(--line); padding-top: 22px; }
+  .step::before { content: '0' counter(step); display: inline-block; font-size: 12px; font-weight: 550; font-variant-numeric: tabular-nums; color: var(--accent); letter-spacing: .08em; }
+  .step h3 { font-size: 18px; margin-top: 22px; letter-spacing: -.035em; }
+  .step p { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.8; }
+  .step code { color: var(--ink); }
+  .step-line { position: absolute; top: -2px; left: 0; width: 38px; height: 3px; border-radius: 9px; background: var(--accent); }
+
+  .download-section { padding-block: 8px 86px; }
+  .final { position: relative; isolation: isolate; overflow: hidden; padding: clamp(35px, 6vw, 68px); border-radius: 26px; border: 1px solid #244f82; background: #0d1b32; color: #f1f6ff; }
+  .final::before { content: ''; position: absolute; z-index: -1; inset: 0; background: radial-gradient(ellipse at 85% 0%, #095bbb55, transparent 65%), linear-gradient(115deg, transparent 40%, #429cff0c 40.1% 56%, transparent 56.1% 65%, #429cff0a 65.1% 81%, transparent 81.1%); }
+  .final::after { content: ''; position: absolute; top: 0; height: 1px; inset-inline: 10%; background: linear-gradient(90deg, transparent, #71bcff99, transparent); }
+  .final .eyebrow { color: #85baff; }
+  .final h2 { font-size: clamp(30px, 3.6vw, 45px); margin-top: 17px; max-width: 610px; }
+  .final p { color: #9aacc8; font-size: 14px; margin-top: 17px; }
+  .final .cta { justify-content: flex-start; margin-top: 27px; }
+  .final .btn.primary { background: #eef5ff; color: #0e294b; border-color: #fff; }
+  .final .btn.quiet { background: #ffffff06; color: #b5c9e8; border-color: #ffffff25; }
+  .final-mark { position: absolute; width: 200px; height: 200px; right: 75px; top: 50%; translate: 0 -48%; filter: drop-shadow(0 20px 50px #0364df35); opacity: .75; pointer-events: none; }
+  .download-meta { display: flex; gap: 12px; align-items: center; color: #8ea6c5; font-size: 11px; margin-top: 19px; }
+  .download-meta span + span::before { content: '·'; margin-right: 12px; }
+  footer { padding-block: 38px 34px; border-top: 1px solid var(--line-soft); color: var(--muted); }
+  .footer-top { display: flex; align-items: center; gap: 24px; justify-content: space-between; }
+  footer .mark { color: var(--ink); font-size: 15px; }
+  footer .mark img { width: 25px; height: 25px; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 12px 22px; font-size: 11px; }
+  footer nav a:hover { color: var(--accent); }
+  .footer-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; margin-top: 28px; font-size: 10px; color: var(--faint); }
+  .fine { max-width: 670px; line-height: 1.8; }
+  .copyright { flex: none; white-space: nowrap; }
+
+  .image-dialog { position: fixed; inset: 0; margin: auto; width: min(1500px, calc(100vw - 48px)); max-width: none; max-height: calc(100dvh - 40px); padding: 0; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); box-shadow: 0 30px 100px #0008; }
+  .image-dialog::backdrop { background: #040810c9; backdrop-filter: blur(12px); }
+  .dialog-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+  .dialog-toolbar p { font-size: 12px; color: var(--muted); }
+  .dialog-toolbar a { font-size: 11px; color: var(--accent); margin-left: auto; }
+  .image-dialog > img { display: block; width: 100%; max-height: calc(100dvh - 115px); object-fit: contain; padding: 10px; }
+
+  @media (max-width: 1000px) {
+    .topbar-inner { gap: 20px; }
+    .topbar nav { gap: 20px; }
+    .card { padding: 24px; }
+    .card-series { grid-column: span 6; grid-template-columns: 1fr; gap: 0; }
+    .card-series p { max-width: none; }
+    .queue-visual { max-width: 270px; margin-inline: auto; width: 100%; padding-top: 25px; }
+    .card-kicker { display: none; }
+    .card-favorites { grid-column: span 6; }
+    .favorites-visual { bottom: 10px; right: 20px; }
+    .card-series h3 br { display: none; }
+    .personalize { grid-template-columns: 1fr 1.2fr; }
+    .theme-sample { grid-column: 1 / -1; justify-content: flex-start; padding-top: 20px; border-top: 1px solid var(--line); }
+    .final-mark { width: 160px; right: 40px; opacity: .4; }
+    .final h2 { position: relative; max-width: 75%; }
+    .codec-flow { gap: 4px; }
+    .codec-flow b { min-width: 46px; padding-inline: 5px; }
+    .codec-flow .original { min-width: 59px; }
+    .filename-parts span { padding-inline: 7px; }
+  }
+  @media (max-width: 760px) {
+    .topbar-inner { height: 65px; gap: 12px; }
+    .mark { font-size: 15px; gap: 7px; }
+    .mark img { width: 27px; height: 27px; }
+    .topbar nav { display: none; }
+    .nav-actions { margin-left: auto; gap: 4px; }
+    .nav-download { font-size: 11px; padding-inline: 12px; }
+    .hero h1 { font-size: clamp(32px, 5.2vw, 43px); }
+    .lead { max-width: 450px; }
+    .hero-atmosphere::after { background-size: 56px 56px; }
+    .showcase { padding-top: 40px; }
+    .showcase-header { padding-inline: 0; }
+    .gallery { grid-template-columns: minmax(0, 1fr); }
+    .arrow { display: none; }
+    .rail { border-radius: 12px; }
+    .rail > figure { padding: 5px; border-radius: 12px; }
+    .rail img { border-radius: 7px; }
+    .gallery-footer { margin-inline: 0; gap: 12px; }
+    .caption { font-size: 11px; }
+    .gallery-meta { gap: 9px; }
+    .feature-ribbon { gap: 14px 24px; font-size: 11px; }
+    .notice { align-items: flex-start; line-height: 1.8; }
+    .notice .icon { margin-top: 3px; }
+    .section-heading { display: block; }
+    .section-heading > p { margin-top: 18px; max-width: 430px; }
+    .bento { gap: 12px; }
+    .card-small { grid-column: span 6; }
+    .card-filename { grid-column: span 12; flex-direction: row; gap: 35px; align-items: center; min-height: 190px; }
+    .card-filename .card-copy { flex: 1; }
+    .card-filename .mini-visual { margin-top: 0; flex: 1; }
+    .personalize { grid-template-columns: 1fr 1.2fr; }
+    .steps { gap: 24px; }
+    .step h3 { font-size: 16px; }
+    .final-mark { width: 150px; right: 20px; opacity: .15; }
+    .final h2 { max-width: none; }
+    .footer-top, .footer-bottom { align-items: flex-start; flex-direction: column; gap: 23px; }
+    .footer-bottom { margin-top: 25px; }
+  }
+  @media (max-width: 520px) {
+    .shell { width: calc(100% - 40px); }
+    .github-top { display: none; }
+    .topbar-inner { gap: 6px; }
+    .nav-download { padding-inline: 10px; }
+    .hero { padding-top: 49px; }
+    .hero h1 { font-size: clamp(29px, 7.15vw, 36px); line-height: 1.25; margin-top: 24px; }
+    .hero h1 .grad { display: inline-block; max-width: 12em; }
+    .lead { font-size: 14px; max-width: 340px; margin-top: 21px; }
+    .cta { gap: 9px; margin-top: 23px; }
+    .btn { min-height: 46px; font-size: 12px; padding-inline: 16px; gap: 8px; }
+    .facts { gap: 7px 12px; font-size: 10px; max-width: 300px; margin-inline: auto; }
+    .facts li + li::before { margin-right: 5px; }
+    .showcase-header p { font-size: 9px; letter-spacing: .1em; }
+    .zoom-button { font-size: 10px; }
+    .gallery-footer { align-items: flex-start; flex-direction: column-reverse; gap: 8px; margin-top: 9px; }
+    .dots { align-self: center; gap: 9px; }
+    .dots button { padding-block: 13px; }
+    .gallery-meta { justify-content: center; width: 100%; }
+    .caption { text-align: center; font-size: 10px; }
+    .gallery-count { font-size: 9px; padding-top: 1px; }
+    .feature-ribbon { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; padding: 16px 5px 27px; }
+    .feature-ribbon span { justify-content: center; }
+    .notice { font-size: 11px; padding-top: 17px; }
+    .notice strong { display: block; }
+    .section { padding-block: 67px; }
+    .section-heading { margin-bottom: 28px; }
+    .section-heading h2 { font-size: 30px; }
+    .section-heading > p { font-size: 13px; }
+    .card, .card-series, .card-favorites, .card-small { grid-column: 1 / -1; }
+    .card { padding: 25px; }
+    .card-series { min-height: auto; }
+    .card-series h3, .card-favorites h3 { font-size: 25px; }
+    .card-series .card-icon { margin-bottom: 19px; }
+    .queue-visual { padding-block: 27px 5px; max-width: 245px; }
+    .card-favorites { min-height: 350px; }
+    .favorites-visual { bottom: -29px; right: -3px; }
+    .card-small { min-height: 285px; }
+    .card-filename { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+    .card-filename .mini-visual { flex: none; margin-top: auto; }
+    .personalize { display: block; }
+    .languages { margin-top: 24px; }
+    .theme-sample { margin-top: 24px; }
+    .steps { grid-template-columns: 1fr; gap: 33px; margin-top: 32px; }
+    .step { padding-left: 42px; padding-top: 21px; }
+    .step::before { position: absolute; left: 0; top: 22px; }
+    .step h3 { margin-top: 0; font-size: 17px; }
+    .step p { font-size: 13px; }
+    .download-section { padding-bottom: 60px; }
+    .final { padding: 32px 24px; border-radius: 20px; }
+    .final h2 { font-size: 30px; }
+    .final p { font-size: 13px; }
+    .final .cta { justify-content: flex-start; }
+    .final .btn { padding-inline: 15px; }
+    .final-mark { width: 130px; top: 95px; right: -20px; }
+    .footer-top { gap: 25px; }
+    footer nav { gap: 14px 18px; }
+    .image-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); border-radius: 12px; }
+    .dialog-toolbar { padding: 10px 12px; }
+    .dialog-toolbar p { font-size: 11px; }
+    .dialog-toolbar a { font-size: 10px; }
+  }
+  @media (max-width: 360px) {
+    #fact-size { display: none; }
+    .mark { font-size: 13px; }
+    .mark img { width: 23px; height: 23px; }
+    .nav-download { padding-inline: 8px; }
+    .icon-button { width: 32px; }
+    .hero h1 { font-size: 28px; }
+    .hero .cta { flex-direction: column; }
+    .hero .btn { width: 100%; }
+  }
+}
+
+@layer motion {
+  @media (prefers-reduced-motion: no-preference) {
+    .hero > .pill { animation: enter .6s both; }
+    .hero h1 { animation: enter .75s .08s both; }
+    .hero .lead { animation: enter .75s .16s both; }
+    .hero .cta, .hero .facts { animation: enter .75s .23s both; }
+    @supports (animation-timeline: view()) {
+      .reveal { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 100%; }
+    }
+    ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html, .rail { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  @keyframes enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes rise { from { transform: translateY(20px); } to { transform: none; } }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<svg xmlns="http://www.w3.org/2000/svg" class="sr-only" aria-hidden="true" focusable="false">
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.7 13.3A9 9 0 0 1 10.7 3.2 9 9 0 1 0 20.7 13.3Z"/></symbol>
+  <symbol id="i-series" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M6 4h12M9 1h6m-4 11 5 3-5 3Z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 13 4-4m-6 7-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m0 12a4 4 0 0 0 6 0l5-5a4 4 0 0 0-6-6l-1 1" transform="translate(1 0) scale(.92)"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
+  <symbol id="i-subtitle" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 11h3m4 0h5M6 15h6m3 0h3"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M3 6h6m6 0h6M3 12h12m6 0h0M3 18h2m6 0h10"/><circle cx="12" cy="6" r="3"/><circle cx="18" cy="12" r="3"/><circle cx="8" cy="18" r="3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4v11l-9 4-9-4Zm0 0 9 4 9-4M12 11v11M7.5 5 16.5 9"/></symbol>
+  <symbol id="i-window" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18M8 8v13"/></symbol>
+  <symbol id="i-zoom" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path stroke="none" fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.36 1.09 2.94.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="shell topbar-inner">
+    <a class="mark" href="#top" aria-label="TVer Downloader 처음으로"><img src="img/logo.png" width="31" height="31" alt=""><span>TVer Downloader</span></a>
+    <nav aria-label="주 메뉴"><a href="#features">주요 기능</a><a href="#showcase">프로그램 화면</a><a href="#start">시작하기</a></nav>
+    <div class="nav-actions">
+      <a class="icon-button github-top" href="https://github.com/deuxdoom/TVerDownloader" aria-label="GitHub 저장소"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg></a>
+      <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="화면 테마 바꾸기" hidden><svg class="icon sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+      <a class="nav-download" href="https://github.com/deuxdoom/TVerDownloader/releases/latest" data-download>다운로드</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero-wrap" id="top">
+    <div class="hero-atmosphere" aria-hidden="true"><i class="beam one"></i><i class="beam two"></i></div>
+    <section class="hero shell" aria-labelledby="hero-title">
+      <a class="pill" id="release-pill" href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><span class="dot" aria-hidden="true"></span><span id="release-label">최신 릴리스 살펴보기</span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></a>
+      <h1 id="hero-title">일본 TVer 영상을<br><span class="grad">받아 두는 가장 쉬운 방법</span></h1>
+      <p class="lead">좋아하는 프로그램의 주소만 가져오세요.<br>시리즈 전체 받기부터 자막, 파일 정리까지. <span>한 창이면 충분합니다.</span></p>
+      <div class="cta">
+        <a class="btn primary" id="download-btn" href="https://github.com/deuxdoom/TVerDownloader/releases/latest" data-download><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Windows용 내려받기</span></a>
+        <a class="btn quiet" href="#showcase">어떤 모습인지 보기<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      </div>
+      <ul class="facts"><li>Windows 10 · 11 / x64</li><li>무료</li><li>설치 없이 실행</li><li id="fact-size">포터블 앱</li></ul>
+    </section>
+
+    <section class="showcase shell" id="showcase" aria-label="프로그램 화면 미리보기">
+      <div class="showcase-header"><p><span aria-hidden="true"></span>Your personal TVer library</p><button class="zoom-button" id="zoom-button" type="button" hidden>확대해서 보기<svg class="icon" aria-hidden="true"><use href="#i-zoom"/></svg></button></div>
+      <div class="gallery">
+        <button class="arrow prev" type="button" id="prev" aria-label="이전 화면" hidden><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+        <div class="rail" role="group" id="rail" tabindex="0" aria-roledescription="캐러셀" aria-label="프로그램 화면">
+          <figure data-title="다운로드" data-caption="다운로드 목록과 진행 로그를 한눈에 확인하세요."><img src="img/app-light.png" width="1672" height="1106" alt="밝은 테마의 메인 화면. 다운로드 목록과 진행 로그를 한 창에 보여 줍니다." fetchpriority="high" decoding="async"></figure>
+          <figure data-title="즐겨찾기" data-caption="좋아하는 시리즈를 모으고, 새 회차를 확인하세요."><img src="img/favorite.png" width="1654" height="1097" alt="즐겨찾기 탭에 시리즈 표지와 마지막 확인 시각이 표시된 모습." loading="lazy" decoding="async"></figure>
+          <figure data-title="기록" data-caption="이미 받은 영상은 기록에서 다시 찾을 수 있습니다."><img src="img/history.png" width="1654" height="1097" alt="기록 탭에 받은 영상의 표지와 정보가 표시된 모습." loading="lazy" decoding="async"></figure>
+          <figure data-title="설정" data-caption="언어, 화질, 자막, 파일명을 내 방식으로 설정하세요."><img src="img/setting.png" width="1144" height="961" alt="언어와 저장 폴더, 동시 다운로드 개수를 정하는 설정 창." loading="lazy" decoding="async"></figure>
+          <figure data-title="다크 테마" data-caption="같은 기능, 다른 분위기. 어두운 테마도 지원합니다."><img src="img/app-dark.png" width="1672" height="1106" alt="어두운 테마의 TVer Downloader 메인 화면." loading="lazy" decoding="async"></figure>
+          <figure data-title="프로그램 정보" data-caption="프로그램 안에서 새 버전을 확인하고 업데이트하세요."><img src="img/about.png" width="1645" height="1088" alt="새 버전을 확인할 수 있는 프로그램 정보 창." loading="lazy" decoding="async"></figure>
+        </div>
+        <button class="arrow next" type="button" id="next" aria-label="다음 화면" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+      </div>
+      <div class="gallery-footer"><div class="gallery-meta"><span class="gallery-count" id="gallery-count" aria-hidden="true">01 / 06</span><p class="caption" id="caption" aria-live="polite" aria-atomic="true">다운로드 목록과 진행 로그를 한눈에 확인하세요.</p></div><div class="dots" id="dots" role="group" aria-label="화면 선택"></div></div>
+      <div class="feature-ribbon" aria-label="주요 특징"><span><svg class="icon" aria-hidden="true"><use href="#i-series"/></svg>시리즈 일괄 다운로드</span><span><svg class="icon" aria-hidden="true"><use href="#i-subtitle"/></svg>일본어 자막 저장</span><span><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg>원본 화질 · 코덱 변환</span><span><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>7개 언어 지원</span></div>
+      <p class="notice"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span><strong>일본 VPN이 필요합니다.</strong>TVer는 일본 IP에서 이용할 수 있습니다. 프로그램이 시작할 때 현재 접속 국가를 알려 드립니다.</span></p>
+    </section>
+  </div>
+
+  <section class="section shell" id="features" aria-labelledby="features-title">
+    <div class="section-heading reveal"><div><p class="eyebrow">Thoughtfully simple</p><h2 id="features-title">필요한 기능은 모두.<br>복잡한 과정은 가볍게.</h2></div><p>주소를 가져오는 순간부터 파일이 정리될 때까지.<br>영상에 집중할 수 있도록, 나머지는 앱이 챙깁니다.</p></div>
+    <div class="bento">
+      <article class="card card-series reveal">
+        <div><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-series"/></svg></span><h3>한 회부터,<br>시리즈 전체까지.</h3><p>주소를 복사하거나 끌어다 놓으세요. 시리즈에서 원하는 회차를 골라 한 번에 받고, 여러 조각을 동시에 내려받습니다.</p><span class="card-kicker">COPY. SELECT. DOWNLOAD.</span></div>
+        <div class="queue-visual" aria-hidden="true"><div class="queue-stack"><div class="queue-url"><svg class="icon"><use href="#i-link"/></svg>tver.jp/series/…</div><div class="queue-row"><span class="queue-number">01</span><div class="queue-file"><b>Episode 01</b><span class="progress-track"><i style="--progress:100%"></i></span></div><svg class="icon"><use href="#i-check"/></svg></div><div class="queue-row"><span class="queue-number">02</span><div class="queue-file"><b>Episode 02</b><span class="progress-track"><i style="--progress:64%"></i></span></div></div><div class="queue-row"><span class="queue-number">03</span><div class="queue-file"><b>Episode 03</b><span class="progress-track"><i style="--progress:28%"></i></span></div></div></div></div>
+      </article>
+      <article class="card card-favorites reveal">
+        <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span><h3>좋아하는 시리즈를<br>놓치지 않도록.</h3><p>즐겨찾기에 담아 두면 새 회차를 확인해 줍니다. 이미 받은 영상은 기록에 남아 다시 찾기도 쉽습니다.</p><span class="favorite-tag">즐겨찾기 · 다운로드 기록</span>
+        <div class="favorites-visual" aria-hidden="true"><div class="favorite-sheet"><svg class="icon"><use href="#i-series"/></svg><b>나의 시리즈</b><small>좋아하는 프로그램을 한곳에</small></div><div class="favorite-sheet"><svg class="icon"><use href="#i-star"/></svg><b>새 회차 확인</b><small>즐겨찾기가 챙겨 드립니다</small></div></div>
+      </article>
+      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-subtitle"/></svg></span><h3>자막도 함께, 편하게.</h3><p>제공되는 일본어 자막을 영상에 넣거나<br>SRT · VTT 파일로 따로 저장하세요.</p></div><div class="mini-visual" aria-hidden="true"><div class="subtitle-demo"><div><b lang="ja">今日も、いい一日。</b><small>CC</small></div><span>JAPANESE SUBTITLES · SRT / VTT</span></div></div></article>
+      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg></span><h3>화질은 취향에 맞게.</h3><p>원본을 유지하거나 AVC · HEVC로 변환하세요. NVIDIA 하드웨어 가속도 지원합니다.</p></div><div class="mini-visual codec-flow" aria-hidden="true"><b class="original">원본 유지</b><svg class="icon"><use href="#i-arrow"/></svg><div class="codec-pair"><b>AVC</b><b>HEVC</b></div><svg class="icon"><use href="#i-chip"/></svg></div></article>
+      <article class="card card-small card-filename reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><h3>정리까지 내 방식대로.</h3><p>방송일, 시리즈, 회차의 순서를 바꾸세요. 저장될 파일 이름을 미리 볼 수 있습니다.</p></div><div class="mini-visual" aria-hidden="true"><div class="filename-parts"><span>방송일</span><span>시리즈</span><span>회차</span></div><div class="filename-preview">2026.09.09_시리즈_제01화.mp4</div></div></article>
+      <article class="card personalize reveal"><div><h3>당신의 언어와 취향으로.</h3><p>익숙한 언어, 편안한 테마로 시작하세요.</p></div><div class="languages" aria-label="지원 언어"><span>한국어</span><span lang="ja">日本語</span><span lang="en">English</span><span lang="zh-Hans">简体中文</span><span lang="zh-Hant">繁體中文</span><span lang="es">Español</span><span lang="th">ไทย</span></div><div class="theme-sample"><span class="theme-swatch" aria-hidden="true"></span><div><b>Light &amp; Dark</b><small>낮에도, 늦은 밤에도.</small></div></div></article>
+    </div>
+  </section>
+
+  <section class="section shell start-section" id="start" aria-labelledby="start-title">
+    <div class="section-heading center reveal"><p class="eyebrow">Ready in three steps</p><h2 id="start-title">시작은, 세 걸음이면 충분합니다.</h2><p>설치 과정 없이. 필요한 도구는 앱이 알아서 준비합니다.</p></div>
+    <ol class="steps"><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>내려받고 실행하기</h3><p>원하는 폴더에 압축을 풀고 <code>TVerDownloader.exe</code>를 실행하세요. yt-dlp와 FFmpeg는 자동으로 준비됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>일본 VPN 연결하기</h3><p>일본 서버에 연결해 주세요. 앱에서 현재 접속 국가를 확인한 뒤 다운로드를 시작하면 됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>TVer 주소 가져오기</h3><p>주소를 복사하면 입력칸이 채워집니다. <strong>다운로드</strong>를 누르세요. 시리즈라면 원하는 회차를 골라 받을 수 있습니다.</p></li></ol>
+  </section>
+
+  <section class="shell download-section" aria-labelledby="download-title"><div class="final reveal"><p class="eyebrow">Your next episode awaits</p><h2 id="download-title">보고 싶은 순간을,<br>가장 간단하게.</h2><p>TVer Downloader와 함께 나만의 라이브러리를 시작하세요.</p><div class="cta"><a class="btn primary" href="https://github.com/deuxdoom/TVerDownloader/releases/latest" data-download><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Windows용 내려받기</a><a class="btn quiet" href="https://github.com/deuxdoom/TVerDownloader/releases">릴리스 노트<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div><div class="download-meta"><span>Windows 10 · 11 (x64)</span><span>무료 · 포터블</span></div><img class="final-mark" src="img/logo.png" width="200" height="200" alt="" loading="lazy" decoding="async"></div></section>
+</main>
+
+<footer><div class="shell"><div class="footer-top"><a class="mark" href="#top"><img src="img/logo.png" width="25" height="25" alt=""><span>TVer Downloader</span></a><nav aria-label="관련 링크"><a href="https://github.com/deuxdoom/TVerDownloader">GitHub</a><a href="https://github.com/deuxdoom/TVerDownloader/blob/main/CHANGELOG.md">변경 내역</a><a href="https://github.com/deuxdoom/TVerDownloader/issues">버그 제보</a><a href="https://refer-nordvpn.com/RRXwGuSQXTe" rel="noopener">NordVPN 제휴</a><a href="https://toon.at/donate/deuxdoom" rel="noopener">후원</a></nav></div><div class="footer-bottom"><p class="fine">이 프로그램은 독점 라이선스로 배포됩니다. 개인적인 사용과 소스 열람은 자유롭지만 무단 수정 · 재배포 · 상업적 이용은 허용되지 않습니다. TVer는 주식회사 TVer의 서비스이며 이 프로젝트와 관련이 없습니다. 내려받은 영상은 개인 감상 범위에서만 이용해 주십시오.</p><p class="copyright">© deuxdoom. All Rights Reserved.</p></div></div></footer>
+
+<dialog class="image-dialog" id="image-dialog" aria-label="프로그램 화면 확대"><div class="dialog-toolbar"><p id="dialog-caption">프로그램 화면</p><a id="original-image" href="img/app-light.png" target="_blank" rel="noopener">원본 이미지 열기</a><form method="dialog"><button class="icon-button" aria-label="확대 화면 닫기"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></form></div><img id="dialog-image" src="img/app-light.png" width="1672" height="1106" alt=""></dialog>
+<script>
+const RELEASES = 'https://github.com/deuxdoom/TVerDownloader/releases';
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+
+function isSafeReleaseUrl(value, asset = false) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'github.com'
+      && url.pathname.startsWith('/deuxdoom/TVerDownloader/releases/' + (asset ? 'download/' : ''));
+  } catch { return false; }
+}
+
+async function syncRelease() {
+  const label = document.getElementById('release-label');
+  const pill = document.getElementById('release-pill');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch('https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest', { signal: controller.signal, headers: { Accept: 'application/vnd.github+json' } });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    if (typeof data.tag_name !== 'string' || !isSafeReleaseUrl(data.html_url)) throw new Error('release');
+    label.textContent = data.tag_name + ' · 최신 릴리스';
+    pill.href = data.html_url;
+    const asset = (Array.isArray(data.assets) ? data.assets : []).find(item =>
+      typeof item.name === 'string' && /\.zip$/i.test(item.name) && isSafeReleaseUrl(item.browser_download_url, true));
+    if (asset) {
+      document.querySelectorAll('[data-download]').forEach(button => {
+        button.href = asset.browser_download_url;
+        button.setAttribute('aria-label', 'Windows용 ' + data.tag_name + ' 내려받기');
+      });
+      if (Number.isFinite(asset.size) && asset.size > 0) document.getElementById('fact-size').textContent = (asset.size / 1048576).toFixed(1) + ' MB';
+    }
+  } catch {
+    label.textContent = '릴리스 페이지 열기';
+    pill.href = RELEASES + '/latest';
+  } finally { clearTimeout(timeout); }
+}
+
+function setupTheme() {
+  const root = document.documentElement;
+  const button = document.getElementById('theme-toggle');
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : systemTheme.matches;
+  const label = () => {
+    button.setAttribute('aria-label', dark() ? '밝은 테마로 바꾸기' : '어두운 테마로 바꾸기');
+    document.querySelectorAll('meta[name="theme-color"]').forEach(meta => meta.content = dark() ? '#080c14' : '#fafbfe');
+  };
+  label();
+  button.hidden = false;
+  systemTheme.addEventListener('change', label);
+  button.addEventListener('click', () => {
+    const theme = dark() ? 'light' : 'dark';
+    const update = () => {
+      root.dataset.theme = theme;
+      try { localStorage.setItem('tver-page-theme', theme); } catch {}
+      label();
+    };
+    if (document.startViewTransition && !reducedMotion.matches) document.startViewTransition(update);
+    else update();
+  });
+}
+
+function setupGallery() {
+  const rail = document.getElementById('rail');
+  const slides = Array.from(rail.children);
+  const dots = document.getElementById('dots');
+  const caption = document.getElementById('caption');
+  const count = document.getElementById('gallery-count');
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+  const zoom = document.getElementById('zoom-button');
+  const dialog = document.getElementById('image-dialog');
+  let index = 0;
+  let target = null;
+  let settleTimer;
+  let drag = null;
+  const offsetOf = i => slides[i].offsetLeft - slides[0].offsetLeft;
+  const nearest = () => slides.reduce((best, slide, i) => Math.abs(offsetOf(i) - rail.scrollLeft) < Math.abs(offsetOf(best) - rail.scrollLeft) ? i : best, 0);
+
+  slides.forEach((slide, i) => {
+    slide.setAttribute('role', 'group');
+    slide.setAttribute('aria-roledescription', '슬라이드');
+    slide.setAttribute('aria-label', (i + 1) + ' / ' + slides.length + ' · ' + slide.dataset.title);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-label', slide.dataset.title + ' 화면 보기');
+    button.title = slide.dataset.title;
+    button.append(document.createElement('span'));
+    button.addEventListener('click', () => go(i));
+    dots.append(button);
+  });
+
+  function paint() {
+    const text = slides[index].dataset.caption;
+    if (caption.textContent !== text) caption.textContent = text;
+    count.textContent = String(index + 1).padStart(2, '0') + ' / ' + String(slides.length).padStart(2, '0');
+    Array.from(dots.children).forEach((button, i) => button.setAttribute('aria-current', String(i === index)));
+    prev.disabled = index === 0;
+    next.disabled = index === slides.length - 1;
+    zoom.setAttribute('aria-label', slides[index].dataset.title + ' 화면 확대해서 보기');
+  }
+
+  function go(i, immediate = false) {
+    index = Math.max(0, Math.min(slides.length - 1, i));
+    target = index;
+    paint();
+    rail.scrollTo({ left: offsetOf(index), behavior: immediate || reducedMotion.matches ? 'instant' : 'smooth' });
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settle, 250);
+  }
+
+  function settle() {
+    if (drag) return;
+    if (target !== null && Math.abs(rail.scrollLeft - offsetOf(target)) > 2) {
+      rail.scrollTo({ left: offsetOf(target), behavior: 'instant' });
+    }
+    target = null;
+    index = nearest();
+    paint();
+  }
+
+  prev.hidden = next.hidden = slides.length < 2;
+  zoom.hidden = typeof dialog.showModal !== 'function';
+  prev.addEventListener('click', () => go(index - 1));
+  next.addEventListener('click', () => go(index + 1));
+  rail.addEventListener('scroll', () => {
+    clearTimeout(settleTimer);
+    if (target === null && !drag) { index = nearest(); paint(); }
+    settleTimer = setTimeout(settle, 120);
+  }, { passive: true });
+  rail.addEventListener('scrollend', () => {
+    if (target === null || Math.abs(rail.scrollLeft - offsetOf(target)) < 2) settle();
+  });
+  rail.addEventListener('wheel', () => { target = null; }, { passive: true });
+  rail.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') { go(index - 1); event.preventDefault(); }
+    if (event.key === 'ArrowRight') { go(index + 1); event.preventDefault(); }
+    if (event.key === 'Home') { go(0); event.preventDefault(); }
+    if (event.key === 'End') { go(slides.length - 1); event.preventDefault(); }
+  });
+  dots.addEventListener('keydown', event => {
+    const current = Array.from(dots.children).indexOf(document.activeElement);
+    if (current < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    let nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? slides.length - 1 : current + (event.key === 'ArrowRight' ? 1 : -1);
+    nextIndex = Math.max(0, Math.min(slides.length - 1, nextIndex));
+    go(nextIndex);
+    dots.children[nextIndex].focus();
+    event.preventDefault();
+  });
+  rail.addEventListener('pointerdown', event => {
+    target = null;
+    clearTimeout(settleTimer);
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    drag = { x: event.clientX, scroll: rail.scrollLeft };
+    rail.classList.add('dragging');
+    rail.setPointerCapture(event.pointerId);
+  });
+  rail.addEventListener('pointermove', event => {
+    if (drag) rail.scrollLeft = drag.scroll - (event.clientX - drag.x);
+  });
+  function release(event) {
+    if (!drag) return;
+    const destination = nearest();
+    drag = null;
+    rail.classList.remove('dragging');
+    if (rail.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId);
+    go(destination);
+  }
+  rail.addEventListener('pointerup', release);
+  rail.addEventListener('pointercancel', release);
+  rail.addEventListener('lostpointercapture', release);
+  rail.addEventListener('dragstart', event => event.preventDefault());
+  let previousWidth = rail.clientWidth;
+  new ResizeObserver(() => {
+    if (Math.abs(rail.clientWidth - previousWidth) < 1) return;
+    previousWidth = rail.clientWidth;
+    go(index, true);
+  }).observe(rail);
+
+  zoom.addEventListener('click', () => {
+    const source = slides[index].querySelector('img');
+    const image = document.getElementById('dialog-image');
+    image.src = source.currentSrc || source.src;
+    image.alt = source.alt;
+    image.width = source.naturalWidth || source.width;
+    image.height = source.naturalHeight || source.height;
+    document.getElementById('original-image').href = image.src;
+    document.getElementById('dialog-caption').textContent = slides[index].dataset.title;
+    dialog.showModal();
+  });
+  dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
+    const box = dialog.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
+  });
+  paint();
+}
+
+function setupCardLight() {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches || reducedMotion.matches) return;
+  document.querySelectorAll('.card').forEach(card => {
+    let frame;
+    card.addEventListener('pointermove', event => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        const box = card.getBoundingClientRect();
+        card.style.setProperty('--pointer-x', (event.clientX - box.left) + 'px');
+        card.style.setProperty('--pointer-y', (event.clientY - box.top) + 'px');
+        frame = null;
+      });
+    });
+  });
+}
+
+setupTheme();
+setupGallery();
+setupCardLight();
+syncRelease();
+</script>
+</body>
+</html>

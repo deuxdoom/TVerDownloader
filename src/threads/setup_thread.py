@@ -169,6 +169,12 @@ class SetupThread(QThread):
         return ytdlp_exe_path
 
     def _update_ffmpeg(self) -> Optional[Path]:
+        """FFmpeg를 최신으로 갈아 끼운다. 실패하면 쓰던 것을 그대로 돌려준다.
+
+        **갈아 끼우기는 지우고 옮기는 것이 아니라 os.replace다.** 먼저 지우면 그 다음
+        이동이 막혔을 때(백신이 갓 푼 exe를 잡고 있으면 실제로 난다) 쓰던 도구까지
+        잃는다. 자동 업데이트가 exe를 바꿀 때 백업으로 옮겨 두는 것과 같은 판단이다.
+        """
         self.log.emit(t("setup.ffmpeg_check"))
         ffmpeg_exe_path = self.BIN_DIR / "ffmpeg.exe"
         ffprobe_exe_path = self.BIN_DIR / "ffprobe.exe"
@@ -212,10 +218,12 @@ class SetupThread(QThread):
 
         if source_ffmpeg.exists() and source_ffprobe.exists():
             self.BIN_DIR.mkdir(parents=True, exist_ok=True)
-            if ffmpeg_exe_path.exists(): ffmpeg_exe_path.unlink()
-            if ffprobe_exe_path.exists(): ffprobe_exe_path.unlink()
-            shutil.move(str(source_ffmpeg), str(ffmpeg_exe_path))
-            shutil.move(str(source_ffprobe), str(ffprobe_exe_path))
+            try:
+                os.replace(str(source_ffmpeg), str(ffmpeg_exe_path))
+                os.replace(str(source_ffprobe), str(ffprobe_exe_path))
+            except OSError as error:
+                self.log.emit(t("setup.ffmpeg_replace_failed", error=error))
+                return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
 
             self.log.emit(t("setup.ffmpeg_moved",
                             names=f"{ffmpeg_exe_path.name} / {ffprobe_exe_path.name}"))

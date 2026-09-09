@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         self.append_log(t("log.app_start"))
         for note in retired_option_notes(self.config):
             self.append_log(note)
+        self._restore_queue()
         self._start_region_check()
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
         self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
@@ -246,7 +247,8 @@ class MainWindow(QMainWindow):
         self.ui.history_del_btn.clicked.connect(self.library.remove_selected_history)
         self.ui.history_search_input.textChanged.connect(self.library.request_history_refresh)
         self.ui.fav_search_input.textChanged.connect(self.library.refresh_fav_list)
-        self.ui.history_sort_combo.currentIndexChanged.connect(self.library.refresh_history_list)
+        self.ui.history_sort_combo.currentIndexChanged.connect(self.library.reset_history_view)
+        self.ui.history_list.verticalScrollBar().valueChanged.connect(self.library.on_history_scrolled)
         self.ui.fav_add_btn.clicked.connect(self.library.add_favorite); self.ui.fav_del_btn.clicked.connect(self.library.remove_selected_favorite)
         self.ui.fav_chk_btn.clicked.connect(self.library.check_all_favorites); self.ui.fav_list.customContextMenuRequested.connect(self.library.show_fav_menu)
         self.download_manager.log.connect(self.append_log); self.download_manager.item_added.connect(self.download_list.add_item_widget)
@@ -340,8 +342,15 @@ class MainWindow(QMainWindow):
         self.raise_(); self.activateWindow()
 
     def _set_input_enabled(self, enabled: bool):
+        """준비가 끝나기 전에는 받으러 갈 수 있는 길을 모두 잠근다.
+
+        **`대기열 시작`도 여기 든다.** 되살린 항목은 준비 전에 세워 두므로 이 단추가 먼저
+        보이는데, 그때 누르면 항목이 _task_queue로 옮겨진 뒤 경로가 없어 그대로 갇힌다
+        (준비가 끝나도 check_queue_and_start를 다시 부르는 자리가 없다).
+        """
         self.ui.url_input.setEnabled(enabled); self.ui.add_button.setEnabled(enabled)
         self.ui.bulk_button.setEnabled(enabled); self.ui.fav_chk_btn.setEnabled(enabled)
+        self.ui.queue_start_button.setEnabled(enabled)
         self.ui.set_primary_action_enabled(enabled)
 
     def _ensure_download_folder(self) -> bool:
@@ -365,7 +374,7 @@ class MainWindow(QMainWindow):
         return self.download_manager.add_task(url, title=title, thumbnail=thumbnail)
 
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
-        """준비가 끝났음을 알리고 대기열을 되살린다.
+        """준비가 끝났음을 알린다.
 
         **'다운로드를 시작할 수 있습니다'를 덧붙이지 않는다** - 바로 위 지역 안내가 VPN이
         없어 받을 수 없다고 말한 뒤라, 준비된 것은 프로그램이라는 뜻이 반대로 읽힌다.
@@ -380,7 +389,6 @@ class MainWindow(QMainWindow):
         self._set_input_enabled(True)
         self._show_region_notice()
         self.append_log(t("log.setup_done"))
-        self._restore_queue()
         if self.config.get("auto_update_check", True):
             QTimer.singleShot(1000, self._check_for_update)
         if self.config.get("auto_check_favorites_on_start", False):
@@ -389,8 +397,13 @@ class MainWindow(QMainWindow):
     def _restore_queue(self):
         """지난 실행에서 끝내지 못한 대기열을 목록에 되살린다.
 
-        준비가 끝난 뒤에 부르는 것은 되살린 항목도 제목을 물어보러 갈 수 있어야 해서다.
-        되살리기만 하고 받기 시작하지는 않는다 - 이유는 restore_task에 적어 두었다.
+        **준비(yt-dlp·FFmpeg)를 기다리지 않는다.** 기다리면 그 사이에 앱을 끄는 순간
+        stop_all이 아직 빈 대기열을 파일에 적어 지난 목록을 통째로 덮는다. 되살리기만 하고
+        받기 시작하지는 않으므로 준비 전에 세워 두어도 안전하다 - 이유는 restore_task에 있다.
+
+        제목을 물어보는 일도 늦춰지지 않는다. MetadataPrefetch가 경로가 없으면 담아 두었다가
+        set_ytdlp_path에서 처리한다 - 예전에 이 함수를 준비 뒤로 미룬 근거가 그것이었는데,
+        미리 묻기 쪽이 트레이 시작을 다루면서 이미 없어졌다.
         """
         if not self._queue_file_ok:
             self.append_log(t("log.queue_file_broken"))

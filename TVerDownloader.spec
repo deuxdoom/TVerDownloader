@@ -88,7 +88,8 @@ a = Analysis(
         ("assets/fonts/PretendardVariable.ttf", "assets/fonts"),
         ("assets/fonts/PretendardJP-Regular.ttf", "assets/fonts"),
         ("assets/fonts/JetBrainsMono-Regular.ttf", "assets/fonts"),
-        ("assets/logo", "assets/logo"),
+        ("assets/title", "assets/title"),
+        ("assets/appicon.ico", "assets"),
         ("lang", "lang"),
     ] + TRANSLATION_DATAS,
     hiddenimports=[],
@@ -145,7 +146,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="assets/tver.ico",
+    icon="assets/appicon.ico",
     version=VERSION_RESOURCE,
 )
 

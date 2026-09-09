@@ -1,6 +1,6 @@
-![TVerDownloader 메인 UI](main.png)
+![TVerDownloader 메인 UI](docs/img/app-light.png)
 
-# <img src="logo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
+# <img src="assets/applogo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
 
 [![NordVPN 74%할인 + 3개월 무료](https://img.shields.io/badge/NORDVPN-74%25%ED%95%A0%EC%9D%B8%203개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white)](https://refer-nordvpn.com/RRXwGuSQXTe)
 [![후원하기](https://img.shields.io/badge/후원하기-투네이션-ff69b4?style=for-the-badge&logo=githubsponsors)](https://toon.at/donate/deuxdoom)
@@ -74,6 +74,7 @@
 - **재인코딩 시 소리도 AAC로 함께 변환** — 영상만 바꾸고 소리를 Opus로 남기면 편집 도구에서 오디오 트랙이 잡히지 않음. 비트레이트는 원본에 맞춰 정하고(96k~192k), 원본이 이미 AAC면 다시 만들지 않고 그대로 옮김
 - **품질 값은 코덱별로 검증된 값이 자동 적용** — CRF/CQ를 직접 넣는 칸은 없음. 해상도·프레임레이트에 맞는 level과 색 정보도 함께 지정
 - **하드웨어 인코딩 가속** 지원 (NVIDIA NVENC)
+- **재인코딩은 한 번에 하나씩** — 다운로드는 그동안에도 계속 진행되고, 변환할 것이 여럿이면 차례로 처리함. 하나가 이미 모든 코어를 쓰므로 겹쳐 돌려도 총 시간이 줄지 않고 서로 느려지기만 함
 - **영상 파일에 썸네일 포함** (설정 > 고급) — 탐색기나 다른 재생기에서도 미리보기 그림이 보임
 - 재인코딩을 쓰지 않을 때는 관련 설정이 **흐리게 표시**되어 지금 해당 없음을 알려줌
 
@@ -91,7 +92,9 @@
 - **목록에서 오른쪽 클릭** — 파일 재생 · 파일 위치 열기 · 썸네일 저장을 한자리에서
 - **기록 탭에서 오른쪽 클릭** — 브라우저에서 열기 · 다시 다운로드 · 파일 위치 열기(파일이 남아 있을 때만) · 기록에서 삭제
 - **기록 탭 여러 항목 한 번에 삭제** — 정렬 드롭다운 왼쪽 `삭제` 버튼으로 선택한 기록을 목록에서 지움. 받아 둔 파일은 남음
-- **기록 검색은 타자를 멈춘 뒤 한 번만 그림** — 글자마다 목록을 다시 그리지 않아 기록이 쌓여도 입력이 매끄러움(기록 1,000개 기준 1,143ms → 56ms). 한 번에 30개까지 보여 주고 넘치는 것은 개수로 알림. 검색 대상은 기록 전체
+- **기록 검색은 타자를 멈춘 뒤 한 번만 그림** — 글자마다 목록을 다시 그리지 않아 기록이 쌓여도 입력이 매끄러움(기록 1,000개 기준 1,143ms → 56ms). 검색 대상은 기록 전체
+- **기록은 30개로 시작해 내릴수록 이어짐** — 목록 끝까지 내리면 15개씩 더 불러와 최대 120개까지 이어짐. 카드를 만드는 값을 끝까지 내려 본 사람만 나눠 내게 한 것. 이미 펼쳐 둔 만큼은 다운로드가 끝나 목록이 갱신되어도 접히지 않고, 검색어나 정렬을 바꿀 때만 처음 30개로 돌아감. 120개를 넘는 것은 개수로 알리고 검색으로 찾음
+- **목록 스크롤은 윈도우 휠 설정을 따르지 않음** — 세 목록 모두 휠 한 칸에 화면의 35%만 움직임. 항목 단위로 굴리면 윈도우의 `한 번에 몇 줄` 설정에 따라 카드가 그 수만큼 통째로 건너뛰어, 5줄로 둔 화면에서는 한 칸에 화면보다 많은 520px이 지나가며 그 사이 항목이 눈에 닿지도 않았음
 - **세그먼트 컨트롤 탭** — 다운로드 / 기록 / 즐겨찾기. 이름에 마우스를 올리면 한 줄 설명
 - **빈 목록 안내** — 세 목록이 비어 있으면 아이콘과 함께 무엇을 하면 되는지 알려 줌. 검색 결과가 없을 때는 그에 맞는 문구
 - **로그 창 접기/펴기** — 다운로드 목록 오른쪽 끝 버튼으로 여닫고, 접어 둔 상태는 다음 실행에도 유지
@@ -111,7 +114,7 @@
 
 창을 **최소화**하면 트레이로 들어갑니다. 닫기 버튼(X)을 눌렀을 때도 종료 대신 트레이로 보내려면 **설정 > 일반**에서 바꿀 수 있습니다(기본값은 종료).
 
-창을 내려 두어도 **진행 상황이 보입니다.** 받는 동안 아이콘 둘레에 고리가 채워지고, 마우스를 올리면 `3 대기 / 1 진행 · 42%`처럼 뜹니다.
+창을 내려 두어도 **진행 상황이 보입니다.** 받는 동안 아이콘이 회색으로 바뀌면서 심벌 모양을 따라 아래에서 위로 초록색이 차오르고, 마우스를 올리면 `3 대기 / 1 진행 · 42%`처럼 뜹니다.
 
 트레이 아이콘을 **오른쪽 클릭**하면 다음 메뉴가 열립니다.
 
@@ -237,12 +240,12 @@
 │  ├─ 📄 autostart.py                        → 윈도우 시작 프로그램 등록/해제
 │  ├─ 📄 widgets.py                          → 다운로드/기록/즐겨찾기 카드 + 색 띠 + 빈 목록 안내
 │  ├─ 📄 thumbnails.py                       → 썸네일 스레드 풀 + 디스크 캐시 (위젯 아님)
-│  ├─ 📄 qtparts.py                          → 공용 Qt 부품 — 팝업 모양 · 둥근 메뉴 · 2열 그리드
+│  ├─ 📄 qtparts.py                          → 공용 Qt 부품 — 팝업 모양 · 둥근 메뉴 · 2열 그리드 · 휠 스크롤
 │  ├─ 📄 history_store.py                    → urlhistory.json + 롤링 백업
 │  ├─ 📄 queue_store.py                      → queue.json — 못 받은 대기열을 다음 실행까지 남김
 │  ├─ 📄 favorites_store.py                  → favorites.json + 백업
 │  ├─ 📄 qss.py                              → 컬러 토큰(palette)과 라이트/다크 QSS 생성
-│  ├─ 📄 appicon.py                          → 앱 아이콘 — exe·창·트레이 (Base64 → QIcon)
+│  ├─ 📄 appicon.py                          → 앱 아이콘 — 공용 ICO 로드 + 트레이 진행률 채우기
 │  ├─ 📄 icons.py                            → UI 내부 Fluent 아이콘을 테마 색으로 렌더
 │  ├─ 📄 icons_data.py                       → 임베드된 SVG 20종 (자동 생성)
 │  ├─ 📄 indicators.py                       → 체크·라디오·스피너 화살표 이미지 생성
@@ -250,7 +253,7 @@
 │  ├─ 📂 controllers                          → 메인 창이 도맡던 일을 성격별로 나눈 것
 │  │  ├─ 📄 __init__.py
 │  │  ├─ 📄 download_list.py                 → 다운로드 목록 탭 (카드 · 중지/제거 · 우클릭 메뉴)
-│  │  └─ 📄 library.py                       → 기록 탭과 즐겨찾기 탭 (다시 그리기 · 검색)
+│  │  └─ 📄 library.py                       → 기록 탭과 즐겨찾기 탭 (다시 그리기 · 검색 · 스크롤로 이어 읽기)
 │  ├─ 📂 threads
 │  │  ├─ 📄 __init__.py
 │  │  ├─ 📄 ytdlp_run.py                     → 정보 조회용 yt-dlp 호출 · 통신 오류 재시도
@@ -268,8 +271,9 @@
 ├─ 📂 assets
 │  ├─ 📂 fonts                                → Pretendard Variable / Pretendard JP / JetBrains Mono
 │  ├─ 📂 icons                                → Fluent SVG 원본 (빌드에는 미포함)
-│  ├─ 📂 logo                                 → 헤더 로고 6종 (언어 3 × 테마 2)
-│  └─ 🖼️ tver.ico                             → exe 아이콘
+│  ├─ 📂 title                                → 헤더 제목 로고 6종 (언어 3 × 테마 2)
+│  ├─ 🖼️ applogo.png                          → T·V 심벌 원본 (1024px)
+│  └─ 🖼️ appicon.ico                          → exe·창·트레이 공용 아이콘 (applogo.png에서 생성)
 ├─ 📂 lang                                    → 번역 원본 7종 (korean · english · japanese · chinese · chinese_traditional · spanish · thai .ini)
 │                                              배포본에서는 `_internal/lang`에 실림 (고쳐 쓰는 곳)
 ├─ 📄 readme.txt                              → 배포본 안내 (한국어 · 영어) · 언어 파일 만드는 법
@@ -289,8 +293,10 @@
 ├─ 📄 .gitattributes                          → 줄 끝(EOL) 정규화 규칙
 ├─ 📄 README.md
 ├─ 📄 CHANGELOG.md                            → 버전별 변경 내역
-├─ 🖼️ logo.png
-└─ 🖼️ main.png
+└─ 📂 docs                                    → 소개 페이지 (GitHub Pages 소스 = /docs)
+   ├─ 📄 index.html                           → deuxdoom.github.io/TVerDownloader
+   ├─ 🖼️ favicon.ico
+   └─ 📂 img                                  → 페이지·README에 쓰는 화면 그림과 로고
 ```
 
 ---

@@ -155,6 +155,29 @@ def match_tver_url(text: str) -> Optional[str]:
     return candidate if TVER_URL_RE.match(candidate) else None
 
 
+TVER_ID_RE = re.compile(
+    r"^https?://(?:www\.)?tver\.jp/(episodes|series)/([A-Za-z0-9_-]+)", re.IGNORECASE)
+"""TVer 주소에서 종류와 ID만 뽑는다. 뒤에 붙은 쿼리·프래그먼트는 보지 않는다."""
+
+
+def canonical_url(text: str) -> str:
+    """중복을 가릴 때 쓸 주소. TVer면 종류와 ID만 남기고, 아니면 그대로 둔다.
+
+    같은 회차라도 공유 경로에 따라 `?utm_source=...`나 `#comment`가 붙어 오는데, 주소를
+    글자 그대로 견주면 **같은 영상이 대기열에 둘 서고 이미 받은 것도 다시 받는다.** 만들어질
+    파일 이름은 메타데이터에서 나와 같으므로, `--force-overwrites`와 겹치면 두 프로세스가
+    한 파일을 함께 쓴다.
+
+    **TVer가 아닌 곳은 절대 손대지 않는다.** 유튜브처럼 쿼리에 영상 ID가 든 곳이 있어
+    (`youtube.com/watch?v=...`), 떼면 아예 다른 영상을 가리키거나 주소가 깨진다.
+    """
+    url = (text or "").strip()
+    matched = TVER_ID_RE.match(url)
+    if not matched:
+        return url
+    return f"https://tver.jp/{matched.group(1).lower()}/{matched.group(2)}"
+
+
 MEDIA_URL_RE = re.compile(
     r"^https?://[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?$", re.IGNORECASE)
 """yt-dlp에 넘겨 볼 만한 주소인지 가르는 최소 조건.
@@ -285,12 +308,23 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: dict) -> bool:
-    """설정을 저장하고 성공 여부를 돌려준다. 실패를 조용히 삼키지 않는다."""
+    """설정을 저장하고 성공 여부를 돌려준다. 실패를 조용히 삼키지 않는다.
+
+    **임시 파일에 썼다가 바꿔치기한다.** 목적지를 바로 열면 쓰는 도중에 막혔을 때 잘린
+    JSON이 그 이름으로 남고, 다음 실행에서 `load_config`가 그것을 못 읽어 **설정이 통째로
+    기본값으로 돌아간다.** 저장소 쪽 세 곳(queue·favorites·history)이 모두 이렇게 쓴다.
+    """
+    target = Path(CONFIG_FILE)
+    tmp = target.with_suffix(".tmp")
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
+        tmp.write_text(json.dumps(config, indent=4, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, target)
         return True
-    except (IOError, OSError, TypeError):
+    except (OSError, TypeError, ValueError):
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False
 
 

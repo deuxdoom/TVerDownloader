@@ -7,6 +7,7 @@ _internal 둘뿐이고 나머지(bin·설정·기록·썸네일)는 사용자 �
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -97,11 +98,32 @@ def find_payload_root(names: Iterable[str]) -> Optional[str]:
     return None
 
 
+DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
+"""맨 앞의 드라이브 지정자. 'C:x'는 그 드라이브의 현재 폴더를 가리켜 목적지를 벗어난다."""
+
+
+def escapes_destination(name: str) -> bool:
+    """압축 항목 이름이 풀어 놓을 폴더 밖을 가리키는가.
+
+    `destination / relative`는 `..`도 앞의 `/`도 접지 않아, 그대로 쓰면 **작업 폴더 바깥을
+    덮어쓴다.** CRC 검사(testzip)는 내용이 온전한지만 보므로 이것을 잡지 못한다.
+
+    정상 릴리스에서 나오는 일은 아니고, 꾸러미가 바뀌었을 때를 위한 층이다. 그런 zip이라면
+    exe 자체가 이미 문제이므로 이것만으로 안전해지지는 않는다 - 값싼 방어라서 둔다.
+    """
+    path = name.replace("\\", "/")
+    if path.startswith("/") or DRIVE_PREFIX_RE.match(path):
+        return True
+    return any(part == ".." for part in path.split("/"))
+
+
 def verify_package(zip_path: Path) -> Tuple[bool, str, str]:
     """받은 zip이 쓸 만한지 본다. (성공 여부, 내용물 접두사, 문제 설명).
 
     깨진 파일로 교체를 시작하면 되돌릴 것도 없이 앱이 사라져, 여는 것으로 끝내지 않고
     CRC까지 본다(testzip). exe와 _internal이 실제로 들어 있는지도 함께 본다.
+    **폴더를 벗어나는 항목이 하나라도 있으면 꾸러미째 거부한다** - 다듬어서 받아들이면
+    무엇을 덮어쓸 뻔했는지 아무도 모르게 된다.
     """
     if not zip_path.exists() or zip_path.stat().st_size == 0:
         return False, "", t("update.pkg_empty")
@@ -110,7 +132,16 @@ def verify_package(zip_path: Path) -> Tuple[bool, str, str]:
             broken = archive.testzip()
             if broken is not None:
                 return False, "", t("update.pkg_broken", name=broken)
-            root = find_payload_root(archive.namelist())
+            names = archive.namelist()
+            unsafe = next((name for name in names if escapes_destination(name)), None)
+            if unsafe is not None:
+                return False, "", t("update.pkg_unsafe", name=unsafe)
+            root = find_payload_root(names)
+            if root is not None:
+                unsafe = next((name for name, relative in payload_members(names, root)
+                               if escapes_destination(relative)), None)
+                if unsafe is not None:
+                    return False, "", t("update.pkg_unsafe", name=unsafe)
     except (zipfile.BadZipFile, OSError) as error:
         return False, "", t("update.pkg_unreadable", error=error)
 
@@ -120,18 +151,39 @@ def verify_package(zip_path: Path) -> Tuple[bool, str, str]:
     return True, root, ""
 
 
+def payload_members(names: Iterable[str], root: str):
+    """root 아래 항목을 (원래 이름, 상대 경로)로 내준다.
+
+    **검증하는 쪽과 푸는 쪽이 같은 것을 봐야 한다.** 원래 이름만 보면
+    `TVerDownloader/C:/x`가 통과한 뒤 접두사를 떼면서 `C:/x`가 되어 다른 드라이브를
+    가리키고, `TVerDownloader//x`는 `/x`가 되어 드라이브 루트를 가리킨다(실측). 떼는
+    규칙이 두 곳에 적히면 이렇게 어긋난다.
+    """
+    for name in names:
+        normalized = name.replace("\\", "/")
+        if not normalized.lower().startswith(root.lower()):
+            continue
+        relative = normalized[len(root):]
+        if not relative:
+            continue
+        yield name, relative
+
+
 def extract_payload(zip_path: Path, root: str, destination: Path,
                     on_progress=None) -> None:
-    """zip에서 본체만 골라 destination 바로 아래에 편다. 배치가 옮길 자리를 하나로 고정한다."""
+    """zip에서 본체만 골라 destination 바로 아래에 편다. 배치가 옮길 자리를 하나로 고정한다.
+
+    벗어나는 항목은 verify_package가 이미 걸렀지만 여기서도 본다 - 푸는 일이 이 함수
+    하나뿐이라, 관문을 거치지 않고 불리는 길이 생겨도 폴더 밖에 쓰지는 않는다.
+    """
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as archive:
-        members = [m for m in archive.infolist()
-                   if m.filename.replace("\\", "/").lower().startswith(root.lower())]
-        total = len(members) or 1
-        for index, member in enumerate(members, 1):
-            relative = member.filename.replace("\\", "/")[len(root):]
-            if not relative:
-                continue
+        by_name = {m.filename: m for m in archive.infolist()}
+        picked = [(by_name[name], relative)
+                  for name, relative in payload_members(by_name, root)
+                  if not escapes_destination(relative)]
+        total = len(picked) or 1
+        for index, (member, relative) in enumerate(picked, 1):
             target = destination / relative
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
