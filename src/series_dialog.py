@@ -9,11 +9,13 @@ from PyQt6.QtWidgets import (
 )
 from src.i18n import t
 from src.thumbnails import start_thumbnail_download, THUMBNAIL_CACHE_DIR
+from src.window_frame import apply_dialog_frame
 
 class SeriesSelectionDialog(QDialog):
     """시리즈의 회차 목록에서 받을 것을 고르는 창."""
 
-    def __init__(self, episode_info: List[Dict[str, str]], parent=None):
+    def __init__(self, episode_info: List[Dict[str, str]], parent=None,
+                 theme: str = "light"):
         super().__init__(parent)
         self.setWindowTitle(t("series.title"))
         self.setMinimumSize(720, 540)
@@ -51,6 +53,9 @@ class SeriesSelectionDialog(QDialog):
         self.deselect_all_btn.clicked.connect(lambda: self._toggle_all_checkboxes(check=False))
         self.dialog_buttons.accepted.connect(self.accept)
         self.dialog_buttons.rejected.connect(self.reject)
+
+        apply_dialog_frame(self, theme, icon_name="download",
+                           color_key="ctx_download")
 
     def _load_or_download_thumbnail(self, item: QListWidgetItem, episode_meta: Dict[str, str]):
         thumb_url = episode_meta.get("thumbnail_url")

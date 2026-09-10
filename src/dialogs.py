@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QStackedWidget, QWidget, QFileDialog, QDialogButtonBox,
     QListWidget, QListWidgetItem, QAbstractItemView, QStyledItemDelegate,
-    QRadioButton, QButtonGroup, QCheckBox, QFrame, QComboBox,
-    QGroupBox, QGridLayout, QKeySequenceEdit, QSizePolicy
+    QRadioButton, QButtonGroup, QFrame, QComboBox,
+    QGroupBox, QGridLayout, QKeySequenceEdit, QSizePolicy, QScrollArea
 )
 from src import i18n, shortcuts
 from src.i18n import t
@@ -18,6 +18,8 @@ from src.utils import (save_config, PARALLEL_MAX, FRAGMENTS_MIN, FRAGMENTS_MAX,
                        MAX_TOTAL_CONNECTIONS, canonicalize_config_fragments,
                        canonicalize_config_codec, canonicalize_config_encoder)
 from src.thumbnails import THUMBNAIL_CACHE_DIR
+from src.window_frame import apply_dialog_frame
+from src.qtparts import WrappingCheckBox
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
@@ -91,7 +93,8 @@ class SettingsDialog(QDialog):
         `자동 감지`와 `한국어`는 같은 결과인데, 문자열만 보면 그 사이를 오갈 때마다
         아무것도 달라지지 않는데도 재시작을 묻는다."""
         self.setWindowTitle(t("settings.title"))
-        self.setMinimumSize(760, 580)
+        self.setMinimumSize(760, 360)
+        self.resize(780, 636)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -132,6 +135,9 @@ class SettingsDialog(QDialog):
         self.nav.currentRowChanged.connect(self._on_nav_changed)
         self.nav.setCurrentRow(0)
 
+        apply_dialog_frame(self, self._theme, icon_name="settings",
+                           color_key="ctx_settings")
+
     def _nav_icon(self, icon_name: str) -> QIcon:
         """평소엔 흐리게, 선택되면 accent로 보이는 아이콘을 만든다."""
         colors = palette(self._theme)
@@ -143,8 +149,16 @@ class SettingsDialog(QDialog):
         return icon
 
     def _add_page(self, widget: QWidget, title: str, icon_name: str):
-        """페이지를 스택에 넣고 좌측 내비게이션 항목을 추가한다."""
-        self.pages.addWidget(widget)
+        """본문만 스크롤해 화면 높이가 줄어도 저장 단추에 항상 닿게 한다."""
+        widget.setObjectName("SettingsPage")
+        for label in widget.findChildren(QLabel):
+            label.setWordWrap(True)
+        scroll = QScrollArea(objectName="SettingsScroll")
+        scroll.viewport().setObjectName("SettingsViewport")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(widget)
+        self.pages.addWidget(scroll)
         item = QListWidgetItem(self._nav_icon(icon_name), title)
         item.setSizeHint(QSize(0, 40))
         self.nav.addItem(item)
@@ -157,6 +171,11 @@ class SettingsDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        screen = self.screen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.resize(max(self.minimumWidth(), min(self.width(), area.width())),
+                        max(self.minimumHeight(), min(self.height(), area.height())))
         self._update_cache_label()
 
     def _calculate_cache_size(self) -> str:
@@ -248,7 +267,7 @@ class SettingsDialog(QDialog):
         clip_group = QWidget(); clip_layout = QVBoxLayout(clip_group); clip_layout.setContentsMargins(0, 0, 0, 0)
         clip_layout.setSpacing(10)
         clip_layout.addWidget(QLabel(t("settings.clipboard_label")))
-        self.clipboard_watch_checkbox = QCheckBox(t("settings.clipboard_check"))
+        self.clipboard_watch_checkbox = WrappingCheckBox(t("settings.clipboard_check"))
         self.clipboard_watch_checkbox.setChecked(self.config.get("clipboard_watch", True))
         self.clipboard_watch_checkbox.setToolTip(t("settings.clipboard_tooltip"))
         clip_layout.addWidget(self.clipboard_watch_checkbox); layout.addWidget(clip_group)
@@ -256,7 +275,7 @@ class SettingsDialog(QDialog):
         fav_group = QWidget(); fav_layout = QVBoxLayout(fav_group); fav_layout.setContentsMargins(0, 0, 0, 0)
         fav_layout.setSpacing(10)
         fav_layout.addWidget(QLabel(t("settings.favorites_label")))
-        self.fav_autocheck_checkbox = QCheckBox(t("settings.fav_autocheck_check"))
+        self.fav_autocheck_checkbox = WrappingCheckBox(t("settings.fav_autocheck_check"))
         self.fav_autocheck_checkbox.setChecked(self.config.get("auto_check_favorites_on_start", False))
         self.fav_autocheck_checkbox.setToolTip(t("settings.fav_autocheck_tooltip"))
         fav_layout.addWidget(self.fav_autocheck_checkbox); layout.addWidget(fav_group)
@@ -264,7 +283,7 @@ class SettingsDialog(QDialog):
         update_group = QWidget(); update_layout = QVBoxLayout(update_group)
         update_layout.setContentsMargins(0, 0, 0, 0); update_layout.setSpacing(10)
         update_layout.addWidget(QLabel(t("settings.update_label")))
-        self.auto_update_checkbox = QCheckBox(t("settings.auto_update_check"))
+        self.auto_update_checkbox = WrappingCheckBox(t("settings.auto_update_check"))
         self.auto_update_checkbox.setChecked(self.config.get("auto_update_check", True))
         self.auto_update_checkbox.setToolTip(t("settings.auto_update_tooltip"))
         update_layout.addWidget(self.auto_update_checkbox); layout.addWidget(update_group)
@@ -482,7 +501,7 @@ class SettingsDialog(QDialog):
     def _create_subtitle_tab(self):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(15)
 
-        self.download_subs_checkbox = QCheckBox(t("settings.subs_download"))
+        self.download_subs_checkbox = WrappingCheckBox(t("settings.subs_download"))
         self.download_subs_checkbox.setChecked(self.config.get("download_subtitles", True))
         layout.addWidget(self.download_subs_checkbox)
 
@@ -491,7 +510,7 @@ class SettingsDialog(QDialog):
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
-        self.embed_subs_checkbox = QCheckBox(t("settings.subs_embed"))
+        self.embed_subs_checkbox = WrappingCheckBox(t("settings.subs_embed"))
         self.embed_subs_checkbox.setChecked(self.config.get("embed_subtitles", False))
         layout.addWidget(self.embed_subs_checkbox)
 
@@ -544,12 +563,12 @@ class SettingsDialog(QDialog):
         exclude_v_layout.addWidget(self.exclude_keywords_edit)
         layout.addWidget(exclude_groupbox)
 
-        self.embed_thumbnail_checkbox = QCheckBox(t("settings.embed_thumb_check"))
+        self.embed_thumbnail_checkbox = WrappingCheckBox(t("settings.embed_thumb_check"))
         self.embed_thumbnail_checkbox.setChecked(self.config.get("embed_thumbnail", False))
         self.embed_thumbnail_checkbox.setToolTip(t("settings.embed_thumb_tooltip"))
         layout.addWidget(self.embed_thumbnail_checkbox)
 
-        self.ignore_ssl_checkbox = QCheckBox(t("settings.ignore_ssl_check"))
+        self.ignore_ssl_checkbox = WrappingCheckBox(t("settings.ignore_ssl_check"))
         self.ignore_ssl_checkbox.setChecked(self.config.get("ignore_ssl_errors", False))
         self.ignore_ssl_checkbox.setToolTip(t("settings.ignore_ssl_tooltip"))
         layout.addWidget(self.ignore_ssl_checkbox)

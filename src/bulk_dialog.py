@@ -5,10 +5,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.i18n import t
+from src.window_frame import apply_dialog_frame
 
 
 class BulkAddDialog(QDialog):
-    def __init__(self, parent=None, initial_urls: list[str] | None = None):
+    def __init__(self, parent=None, initial_urls: list[str] | None = None,
+                 theme: str = "light"):
         super().__init__(parent)
         self.setWindowTitle(t("bulk.title"))
         self.resize(600, 420)
@@ -35,6 +37,8 @@ class BulkAddDialog(QDialog):
         btns.addWidget(self.ok_btn)
         btns.addWidget(self.cancel_btn)
         layout.addLayout(btns)
+
+        apply_dialog_frame(self, theme, icon_name="bulk_add")
 
         if initial_urls:
             self.set_urls(initial_urls)

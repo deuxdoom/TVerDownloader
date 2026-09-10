@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QListWidgetItem, QFileDialog, QWidget
 from PyQt6.QtGui import QCursor
 
 from src.i18n import t
-from src.utils import open_file_location, ERROR_STATUSES, FILENAME_TITLE_MAX_LENGTH
+from src.utils import open_file_location, FILENAME_TITLE_MAX_LENGTH
 from src.qtparts import RoundedMenu
 from src.widgets import DownloadItemWidget
 
@@ -157,8 +157,7 @@ class DownloadListController:
                 if window.download_manager.remove_task_from_queue(url): self.remove_row(window.ui.download_list.row(item))
             menu.addAction(t("menu.remove_from_queue"), remove_from_queue)
         else:
-            if widget.status in ERROR_STATUSES:
-                menu.addAction(t("menu.redownload"), lambda: self.retry_download(url))
+            menu.addAction(t("menu.redownload"), lambda: self.retry_download(url))
             menu.addAction(t("menu.delete_from_list"), lambda: self.remove_row(window.ui.download_list.row(item)))
         self._add_file_actions(menu, widget)
         menu.exec(QCursor.pos())
@@ -218,6 +217,10 @@ class DownloadListController:
         return cleaned[:FILENAME_TITLE_MAX_LENGTH] or "thumbnail"
 
     def retry_download(self, url: str):
+        """다시 받는다. 기록 탭과 달리 이미 받았는지 되묻지 않는다.
+
+        사용자가 그 카드를 짚어 재다운로드를 고른 뒤라, 같은 것을 한 번 더 묻는 셈이 된다.
+        """
         window = self.window
         if window.download_manager.is_pending(url):
             return

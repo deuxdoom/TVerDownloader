@@ -1,7 +1,10 @@
-"""현재 공인 IP가 어느 나라인지 한 번 물어보는 스레드.
+"""현재 공인 IP가 어느 나라인지 되풀이해 물어보는 스레드.
 
 TVer는 일본 지역 제한이 있어 VPN 없이 받으면 전부 실패하는데, 지금은 받기 시작해서
-실패해야 그것을 안다. 켤 때 로그에 한 줄 알려 주자는 것이 전부다 - 막지도 묻지도 않는다.
+실패해야 그것을 안다. 로그에 한 줄 알려 주자는 것이 전부다 - 막지도 묻지도 않는다.
+
+**한 번만 묻지 않는 것은 VPN이 앱보다 늦게 켜지기 때문이다.** 켤 때 물은 답을 그대로
+들고 있으면 나중에 VPN을 켠 사람에게 앱을 껐다 켜라고 요구하게 된다(사용자 지적).
 
 **실패는 통째로 조용히 넘긴다.** 안내지 관문이라서가 아니다. 못 물어본 것을 '일본이
 아니다'로 읽으면 VPN을 켜 둔 사람에게 껐다고 알리게 되어, 실패 방향이 가장 나쁘다.
@@ -11,7 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 import requests
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QMutex, QThread, QWaitCondition, pyqtSignal
 
 from src.i18n import t
 
@@ -42,6 +45,7 @@ STOP_WAIT_MS = 300
 그대로 끝난다. DNS가 막힌 회선에서는 TIMEOUT과 무관하게 십수 초가 걸려(실측 11초)
 어차피 기다릴 수 없다.
 """
+
 
 
 def country_name(code: str) -> str:
@@ -76,7 +80,11 @@ def parse_country(body: str) -> Optional[str]:
 
 
 class RegionCheckThread(QThread):
-    """공인 IP의 국가를 한 번 물어보고, 알아낸 때만 알린다."""
+    """공인 IP의 국가를 되풀이해 물어보고, 알아낸 때마다 알린다.
+
+    **같은 답이 또 와도 그대로 알린다.** 무엇이 달라졌는지 가르는 일은 창이 한다 - 이쪽은
+    지금 어디인지를 관측할 뿐이고, 어떤 안내를 이미 내보냈는지는 여기서 알 길이 없다.
+    """
 
     resolved = pyqtSignal(str)
     """알아낸 두 글자 국가 코드. 실패했을 때는 이쪽이 나오지 않는다."""
@@ -93,19 +101,54 @@ class RegionCheckThread(QThread):
         """
         super().__init__()
         self._stop_flag = False
+        self._pending = False
+        self._mutex = QMutex()
+        self._wake = QWaitCondition()
 
     def stop(self):
-        """받아 온 답을 버린다. 통신은 곧 제한 시간에 걸려 스스로 끝난다."""
+        """받아 온 답을 버리고 기다리는 중이면 곧장 깨운다.
+
+        **깨우지 않으면 스레드가 영원히 기다린다.** 다음 요청이 올 때까지 시간 제한 없이
+        멎어 있는 구조라, 끝내라는 뜻을 같은 조건 변수로 전해야 빠져나온다.
+        """
         self._stop_flag = True
+        self._wake.wakeAll()
+
+    def request_recheck(self):
+        """다시 물어보라고 시킨다. 네트워크가 바뀌었을 때 창이 부른다.
+
+        **확인하는 중에 와도 잃지 않는다** - 깃발을 세워 두면 이번 확인을 마친 스레드가
+        기다리지 않고 곧바로 한 번 더 묻는다. VPN이 붙는 동안 알림이 잇달아 오는 자리다.
+        """
+        self._mutex.lock()
+        self._pending = True
+        self._wake.wakeAll()
+        self._mutex.unlock()
 
     def run(self):
-        code = self._lookup()
-        if self._stop_flag:
-            return
-        if code:
-            self.resolved.emit(code)
-        else:
-            self.failed.emit()
+        while not self._stop_flag:
+            code = self._lookup()
+            if self._stop_flag:
+                return
+            if code:
+                self.resolved.emit(code)
+            else:
+                self.failed.emit()
+            self._await_request()
+
+    def _await_request(self):
+        """다시 물어보라는 말이 올 때까지 기다린다. **시간 제한을 두지 않는다.**
+
+        주기적으로 깨어날 이유가 없다 - IP가 달라지는 것은 네트워크가 바뀔 때뿐이고 그것은
+        `net_watch`가 알려 준다. 기다리는 동안 이 스레드가 쓰는 것은 아무것도 없다.
+        """
+        self._mutex.lock()
+        try:
+            while not self._stop_flag and not self._pending:
+                self._wake.wait(self._mutex)
+            self._pending = False
+        finally:
+            self._mutex.unlock()
 
     def _lookup(self) -> Optional[str]:
         """국가 코드를 받아 온다. 무엇이 잘못되든 None.

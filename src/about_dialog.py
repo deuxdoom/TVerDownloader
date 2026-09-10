@@ -8,7 +8,8 @@ from src.appicon import get_app_icon
 from src.i18n import t
 from src.message import notify
 from src.qss import palette
-from src.utils import open_developer_link, open_feedback_link, localized_app_name
+from src.utils import open_developer_link, open_site_link, localized_app_name
+from src.window_frame import apply_dialog_frame
 
 
 def features() -> list[str]:
@@ -84,6 +85,8 @@ class AboutDialog(QDialog):
 
         root.addStretch(1)
         root.addLayout(self._build_buttons())
+        apply_dialog_frame(self, theme, resizable=False,
+                           icon_name="info")
 
     def _build_header(self, version: str) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -114,8 +117,8 @@ class AboutDialog(QDialog):
         row.setSpacing(6)
         youtube_btn = QPushButton(t("about.youtube"), objectName="AboutYouTube")
         youtube_btn.clicked.connect(open_developer_link)
-        contact_btn = QPushButton(t("about.contact"), objectName="AboutContact")
-        contact_btn.clicked.connect(open_feedback_link)
+        site_btn = QPushButton(t("about.site"), objectName="AboutSite")
+        site_btn.clicked.connect(open_site_link)
 
         self.check_btn = QPushButton(t(self.CHECK_LABEL_KEY), objectName="AboutUpdate")
         self.check_btn.clicked.connect(self._check_update)
@@ -125,7 +128,7 @@ class AboutDialog(QDialog):
         close_box.rejected.connect(self.reject)
 
         row.addWidget(youtube_btn)
-        row.addWidget(contact_btn)
+        row.addWidget(site_btn)
         row.addWidget(self.check_btn)
         row.addStretch(1)
         row.addWidget(close_box)

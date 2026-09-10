@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from src.icons import get_icon
 from src.i18n import t
 from src.qss import blend, palette
+from src.window_frame import apply_dialog_frame
 from src.thumbnails import (THUMBNAIL_CACHE_DIR, ThumbnailDownloader,
                             cached_thumbnail, discard_thumbnail_requests,
                             rounded_thumbnail, start_thumbnail_download,
@@ -71,6 +72,9 @@ class EmptyStateOverlay(QWidget):
     MARGIN = 24
     TEXT_MAX_WIDTH = 320
     """설명 줄의 최대 폭. 창을 넓히면 한 줄이 끝없이 길어져 읽는 눈이 되돌아온다."""
+    COMPACT_HEIGHT = 180
+    COMPACT_MARGIN = 8
+    """낮은 목록에서는 아이콘과 긴 설명 대신 상태 제목을 남겨 겹침을 막는다."""
 
     def __init__(self, list_widget: QListWidget, icon_name: str,
                  title: str, description: str,
@@ -152,15 +156,20 @@ class EmptyStateOverlay(QWidget):
         self.setVisible(visible)
 
     def _fit(self):
-        """목록 크기에 맞춰 자리를 잡고, 접히는 설명 줄의 높이를 직접 먹인다.
-
-        QLabel은 wordWrap을 켜도 sizeHint가 한 줄 높이라, 가운데 정렬까지 걸면 두 줄이
-        겹쳐 그려진다(실측: 필요 64px에 받은 것 16px). heightForWidth로 구해 넣는다.
-        """
+        """가운데 정렬한 QLabel은 줄바꿈 높이를 놓치므로 제목과 설명 모두 직접 맞춘다."""
         if not self._usable():
             return
         rect = self._list.viewport().rect()
         self.setGeometry(rect)
+        compact = rect.height() < self.COMPACT_HEIGHT
+        self.icon_label.setVisible(not compact)
+        self.description_label.setVisible(not compact)
+        self.title_label.setWordWrap(True)
+        margin = self.COMPACT_MARGIN if compact else self.MARGIN
+        self.layout().setContentsMargins(margin, margin, margin, margin)
+        title_width = max(1, rect.width() - 2 * margin)
+        self.title_label.setFixedWidth(title_width)
+        self.title_label.setMinimumHeight(self.title_label.heightForWidth(title_width))
         width = min(self.TEXT_MAX_WIDTH, max(1, rect.width() - 2 * self.MARGIN))
         self.description_label.setFixedWidth(width)
         self.description_label.setMinimumHeight(
@@ -206,7 +215,7 @@ def clear_item_widgets(view: QListWidget):
 class ImagePreviewDialog(QDialog):
     """썸네일을 크게 보여 주는 창. 보기만 한다 - 저장은 목록 우클릭 메뉴가 맡는다."""
 
-    def __init__(self, pixmap: QPixmap, parent=None):
+    def __init__(self, pixmap: QPixmap, parent=None, theme: str = "light"):
         super().__init__(parent)
         self.setWindowTitle(t("card.preview_title")); self.setMinimumSize(640, 360); self.setModal(True)
         self._original_pixmap = pixmap
@@ -214,6 +223,7 @@ class ImagePreviewDialog(QDialog):
         self.image_label = QLabel(alignment=Qt.AlignmentFlag.AlignCenter); self.scroll_area.setWidget(self.image_label)
         layout = QVBoxLayout(self); layout.setContentsMargins(5, 5, 5, 5); layout.addWidget(self.scroll_area)
         self.image_label.mousePressEvent = self._handle_mouse_press
+        apply_dialog_frame(self, theme, icon_name="image")
 
     def showEvent(self, event): super().showEvent(event); QTimer.singleShot(0, self._update_scaled_pixmap)
     def resizeEvent(self, event): super().resizeEvent(event); self._update_scaled_pixmap()
@@ -496,7 +506,11 @@ class DownloadItemWidget(ThumbnailCard):
         return HoverTintButton(icon_name, tooltip, self)
 
     def apply_theme(self, theme: str):
-        """테마 전환 시 스트립 색과 액션 아이콘을 다시 칠한다."""
+        """테마 전환 시 스트립 색과 액션 아이콘을 다시 칠한다.
+
+        색뿐 아니라 테마 이름도 들고 있는 것은 썸네일 확대창이 이름을 받기 때문이다.
+        """
+        self._theme = theme
         self._colors = palette(theme)
         self._paint_action_icons()
         self._refresh_strip()
@@ -564,7 +578,7 @@ class DownloadItemWidget(ThumbnailCard):
 
     def _on_thumb_clicked(self, event):
         if self._orig_thumb_pm and not self._orig_thumb_pm.isNull():
-            ImagePreviewDialog(self._orig_thumb_pm, self).exec()
+            ImagePreviewDialog(self._orig_thumb_pm, self, self._theme).exec()
 
     def _animate_progress(self, target: int):
         target = max(0, min(100, int(target)))

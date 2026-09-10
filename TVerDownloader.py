@@ -33,7 +33,9 @@ from src.updater import maybe_show_update
 from src.threads.setup_thread import SetupThread
 from src.threads.region_thread import (RegionCheckThread, JAPAN_CODE, country_name,
                                        STOP_WAIT_MS as REGION_STOP_WAIT_MS)
+from src.net_watch import NetworkChangeWatcher
 from src.ui.main_window_ui import MainWindowUI
+from src.window_frame import center_on_screen, handle_system_command, make_frameless
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 from src.controllers.download_list import DownloadListController
@@ -45,7 +47,14 @@ from versioninfo import APP_VERSION
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{localized_app_name()} v{APP_VERSION}")
+        self.setWindowTitle(localized_app_name())
+        """제목에 버전을 적지 않는다.
+
+        제목 표시줄을 떼어 화면에는 아예 나오지 않고, 남은 자리는 작업 표시줄과 Alt+Tab
+        목록뿐이다. 거기서 필요한 것은 어느 프로그램인지이지 몇 번째 판인지가 아니다 -
+        버전은 정보 창에서 본다. 이름까지 비우면 그 목록에 이름 없는 칸으로 선다.
+        """
+        make_frameless(self)
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self._local_server = None
         self_update.cleanup_workspace()
@@ -233,6 +242,9 @@ class MainWindow(QMainWindow):
         self.ui.about_button.clicked.connect(
             lambda: AboutDialog(APP_VERSION, self, self.config.get("theme", "light")).exec())
         self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
+        self.ui.min_button.clicked.connect(self.showMinimized)
+        self.ui.max_button.clicked.connect(self.ui.toggle_maximized)
+        self.ui.close_button.clicked.connect(self.close)
         self.ui.theme_button.clicked.connect(self.toggle_theme)
         self.ui.log_toggle_btn.clicked.connect(self.toggle_log_panel)
         self.ui.clear_completed_button.clicked.connect(self.download_list.clear_completed)
@@ -318,23 +330,21 @@ class MainWindow(QMainWindow):
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is not None:
             area = screen.availableGeometry()
+            want_width, want_height = self.ui.window_size(self.ui.DEFAULT_WIDTH,
+                                                          self.ui.DEFAULT_HEIGHT)
             self.resize(
-                max(self.minimumWidth(), min(self.ui.DEFAULT_WIDTH, area.width())),
-                max(self.minimumHeight(), min(self.ui.DEFAULT_HEIGHT, area.height())))
+                max(self.minimumWidth(), min(want_width, area.width())),
+                max(self.minimumHeight(), min(want_height, area.height())))
         self._center_on_cursor_screen(self)
 
     @staticmethod
     def _center_on_cursor_screen(window):
-        """작업 표시줄을 뺀 영역 안에서 가운데로 옮긴다. 마우스가 있는 화면을 고른다."""
-        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-        if screen is None:
-            return
-        area = screen.availableGeometry()
-        frame = window.frameGeometry()
-        frame.moveCenter(area.center())
-        x = min(max(frame.x(), area.x()), max(area.x(), area.right() - frame.width() + 1))
-        y = min(max(frame.y(), area.y()), max(area.y(), area.bottom() - frame.height() + 1))
-        window.move(x, y)
+        """작업 표시줄을 뺀 영역 안에서 가운데로 옮긴다. 마우스가 있는 화면을 고른다.
+
+        셈은 `window_frame`에 있다 - 대화상자를 부모 가운데에 놓는 일과 화면 밖으로
+        나가지 않게 자르는 규칙이 같아서, 두 곳에 적으면 한쪽만 고쳐진다.
+        """
+        center_on_screen(window)
 
     def bring_to_front(self):
         if self.isMinimized(): self.showNormal()
@@ -381,6 +391,7 @@ class MainWindow(QMainWindow):
         """
         if not ok:
             self.append_log(t("log.setup_failed"))
+            self.ui.set_notice(t("log.setup_failed"), "danger")
             notify(self, t("dialog.error_title"), t("dialog.setup_failed_body"),
                    icon_name="info", color_key="danger",
                    theme=self.config.get("theme", "light"))
@@ -438,7 +449,8 @@ class MainWindow(QMainWindow):
 
     def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
         """에피소드 선택 창을 띄우고 고른 것만 대기열에 넣는다. 제목·표지 그림도 함께 넘긴다."""
-        dialog = SeriesSelectionDialog(episode_info, self)
+        dialog = SeriesSelectionDialog(episode_info, self,
+                                       self.config.get("theme", "light"))
         if not dialog.exec():
             self.append_log(t("log.selection_canceled", label=label))
             return
@@ -487,19 +499,76 @@ class MainWindow(QMainWindow):
         """
         self._region_code = ""
         self._region_failed = False
-        self._region_notice_shown = False
+        self._region_notified = None
+        """마지막으로 알린 상태 - 국가 코드이거나, 확인 실패 안내를 냈다는 뜻의 빈 문자열.
+
+        VPN을 켜고 끄면 같은 답이 여러 번 오므로 **무엇이 달라졌는지 여기서 가른다.**
+        아무것도 알리지 않은 상태를 빈 문자열과 구별해야 해서 None으로 시작한다.
+        """
         self.region_thread = RegionCheckThread()
         self.region_thread.resolved.connect(self._on_region_resolved)
         self.region_thread.failed.connect(self._on_region_failed)
         self.region_thread.start()
+        self._start_network_watch()
+
+    REGION_PROBE_DELAYS_MS = (3_000, 12_000, 30_000)
+    """네트워크가 바뀐 뒤 다시 물어보는 시점들(마지막 알림으로부터).
+
+    **한 번만 물으면 아직 옛 나라가 온다.** VPN은 어댑터에 주소가 붙는 것과 통신이 실제로
+    그쪽으로 도는 것 사이에 시차가 있어, 첫 알림이 오는 순간에는 아직 옮겨 가지 않았다.
+    세 번이면 대개 잡히고 통신은 다 합쳐 750바이트다.
+
+    **주기 확인이 아니다.** 네트워크가 바뀌지 않는 동안에는 이 타이머가 아예 돌지 않는다.
+    """
+
+    def _start_network_watch(self):
+        """네트워크가 바뀌는 것을 지켜보다가 그때만 다시 묻게 한다.
+
+        **주기적으로 다시 묻지 않는 근거가 여기 있다**(사용자 지시, 2026-09-10). IP가
+        달라지는 것은 네트워크가 바뀔 때뿐이라, 그 순간을 윈도우에게 얻어 오면 평소에
+        치를 값이 없다. 걸지 못했으면 켤 때 한 번 물은 답이 그대로 남는다 - 오늘 이전과
+        같은 상태이고, 그렇다고 앱이 못 돌 이유는 아니다.
+        """
+        self._region_probe_index = 0
+        self._region_probe_timer = QTimer(self)
+        self._region_probe_timer.setSingleShot(True)
+        self._region_probe_timer.timeout.connect(self._fire_region_probe)
+        self.net_watch = NetworkChangeWatcher(self)
+        self.net_watch.changed.connect(self._on_network_changed)
+        self.net_watch.start()
+
+    def _on_network_changed(self):
+        """네트워크가 바뀌었다. 자리잡을 틈을 두고 몇 번 물어본다.
+
+        타이머를 다시 걸어 두는 것이 곧 디바운스다 - VPN이 붙는 동안 알림이 잇달아 오는데,
+        그때마다 묻지 않고 **마지막 알림을 기준으로** 세 번만 묻는다.
+        """
+        self._region_probe_index = 0
+        self._region_probe_timer.start(self.REGION_PROBE_DELAYS_MS[0])
+
+    def _fire_region_probe(self):
+        """지금 한 번 묻고, 남은 시점이 있으면 그 간격만큼 다시 건다."""
+        self.region_thread.request_recheck()
+        self._region_probe_index += 1
+        delays = self.REGION_PROBE_DELAYS_MS
+        if self._region_probe_index < len(delays):
+            self._region_probe_timer.start(
+                delays[self._region_probe_index] - delays[self._region_probe_index - 1])
 
     def _on_region_resolved(self, country_code: str):
-        """알아낸 국가를 적어 둔다. 알릴지는 준비가 끝났는지에 달렸다."""
+        """알아낸 국가를 적어 둔다. 알릴지는 준비가 끝났는지와 달라졌는지에 달렸다."""
         self._region_code = country_code
         self._show_region_notice()
 
     def _on_region_failed(self):
-        """못 물어봤다고 적어 둔다. 이때는 나라를 모르므로 예전의 일반 안내로 돌아간다."""
+        """못 물어봤다. **이미 무언가 알렸으면 아무 말도 하지 않는다.**
+
+        VPN을 켜고 끄는 그 순간에는 통신이 잠깐 끊겨 확인이 실패하는데, 그때마다 '확인에
+        실패했다'를 내보내면 정작 나라가 바뀐 안내가 그 줄들에 묻힌다. 모르는 동안에는
+        마지막으로 알아낸 나라가 그대로 서 있는 것이 맞다.
+        """
+        if self._region_notified is not None:
+            return
         self._region_failed = True
         self._show_region_notice()
 
@@ -514,28 +583,33 @@ class MainWindow(QMainWindow):
     """
 
     def _show_region_notice(self):
-        """지역 안내를 로그 맨 아래에 한 번만 붙인다. 알리기만 하고 아무것도 막지 않는다.
+        """지역 안내를 로그 맨 아래에 붙인다. 알리기만 하고 아무것도 막지 않는다.
 
         준비가 끝난 뒤로 미루는 것은 yt-dlp·FFmpeg 확인 줄 사이에 끼면 읽는 차례가 끊기기
         때문이다. 답이 온 것과 준비가 끝난 것 중 늦게 오는 쪽이 이 함수를 부른다.
         **IP는 어디에도 적지 않는다** - 로그를 그대로 붙여 도움을 청하는 자리가 있다.
+
+        **나라가 달라졌을 때만 다시 붙인다.** 30초마다 오는 같은 답을 그대로 찍으면 로그가
+        그 줄로 차고, 위에서 아래로 읽는 흐름도 끊긴다. 문구를 새로 만들지 않은 것은 지금
+        어디인지를 말하는 글이 언제 붙어도 그대로 통하기 때문이다.
         """
-        if self._region_notice_shown or not self.env_ready:
+        if not self.env_ready:
             return
-        if self._region_code == JAPAN_CODE:
+        state = self._region_code or ("" if self._region_failed else None)
+        if state is None or state == self._region_notified:
+            return
+        if state == JAPAN_CODE:
             lines = [t("log.region_ok")]
             color_key = "log_success"
-        elif self._region_code:
+        elif state:
             lines = [t("log.region_not_japan"),
-                     t("log.region_use_vpn", country=country_name(self._region_code)),
+                     t("log.region_use_vpn", country=country_name(state)),
                      t("log.region_restricted")]
             color_key = "notice"
-        elif self._region_failed:
+        else:
             lines = [t(key) for key in self.REGION_FALLBACK_KEYS]
             color_key = "notice"
-        else:
-            return
-        self._region_notice_shown = True
+        self._region_notified = state
         self.append_notice(t("log.heading_notice"), lines, color_key=color_key)
 
     def stop_region_check(self):
@@ -543,7 +617,16 @@ class MainWindow(QMainWindow):
 
         오래 기다리지 않는 것은 DNS가 막힌 회선에서 십수 초가 걸리기 때문이다 - 부모 없는
         스레드라 도는 채로 두어도 프로세스가 그대로 끝난다.
+
+        **네트워크 감시를 먼저 거둔다.** 그쪽 등록을 남긴 채 프로세스가 끝나면 윈도우가
+        이미 사라진 콜백을 부르러 온다.
         """
+        watcher = getattr(self, "net_watch", None)
+        if watcher is not None:
+            watcher.stop()
+        timer = getattr(self, "_region_probe_timer", None)
+        if timer is not None:
+            timer.stop()
         thread = self.region_thread
         if thread is None:
             return
@@ -575,6 +658,7 @@ class MainWindow(QMainWindow):
         일본이냐 아니냐로 갈리는데, 둘 다 적색이면 어느 쪽인지 읽어야 알게 된다.
         """
         colors = palette(self.config.get("theme", "light"))
+        self.ui.set_notice(lines[0] if lines else title, color_key)
         head = self._log_heading(title)
         block = "\n".join([head, *lines, self._rule_matching(head)])
         self.ui.log_output.append(
@@ -583,16 +667,12 @@ class MainWindow(QMainWindow):
         self._scroll_log_to_end()
 
     def _log_text_width(self) -> int:
-        """로그 한 줄이 접히지 않고 들어가는 폭.
-
-        위젯이 아니라 고정폭 상수에서 잰다 - 로그를 접은 채로 시작하면 그 자리에 배치가
-        돌지 않아 위젯이 창 절반쯤 되는 폭을 들고 있다. 세로 스크롤바 폭은 늘 뺀다.
-        """
+        """접힌 로그의 초기 위젯 폭은 믿지 않고, 펼친 로그는 실제 배치와 QSS 안쪽 여백을 따른다."""
         log = self.ui.log_output
-        frame = log.width() - log.maximumViewportSize().width()
-        return int(self.ui.LOG_PANE_WIDTH - frame
+        width = log.width() if log.isVisible() else self.ui.LOG_PANE_WIDTH
+        return max(1, int(width - 2 * log.frameWidth()
                    - 2 * log.document().documentMargin()
-                   - log.verticalScrollBar().sizeHint().width())
+                   - log.verticalScrollBar().sizeHint().width()))
 
     def _log_heading(self, title: str) -> str:
         """제목 양옆을 괘선으로 채운 구분선. 로그 폭 안에서 한 줄로 떨어진다.
@@ -630,10 +710,31 @@ class MainWindow(QMainWindow):
         except Exception as e: self.append_log(t("log.play_failed", error=e))
 
     def changeEvent(self, event):
-        """Qt가 창에만 보내는 이벤트라 여기서 받아 트레이 쪽으로 넘긴다."""
+        """Qt가 창에만 보내는 이벤트라 여기서 받아 트레이와 창 모양 쪽으로 넘긴다.
+
+        최소화는 트레이로 내려가는 길이라 그 자리에서 끝낸다 - 이어서 최대화 여부를
+        물으면 내려간 창의 상태를 읽어 모서리와 단추를 엉뚱하게 되돌린다.
+        """
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
             self.tray.handle_minimized()
+
+    def nativeEvent(self, event_type, message):
+        """윈도우가 보낸 최대화·복원 지시를 우리 쪽 최대화로 바꿔 받는다.
+
+        화면 위쪽에 끌어다 붙이는 스냅과 Win+↑가 그대로 Qt에 닿으면, 프레임 없는 창이라
+        작업 표시줄까지 덮은 채 우리 모서리는 둥근 상태로 남는다.
+
+        **`self.ui`가 아직 없을 때도 불린다.** 창을 세우는 도중에 메시지가 오므로 그것을
+        곧바로 읽으면 AttributeError가 나는데, 창 프로시저 안에서 난 예외는 잡히지 않고
+        프로세스를 그대로 죽인다(실측: 종료 코드 0xC000041D, 출력 한 줄도 남지 않았다).
+
+        **`super().nativeEvent()`를 부르지 않는다.** PyQt6에서 그 한 줄만으로 접근 위반이
+        나며 창이 뜨는 도중에 죽는다(실측: 메시지를 읽지도 않고 그대로 넘기기만 해도 났다).
+        기본 구현은 '처리하지 않았다'를 돌려줄 뿐이라 우리가 그 값을 직접 내면 된다.
+        """
+        frame = getattr(getattr(self, "ui", None), "window_frame", None)
+        return (True, 0) if handle_system_command(frame, message) else (False, 0)
 
     def closeEvent(self, event):
         """Qt가 창에만 보내는 이벤트라 여기서 받아 트레이 쪽으로 넘긴다."""

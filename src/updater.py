@@ -132,7 +132,7 @@ def prompt_and_update(parent, release: dict, log=print, *,
     if pending_downloads and not confirm(
             parent, t("update.pending_title"),
             t("update.pending_body", count=pending_downloads),
-            icon_name="cancel", color_key="danger", theme=theme,
+            icon_name="download", color_key="danger", theme=theme,
             yes_text=t("update.pending_yes"), no_text=t("common.cancel")):
         log(t("log.update_pending_canceled"))
         return

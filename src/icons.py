@@ -18,6 +18,7 @@ FLUENT_FILL = "#212121"
 DEFAULT_SIZE = 18
 
 _cache: Dict[Tuple[str, str, int, float], QIcon] = {}
+_hover_cache: Dict[Tuple[str, str, str, int, float], QIcon] = {}
 
 
 def _device_pixel_ratio() -> float:
@@ -29,8 +30,13 @@ def _device_pixel_ratio() -> float:
 
 
 def recolor_svg(svg: str, color: str) -> str:
-    """SVG의 fill 값을 테마 색으로 치환한다."""
-    return svg.replace(f'fill="{FLUENT_FILL}"', f'fill="{color}"')
+    """SVG의 fill과 stroke 값을 테마 색으로 치환한다.
+
+    Fluent 아이콘은 모두 면(fill)으로 그려져 있지만, 우리가 직접 그린 것 중에는 획(stroke)이
+    편한 모양이 있다(전원 아이콘의 열린 고리). 둘 다 같은 색 값을 쓰므로 한 번에 바꾼다.
+    """
+    return (svg.replace(f'fill="{FLUENT_FILL}"', f'fill="{color}"')
+               .replace(f'stroke="{FLUENT_FILL}"', f'stroke="{color}"'))
 
 
 _tint_cache: Dict[Tuple[int, str], QIcon] = {}
@@ -88,18 +94,13 @@ def tint_icon(icon: QIcon, color: str) -> QIcon:
     return tinted
 
 
-def get_icon(name: str, color: str, size: int = DEFAULT_SIZE) -> QIcon:
-    """이름과 색으로 QIcon을 만든다. 모르는 이름이면 빈 QIcon(그 버튼만 아이콘이 없다)."""
-    dpr = _device_pixel_ratio()
-    key = (name, color, size, dpr)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
-
+def render_pixmap(name: str, color: str, size: int = DEFAULT_SIZE) -> QPixmap | None:
+    """SVG 하나를 그 색으로 그린 픽스맵. 모르는 이름이면 None."""
     svg = ICON_SVG.get(name)
     if svg is None:
-        return QIcon()
+        return None
 
+    dpr = _device_pixel_ratio()
     pixmap = QPixmap(max(1, round(size * dpr)), max(1, round(size * dpr)))
     pixmap.setDevicePixelRatio(dpr)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -109,7 +110,43 @@ def get_icon(name: str, color: str, size: int = DEFAULT_SIZE) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     renderer.render(painter, QRectF(0, 0, size, size))
     painter.end()
+    return pixmap
+
+
+def get_icon(name: str, color: str, size: int = DEFAULT_SIZE) -> QIcon:
+    """이름과 색으로 QIcon을 만든다. 모르는 이름이면 빈 QIcon(그 버튼만 아이콘이 없다)."""
+    key = (name, color, size, _device_pixel_ratio())
+    cached = _cache.get(key)
+    if cached is not None:
+        return cached
+
+    pixmap = render_pixmap(name, color, size)
+    if pixmap is None:
+        return QIcon()
 
     icon = QIcon(pixmap)
     _cache[key] = icon
+    return icon
+
+
+def get_hover_icon(name: str, color: str, hover_color: str,
+                   size: int = DEFAULT_SIZE) -> QIcon:
+    """평소 색과 커서를 올렸을 때 색을 함께 담은 아이콘.
+
+    QToolButton은 커서가 올라간 동안 QIcon.Mode.Active 그림을 쓴다. 배경이 확 바뀌는
+    단추(닫기)에서 글리프 색을 enter/leave로 직접 다시 칠하지 않아도 되게 한다.
+    """
+    key = (name, color, hover_color, size, _device_pixel_ratio())
+    cached = _hover_cache.get(key)
+    if cached is not None:
+        return cached
+
+    base = render_pixmap(name, color, size)
+    active = render_pixmap(name, hover_color, size)
+    if base is None or active is None:
+        return QIcon()
+
+    icon = QIcon(base)
+    icon.addPixmap(active, QIcon.Mode.Active)
+    _hover_cache[key] = icon
     return icon

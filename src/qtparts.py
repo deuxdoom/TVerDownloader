@@ -6,11 +6,157 @@
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize, QEvent, QObject
+from PyQt6.QtCore import Qt, QSize, QRect, QEvent, QObject
+from PyQt6.QtGui import QPainter, QPalette
 from PyQt6.QtWidgets import (
     QWidget, QMenu, QListWidget, QListView, QTabBar,
-    QAbstractItemView, QStyledItemDelegate, QStyle,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QLayout, QSpacerItem, QSizePolicy,
+    QCheckBox, QStyleOptionButton,
 )
+
+
+class WrappingCheckBox(QCheckBox):
+    """체크 동작과 접근성은 Qt에 맡기고 긴 번역문에 필요한 높이만 늘린다."""
+
+    TEXT_MIN_WIDTH = 160
+    """긴 문구 하나가 설정 페이지의 최소 폭을 통째로 늘리지 않게 한다."""
+    TEXT_LAYOUT_HEIGHT = 10000
+    """줄바꿈 높이를 잴 때 현재 위젯 높이 때문에 마지막 줄이 잘리지 않게 한다."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        policy = self.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Preferred)
+        policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def _content_rect(self, width):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.rect = QRect(0, 0, width, self.height())
+        return self.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, self)
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        return QSize(min(hint.width(), self.TEXT_MIN_WIDTH), hint.height())
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        rect = self._content_rect(width)
+        height = self.fontMetrics().boundingRect(
+            QRect(0, 0, max(1, rect.width()), self.TEXT_LAYOUT_HEIGHT),
+            Qt.TextFlag.TextWordWrap, self.text()).height()
+        return max(super().sizeHint().height(), height)
+
+    def paintEvent(self, event):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        content = self._content_rect(self.width())
+        option.text = ""
+        painter = QPainter(self)
+        self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter, self)
+        group = QPalette.ColorGroup.Active if self.isEnabled() else QPalette.ColorGroup.Disabled
+        painter.setPen(self.palette().color(group, QPalette.ColorRole.WindowText))
+        painter.drawText(content, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                         | Qt.TextFlag.TextWordWrap, self.text())
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
+
+
+class FlowLayout(QLayout):
+    """번역문이 길어져도 조작을 숨기지 않고 필요한 높이를 부모 배치에 전달한다."""
+
+    def __init__(self, parent=None, spacing=8):
+        super().__init__(parent)
+        self._items = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(spacing)
+
+    def addItem(self, item):
+        self._items.append(item)
+        self.invalidate()
+
+    def addStretch(self):
+        self.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation.Horizontal
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._arrange(QRect(0, 0, width, 0), False)
+
+    def minimumSize(self):
+        result = QSize()
+        for item in self._items:
+            if not item.isEmpty():
+                result = result.expandedTo(item.minimumSize())
+        return result
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._arrange(rect, True)
+
+    def _arrange(self, rect, apply):
+        rows, row, used = [], [], 0
+        for item in self._items:
+            if item.spacerItem() is not None:
+                if row:
+                    row.append((item, QSize()))
+                continue
+            if item.isEmpty():
+                continue
+            hint = item.sizeHint().expandedTo(item.minimumSize())
+            gap = self.spacing() if any(size.width() for _, size in row) else 0
+            if row and used + gap + hint.width() > rect.width():
+                rows.append(row)
+                row, used, gap = [], 0, 0
+            row.append((item, hint))
+            used += gap + hint.width()
+        if row:
+            rows.append(row)
+        y = rect.y()
+        for row in rows:
+            while row and row[-1][0].spacerItem() is not None:
+                row.pop()
+            if not row:
+                continue
+            widgets = [(item, size) for item, size in row if item.spacerItem() is None]
+            height = max(size.height() for _, size in widgets)
+            used = sum(size.width() for _, size in widgets) + self.spacing() * (len(widgets) - 1)
+            stretches = len(row) - len(widgets)
+            extra = max(0, rect.width() - used) // stretches if stretches else 0
+            x, placed = rect.x(), False
+            for item, size in row:
+                if item.spacerItem() is not None:
+                    x += extra
+                    continue
+                if placed:
+                    x += self.spacing()
+                if apply:
+                    item.setGeometry(QRect(x, y + (height - size.height()) // 2, size.width(), size.height()))
+                x += size.width()
+                placed = True
+            y += height + self.spacing()
+        return max(0, y - rect.y() - self.spacing())
 
 
 def apply_popup_shape(popup: QWidget):

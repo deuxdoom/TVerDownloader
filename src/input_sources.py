@@ -167,7 +167,8 @@ class InputSources:
         if not window._ensure_download_folder():
             window.append_log(t("log.no_folder_canceled"))
             return False
-        dialog = BulkAddDialog(window, initial_urls)
+        dialog = BulkAddDialog(window, initial_urls,
+                               theme=window.config.get("theme", "light"))
         self._bulk_dialog = dialog
         try:
             accepted = dialog.exec()

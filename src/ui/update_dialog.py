@@ -1,18 +1,19 @@
 """업데이트 진행 창.
 
-**닫기 단추를 없애고 취소 단추만 둔다** - 창만 닫고 스레드는 계속 도는 상태가 생기면
-다음에 다시 눌렀을 때 같은 폴더에 두 번 풀게 된다.
+**닫는 길과 취소가 같은 길이다** - 제목 줄의 X도 `reject()`로 가고, 그것이 받기를 세운 뒤
+스레드가 빠져나오기를 기다린다. 창만 닫히고 스레드는 도는 상태가 생기면 다음에 다시
+눌렀을 때 같은 폴더에 두 번 풀게 된다.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QLabel, QProgressBar, QPushButton,
                              QVBoxLayout, QHBoxLayout)
 
 from src.i18n import t
 from src.threads.update_thread import UpdateDownloadThread
+from src.window_frame import apply_dialog_frame
 
 DIALOG_WIDTH = 420
 """창 폭. 진행 문구가 파일 크기까지 담아도 한 줄에 떨어지는 값."""
@@ -27,7 +28,6 @@ class UpdateProgressDialog(QDialog):
         self.setWindowTitle(t("update.dialog_title"))
         self.setModal(True)
         self.setFixedWidth(DIALOG_WIDTH)
-        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
 
         self.failure_reason = ""
         """실패 사유. 사용자가 취소했으면 빈 문자열로 남는다."""
@@ -58,6 +58,14 @@ class UpdateProgressDialog(QDialog):
         self.cancel_button.clicked.connect(self._cancel)
         button_row.addWidget(self.cancel_button)
         layout.addLayout(button_row)
+
+        apply_dialog_frame(self, theme, resizable=False,
+                           icon_name="download")
+        """제목 줄의 X도 `reject()`로 가므로 취소 단추와 같은 길이다.
+
+        예전에 `WindowCloseButtonHint`를 꺼 둔 것은 X가 스레드를 두고 창만 닫아 버리던
+        시절의 대비였다. 지금은 그 경로가 취소와 같아져 감출 이유가 없다.
+        """
 
         self.thread = UpdateDownloadThread(asset_url, work_dir, self)
         self.thread.progress.connect(self._on_progress)

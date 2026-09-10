@@ -101,7 +101,7 @@ class TrayController:
                                          window.windowIcon(), 2000)
             return
         if confirm(window, t("dialog.quit_title"), t("dialog.quit_body"),
-                   icon_name="cancel", color_key="danger",
+                   icon_name="power", color_key="danger",
                    theme=window.config.get("theme", "light")):
             self.quit_application(); event.accept()
         else:

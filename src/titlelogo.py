@@ -60,6 +60,24 @@ def logo_path(theme: str, language: Optional[QLocale.Language] = None) -> Path:
     return LOGO_DIR / f"logo_{logo_language(language)}_{theme}.png"
 
 
+def left_padding(pixmap: QPixmap) -> int:
+    """로고 그림 왼쪽에 비어 있는 투명 여백의 폭(표시 크기 기준).
+
+    **언어마다 다르다**(30px 높이에서 ko 18 / en 7 / jp 6, 실측). 앞에 앱 심벌을 두면
+    그 여백이 그대로 심벌과 글자 사이 간격이 되어 언어마다 벌어짐이 달라 보이므로,
+    부르는 쪽이 이 값을 빼서 간격을 맞춘다.
+    """
+    if pixmap.isNull():
+        return 0
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatio() or 1.0
+    for x in range(image.width()):
+        for y in range(image.height()):
+            if image.pixelColor(x, y).alpha() > 8:
+                return int(x / ratio)
+    return 0
+
+
 def build_logo(theme: str, height: int = LOGO_HEIGHT, dpr: float = 1.0,
                language: Optional[QLocale.Language] = None) -> Optional[QPixmap]:
     """헤더에 넣을 로고 픽스맵. 없거나 못 읽으면 None이고 호출부는 글자 제목으로 돌아간다."""

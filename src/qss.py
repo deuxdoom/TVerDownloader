@@ -26,6 +26,19 @@ SIDE_MARGIN = 12
 곳에서 낸다 - QSS의 tab-bar left와 `MainWindowUI.TAB_MARGIN`이 모두 이 값을 받는다.
 """
 
+SIDE_MARGIN_WIDE = 16
+COMFORTABLE_WIDTH = 1100
+SECTION_SPACING = 12
+"""넓은 창의 여백만 늘려 작은 작업 영역의 카드 폭을 지킨다."""
+
+
+WINDOW_RADIUS = 10
+"""제목 표시줄 없는 창의 모서리 반지름. 그림자를 그리는 쪽과 QSS가 같은 값을 써야 한다.
+
+메뉴(MENU_RADIUS)와 같은 값으로 둔다 - 한 화면에 나란히 뜨는 것들이라 곡률이 다르면
+메뉴만 다른 앱에서 온 것처럼 보인다. 최대화하면 0으로 접는다(화면 모서리는 각지다).
+"""
+
 
 def blend(fg: str, bg: str, ratio: float) -> str:
     """fg를 bg 위에 ratio 만큼 섞은 색. 은은한 선택 배경을 만드는 데 쓴다."""
@@ -38,19 +51,19 @@ def palette(theme: str = "dark") -> dict:
     """테마별 컬러 토큰. QSS와 아이콘 채색이 같은 값을 쓰도록 여기서만 정의한다."""
     if theme == "light":
         colors = {
-            "bg": "#F2F4F7",
-            "bg_alt": "#E7ECF2",
+            "bg": "#F7F9FC",
+            "bg_alt": "#EEF2F8",
             "surface": "#FFFFFF",
-            "border": "#DDE3EA",
-            "border_strong": "#C4CDD8",
-            "text": "#1B2430",
-            "text_dim": "#66748A",
-            "accent": "#00808F",
-            "accent_hover": "#00707D",
-            "accent_soft": "#B9D6DB",
-            "primary": "#0FB0E6",
-            "primary_hover": "#0C9AC9",
-            "primary_press": "#0A83AB",
+            "border": "#DEE5EF",
+            "border_strong": "#BCCADC",
+            "text": "#172134",
+            "text_dim": "#59687F",
+            "accent": "#0067D9",
+            "accent_hover": "#005ABF",
+            "accent_soft": "#E3EEFC",
+            "primary": "#0067D9",
+            "primary_hover": "#005ABF",
+            "primary_press": "#004A9F",
             "primary_fg": "#FFFFFF",
             "log_success": "#00808F",
             "notice": "#A94442",
@@ -76,23 +89,24 @@ def palette(theme: str = "dark") -> dict:
             "hover_red": "#D9534F",
             "hover_yellow": "#D9A521",
             "hover_green": "#3E9E6B",
+            "hover_blue": "#2E8FD9",
         }
     else:
         colors = {
-            "bg": "#161C26",
-            "bg_alt": "#1B222D",
-            "surface": "#1E2632",
-            "border": "#2C3644",
-            "border_strong": "#3C4859",
-            "text": "#E6EBF2",
-            "text_dim": "#8A97AA",
-            "accent": "#2AB8C6",
-            "accent_hover": "#45C6D2",
-            "accent_soft": "#1B3A42",
-            "primary": "#25C8FF",
-            "primary_hover": "#52D6FF",
-            "primary_press": "#0FA9DE",
-            "primary_fg": "#04202B",
+            "bg": "#0B111B",
+            "bg_alt": "#101925",
+            "surface": "#152030",
+            "border": "#253247",
+            "border_strong": "#425773",
+            "text": "#EFF4FF",
+            "text_dim": "#9BAAC0",
+            "accent": "#70B5FF",
+            "accent_hover": "#96CAFF",
+            "accent_soft": "#183454",
+            "primary": "#4DA3FF",
+            "primary_hover": "#70B5FF",
+            "primary_press": "#2D8BEF",
+            "primary_fg": "#081D36",
             "log_success": "#3FC9D6",
             "notice": "#FF9A94",
             "warn": "#E0A93B",
@@ -117,6 +131,7 @@ def palette(theme: str = "dark") -> dict:
             "hover_red": "#FF7B74",
             "hover_yellow": "#F0C05A",
             "hover_green": "#6FD39B",
+            "hover_blue": "#6FC0F0",
         }
     return colors
 
@@ -194,8 +209,8 @@ def build_qss(theme: str = "dark") -> str:
     order_sel = blend(colors["accent"], colors["bg"], FILENAME_ROW_SELECT_MIX)
 
     about_red = blend(colors["hover_red"], colors["bg"], ABOUT_HOVER_MIX)
-    about_yellow = blend(colors["hover_yellow"], colors["bg"], ABOUT_HOVER_MIX)
     about_green = blend(colors["hover_green"], colors["bg"], ABOUT_HOVER_MIX)
+    about_blue = blend(colors["hover_blue"], colors["bg"], ABOUT_HOVER_MIX)
 
     bump = 1
     fs_title = 15 + bump
@@ -215,13 +230,42 @@ def build_qss(theme: str = "dark") -> str:
         font-family: {UI_FONT_STACK};
         font-size: {fs_body}px;
     }}
-    QMainWindow, QDialog {{ background: {colors["bg"]}; }}
+    QDialog {{ background: {colors["bg"]}; }}
+
+    /* 제목 표시줄을 뗀 대화상자 — 메인 창과 같은 짜임이다(투명한 껍데기 + 둥근 표면).
+       배경을 지우는 것을 `framed` 속성으로 좁히는 것은, 감싸지 않은 창(마지막에 뜨는
+       오류 상자)까지 투명해지면 배경 없이 글자만 뜨기 때문이다. */
+    QDialog[framed="true"] {{ background: transparent; }}
+    #DialogBody {{ background: transparent; }}
+    #DialogTitleBar {{
+        background: {colors["bg_alt"]};
+        border-bottom: 1px solid {colors["border"]};
+        border-top-left-radius: {WINDOW_RADIUS}px;
+        border-top-right-radius: {WINDOW_RADIUS}px;
+    }}
+    #DialogTitle {{ font-size: {fs_pane}px; font-weight: 600; color: {colors["text"]}; }}
+
+    /* 제목 표시줄 없는 메인 창 — 바깥 껍데기가 그림자를 그릴 자리라 투명해야 하고,
+       배경을 칠하는 것은 둥근 표면 하나뿐이다. 창이 배경을 칠하면 그림자 자리까지
+       사각형으로 덮여 모서리가 각지게 남는다. */
+    QMainWindow {{ background: transparent; }}
+    #WindowShell {{ background: transparent; }}
+    #WindowSurface {{ background: {colors["bg"]}; border-radius: {WINDOW_RADIUS}px; }}
+    #WindowSurface[window_maximized="true"] {{ border-radius: 0px; }}
 
     /* 글자 위젯은 자기 배경을 칠하지 않는다.
        위의 QWidget 규칙이 QLabel/QCheckBox에도 적용돼, 카드(surface) 위에 얹힌
        제목·상태 문구마다 창 배경색(bg) 사각형이 겹쳐 보이던 원인이다. */
     QLabel, QCheckBox, QRadioButton {{ background: transparent; }}
-    #AppHeader {{ background: {colors["bg_alt"]}; border-bottom: 1px solid {colors["border"]}; }}
+    /* 헤더는 창 맨 위라 표면과 같은 곡률로 위쪽 두 모서리를 깎는다. 안 깎으면 헤더가
+       둥근 모서리 위에 사각형으로 얹혀 표면의 곡선이 가려진다. */
+    #AppHeader {{
+        background: {colors["bg_alt"]};
+        border-bottom: 1px solid {colors["border"]};
+        border-top-left-radius: {WINDOW_RADIUS}px;
+        border-top-right-radius: {WINDOW_RADIUS}px;
+    }}
+    #AppHeader[window_maximized="true"] {{ border-top-left-radius: 0px; border-top-right-radius: 0px; }}
     #AppTitle {{ font-size: {fs_title + 2}px; font-weight: 600; color: {colors["text"]}; }}
 
     /* 버튼 — 3단계 위계 (UI_REDESIGN.md §1)
@@ -242,6 +286,9 @@ def build_qss(theme: str = "dark") -> str:
     QPushButton#PrimaryButton {{ background: {colors["primary"]}; color: {colors["primary_fg"]}; border-color: {colors["primary"]}; }}
     QPushButton#PrimaryButton:hover {{ background: {colors["primary_hover"]}; border-color: {colors["primary_hover"]}; }}
     QPushButton#PrimaryButton:pressed {{ background: {colors["primary_press"]}; border-color: {colors["primary_press"]}; }}
+    QPushButton#QueueStartButton {{ color: {colors["accent"]}; background: {blend(colors["accent"], colors["bg"], 0.08)}; border-color: {blend(colors["accent"], colors["bg"], 0.35)}; }}
+    QPushButton#QueueStartButton:hover {{ background: {colors["accent_soft"]}; border-color: {colors["accent"]}; }}
+    QPushButton#QueueStartButton:disabled {{ color: {colors["text_dim"]}; border-color: {colors["border"]}; background: transparent; }}
     /* 준비가 끝나기 전에도 같은 버튼으로 읽히도록 accent를 옅게 깔아 둔다.
        평범한 회색이면 준비 완료 순간 색이 튀어 다른 버튼처럼 보인다. */
     QPushButton#PrimaryButton:disabled {{
@@ -277,7 +324,7 @@ def build_qss(theme: str = "dark") -> str:
     /* 정보 창 왼쪽 단추 셋 — 닫기보다 한 단계 작고, 올리면 각자의 색이 든다.
        색을 달리하는 것은 세 단추가 하는 일이 서로 무관해서다. 나란히 같은
        모양으로 있으면 어느 것이 무엇인지 매번 글자를 읽어야 한다. */
-    QPushButton#AboutYouTube, QPushButton#AboutContact, QPushButton#AboutUpdate {{
+    QPushButton#AboutYouTube, QPushButton#AboutSite, QPushButton#AboutUpdate {{
         font-size: {fs_sub}px;
         padding: 4px 11px;
         border-radius: 7px;
@@ -285,8 +332,8 @@ def build_qss(theme: str = "dark") -> str:
     QPushButton#AboutYouTube:hover {{
         background: {about_red}; border-color: {colors["hover_red"]};
     }}
-    QPushButton#AboutContact:hover {{
-        background: {about_yellow}; border-color: {colors["hover_yellow"]};
+    QPushButton#AboutSite:hover {{
+        background: {about_blue}; border-color: {colors["hover_blue"]};
     }}
     QPushButton#AboutUpdate:hover {{
         background: {about_green}; border-color: {colors["hover_green"]};
@@ -306,6 +353,14 @@ def build_qss(theme: str = "dark") -> str:
     QToolButton#IconButton:hover {{ background: {colors["surface"]}; }}
     QToolButton#IconButton:pressed {{ background: {colors["border"]}; }}
     QToolButton#IconButton:checked {{ background: {colors["accent_soft"]}; }}
+    QPushButton:focus {{ border: 1px solid {colors["accent"]}; }}
+
+    /* 창 단추 — 최소화 · 최대화 · 닫기. 헤더의 다른 아이콘 단추와 같은 모양이되
+       닫기만 빨갛게 채운다(윈도우가 하는 대로). 되돌릴 수 없는 동작이라 나머지 둘과
+       같은 색으로 두면 눌러 놓고 알아채지 못한다. 글리프는 QIcon의 Active 그림이
+       흰색으로 바꿔 준다. */
+    QToolButton#IconButton[window_close="true"]:hover {{ background: {colors["hover_red"]}; }}
+    QToolButton#IconButton[window_close="true"]:pressed {{ background: {colors["danger"]}; }}
 
     /* 카드 액션 버튼 — 완료 시 노출되는 재생 / 폴더 열기 */
     QToolButton#CardActionButton {{
@@ -474,10 +529,13 @@ def build_qss(theme: str = "dark") -> str:
     QGroupBox:disabled {{ color: {colors["text_dim"]}; }}
 
     /* 설정창 좌측 세로 내비게이션 — 선택 항목에 3px accent 마커 (UI_REDESIGN.md 6항) */
+    /* 왼쪽 내비게이션은 설정 창 아래 왼쪽 모서리를 덮는다 - 같은 곡률로 깎지 않으면
+       창은 둥근데 그 자리만 사각으로 남는다(실측: 좌하 모서리만 각졌다). */
     QListWidget#SettingsNav {{
         background: {colors["bg_alt"]};
         border: none;
         border-right: 1px solid {colors["border"]};
+        border-bottom-left-radius: {WINDOW_RADIUS}px;
         padding: 8px 0px;
         outline: none;
     }}
@@ -509,8 +567,15 @@ def build_qss(theme: str = "dark") -> str:
 
     /* 세그먼트 컨트롤 — 알약 배경 안에서 선택된 항목만 떠오른다 (UI_REDESIGN.md 4항).
        QTabWidget 구조는 그대로 두고 탭 바 모양만 다시 그린다. */
-    #MainTabs::pane {{ border: none; }}
+    /* 탭 상자와 탭 장은 배경을 칠하지 않는다 - 창 아래쪽 두 모서리를 이것들이 덮고
+       있어, 칠하면 둥글게 깎아 둔 자리가 사각형으로 메워진다.
+       가상 요소(::pane)를 같은 묶음에 섞지 않는다 - 묶어 적으면 규칙이 통째로 버려져
+       탭 장이 그대로 배경을 칠했다(실측: 아래 두 모서리만 각진 채 남았다). */
+    #MainTabs, #DownloadTab, #HistoryTab, #FavoritesTab {{ background: transparent; }}
+    #MainTabs QStackedWidget {{ background: transparent; }}
+    #MainTabs::pane {{ border: none; background: transparent; }}
     #MainTabs::tab-bar {{ alignment: left; left: {SIDE_MARGIN}px; }}
+    #MainTabs[comfortable="true"]::tab-bar {{ left: {SIDE_MARGIN_WIDE}px; }}
     #MainTabs QTabBar {{
         background: transparent;
         border: none;
@@ -536,7 +601,7 @@ def build_qss(theme: str = "dark") -> str:
         background: {colors["surface"]};
         color: {colors["text"]};
     }}
-    #PaneTitle {{ font-size: {fs_pane}px; font-weight: 600; color: {colors["text"]}; }}
+    #PaneTitle {{ font-size: {fs_pane}px; font-weight: 700; color: {colors["text"]}; }}
     #PaneSubtitle {{ font-size: {fs_sub}px; font-weight: 400; color: {colors["text_dim"]}; }}
 
     /* 빈 목록 안내 — 둘 다 흐린 글자색이라 배경에 묻히고, 굵기와 크기로만 갈린다.
@@ -547,7 +612,7 @@ def build_qss(theme: str = "dark") -> str:
     /* 리스트 */
     QListWidget#DownloadList, QListWidget#HistoryList, QListWidget#FavoritesList {{
         background: {colors["bg"]};
-        border: 1px solid {colors["border"]};
+        border: 1px solid {blend(colors["border"], colors["bg"], 0.55)};
         border-radius: 8px;
         padding: 4px;
     }}
@@ -577,7 +642,7 @@ def build_qss(theme: str = "dark") -> str:
     #HistoryItem[selected="true"] {{ background: {tint_hi}; border: 1px solid {colors["ctx_history"]}; }}
     #FavoriteItem[selected="true"] {{ background: {tint_fa}; border: 1px solid {colors["ctx_favorites"]}; }}
 
-    QLabel#Title {{ font-size: {fs_card}px; font-weight: 500; color: {colors["text"]}; }}
+    QLabel#Title {{ font-size: {fs_card}px; font-weight: 600; color: {colors["text"]}; }}
     /* 선택된 행은 강조 배경 위에 놓인다. 흐린 색 그대로면 읽히지 않는다.
        다크는 near-white, 라이트는 near-black으로 제목과 같은 색이 된다. */
     QLabel#Title[selected="true"],
@@ -603,7 +668,12 @@ def build_qss(theme: str = "dark") -> str:
     #Separator {{ background: {colors["border"]}; border: none; }}
 
     /* 로그 */
-    #LogOutput {{ background: {colors["bg_alt"]}; border: 1px solid {colors["border"]}; border-radius: 8px; padding: 8px; }}
+    #LogOutput {{ background: {blend(colors["bg_alt"], colors["bg"], 0.5)}; color: {colors["text_dim"]}; border: 1px solid {blend(colors["border"], colors["bg"], 0.55)}; border-radius: 8px; padding: 10px; }}
+    #PaneToolbar, #ToolbarGroup, #SettingsScroll, #SettingsPage, #SettingsViewport {{ background: transparent; }}
+    #SettingsScroll {{ border: none; }}
+    QPushButton#NoticeBar {{ text-align: left; color: {colors["notice"]}; background: {blend(colors["notice"], colors["bg"], 0.08)}; border-color: {blend(colors["notice"], colors["bg"], 0.25)}; }}
+    QPushButton#NoticeBar[tone="danger"] {{ color: {colors["danger"]}; }}
+    QPushButton#NoticeBar[tone="log_success"] {{ color: {colors["log_success"]}; background: {blend(colors["log_success"], colors["bg"], 0.08)}; border-color: {blend(colors["log_success"], colors["bg"], 0.25)}; }}
 
     /* 스크롤바 — 기본 스크롤바는 화살표 버튼까지 달려 투박하다.
        손잡이만 남긴 얇은 막대로 바꿔 어느 목록에서든 같은 모양으로 보이게 한다.

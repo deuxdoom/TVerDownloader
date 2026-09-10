@@ -484,8 +484,9 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     error_box.exec()
 
 
-def open_feedback_link():
-    webbrowser.open("https://github.com/deuxdoom/TVerDownloader/issues")
+def open_site_link():
+    """공식 소개 페이지를 연다. 받는 법과 쓰는 법이 한자리에 정리된 곳이다."""
+    webbrowser.open("https://deuxdoom.github.io/TVerDownloader/")
 
 
 def open_developer_link():
