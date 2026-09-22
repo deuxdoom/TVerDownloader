@@ -33,6 +33,13 @@ class TrayController:
         self._timer = QTimer(window)
         self._timer.setInterval(self.TRAY_SYNC_INTERVAL_MS)
         self._timer.timeout.connect(self._sync)
+        self._minimize_timer = QTimer(window)
+        self._minimize_timer.setSingleShot(True)
+        self._minimize_timer.timeout.connect(self._finish_minimized)
+        self._notice_timer = QTimer(window)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(self._notify_hidden)
+        self._hide_notice_shown = False
 
     def on_queue_changed(self, queued: int, active: int):
         """대기·진행 개수가 바뀌면 화면 라벨과 트레이를 함께 맞춘다."""
@@ -88,12 +95,26 @@ class TrayController:
                                      window.windowIcon(), 5000)
 
     def handle_minimized(self):
-        """최소화를 트레이로 내려가는 동작으로 바꾼다.
+        """트레이로 바로 숨겨 Windows 최소화와 숨김이 연달아 창 상태를 바꾸지 않게 한다."""
+        self._minimize_timer.stop()
+        self.window.hide()
+        if not self._hide_notice_shown:
+            self._notice_timer.start(0)
 
-        Qt의 최소화 상태로 남으면 대화상자가 그 창을 부모로 삼을 때 자리 계산이 되지 않는다.
-        """
+    def schedule_minimized(self):
+        """운영체제에서 온 최소화는 Qt의 상태 전환이 끝나야 안전하게 숨길 수 있다."""
+        self._minimize_timer.start(0)
+
+    def _finish_minimized(self):
+        if self.window.isMinimized():
+            self.handle_minimized()
+
+    def _notify_hidden(self):
+        """동기 셸 호출을 창 전환 밖으로 미루고 같은 안내를 실행 중 한 번만 보낸다."""
         window = self.window
-        window.hide()
+        if not window.isHidden() or window.force_quit or self._hide_notice_shown:
+            return
+        self._hide_notice_shown = True
         window.tray_icon.showMessage(localized_app_name(), t("dialog.tray_minimized"),
                                      window.windowIcon(), 2000)
 
@@ -105,9 +126,8 @@ class TrayController:
         window = self.window
         if window.force_quit: event.accept(); return
         if window.config.get("close_action", "exit") == "tray":
-            event.ignore(); window.hide()
-            window.tray_icon.showMessage(localized_app_name(), t("dialog.tray_minimized"),
-                                         window.windowIcon(), 2000)
+            event.ignore()
+            self.handle_minimized()
             return
         if confirm(window, t("dialog.quit_title"), t("dialog.quit_body"),
                    icon_name="power", color_key="danger",

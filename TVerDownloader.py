@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
             lambda: run_dialog(AboutDialog(APP_VERSION, self, self.config.get("theme", "light"))))
         self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
         self.ui.tools_update_button.clicked.connect(self.update_tools)
-        self.ui.min_button.clicked.connect(self.showMinimized)
+        self.ui.min_button.clicked.connect(self.tray.handle_minimized)
         self.ui.max_button.clicked.connect(self.ui.toggle_maximized)
         self.ui.close_button.clicked.connect(self.close)
         self.ui.theme_button.clicked.connect(self.toggle_theme)
@@ -785,14 +785,10 @@ class MainWindow(QMainWindow):
         except Exception as e: self.append_log(t("log.play_failed", error=e))
 
     def changeEvent(self, event):
-        """Qt가 창에만 보내는 이벤트라 여기서 받아 트레이와 창 모양 쪽으로 넘긴다.
-
-        최소화는 트레이로 내려가는 길이라 그 자리에서 끝낸다 - 이어서 최대화 여부를
-        물으면 내려간 창의 상태를 읽어 모서리와 단추를 엉뚱하게 되돌린다.
-        """
+        """상태 전환 도중 숨기면 Qt가 다시 보이게 하므로 전환이 끝난 뒤 트레이로 보낸다."""
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
-            self.tray.handle_minimized()
+            self.tray.schedule_minimized()
 
     def nativeEvent(self, event_type, message):
         """윈도우가 보낸 최대화·복원 지시를 우리 쪽 최대화로 바꿔 받는다.
