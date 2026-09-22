@@ -3,7 +3,7 @@ import subprocess
 from typing import List, Dict, Optional, Any
 from PyQt6.QtCore import QObject, QDeadlineTimer, pyqtSignal
 
-from src.threads.download_thread import DownloadThread
+from src.threads.download_thread import DownloadThread, VIDEO_CODEC_KEY
 from src.threads.conversion_thread import ConversionThread
 from src.history_store import HistoryStore
 from src.metadata_prefetch import MetadataPrefetcher
@@ -149,6 +149,19 @@ class DownloadManager(QObject):
                 break
         self._update_queue_counter()
         return len(threads)
+
+    def running_count(self) -> int:
+        """지금 yt-dlp나 ffmpeg를 붙잡고 있거나 곧 붙잡을 항목 수(받는 중·변환 중·변환 차례).
+
+        도구를 갈아 끼워도 되는지 가르는 데 쓴다. 대기 중인 것은 세지 않는다 - 교체하는 동안
+        입력을 잠그므로 새로 시작하지 않는다.
+        """
+        return (len(self._active_threads) + len(self._active_conversions)
+                + len(self._conversion_queue))
+
+    def suspend_prefetch(self):
+        """도구를 갈아 끼우는 동안 미리 묻기를 멈춘다. set_paths가 다시 이어 준다."""
+        self._prefetch.suspend()
 
     def set_paths(self, ytdlp_path: str, ffmpeg_path: str):
         self.ytdlp_path = ytdlp_path; self.ffmpeg_path = ffmpeg_path
@@ -369,7 +382,7 @@ class DownloadManager(QObject):
             self._check_completion()
             return
 
-        current_codec = self._get_video_codec(final_filepath)
+        current_codec = (metadata or {}).get(VIDEO_CODEC_KEY) or self._get_video_codec(final_filepath)
 
         codec_map = {'avc': 'h264', 'hevc': 'hevc'}
         target_codec = codec_map.get(preferred_codec_key)

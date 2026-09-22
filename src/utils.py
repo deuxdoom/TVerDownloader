@@ -141,22 +141,28 @@ FINISHED_STATUSES = {STATUS_DONE, NO_AUDIO_STATUS}
 
 
 TVER_URL_RE = re.compile(
-    r"^https?://(?:www\.)?tver\.jp/(?:episodes|series)/[A-Za-z0-9_-]+(?:[/?#]\S*)?$",
+    r"^(?:https?://)?(?:www\.)?tver\.jp/(?:episodes|series)/[A-Za-z0-9_-]+(?:[/?#]\S*)?$",
     re.IGNORECASE)
-"""클립보드에서 받아들일 TVer 주소.
+"""받아들일 TVer 주소. 에피소드와 시리즈만, 전체 일치로 본다 - 주소가 섞인 긴 글에 멋대로 반응하지 않게.
 
-에피소드와 시리즈만, 전체 일치로 본다 - 주소가 섞인 긴 글에 멋대로 반응하지 않게.
+**체계(`https://`)는 없어도 된다**(4.3.0). 크롬 주소창에서 끌어오면 `tver.jp/episodes/...`로
+오는데, 예전에는 그것을 주소로 보지 않아 드롭도 입력도 막혔다(사용자 신고, 2026-09-22).
+호스트와 경로까지 전체 일치로 보므로 `memo.txt` 같은 글이 섞여 들어올 틈은 없다.
 """
+
+SCHEME_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 def match_tver_url(text: str) -> Optional[str]:
-    """텍스트가 TVer 주소면 다듬어 돌려주고, 아니면 None."""
+    """텍스트가 TVer 주소면 다듬어 돌려주고, 아니면 None. 체계가 빠졌으면 `https://`를 붙인다."""
     candidate = (text or "").strip()
-    return candidate if TVER_URL_RE.match(candidate) else None
+    if not TVER_URL_RE.match(candidate):
+        return None
+    return candidate if SCHEME_RE.match(candidate) else "https://" + candidate
 
 
 TVER_ID_RE = re.compile(
-    r"^https?://(?:www\.)?tver\.jp/(episodes|series)/([A-Za-z0-9_-]+)", re.IGNORECASE)
+    r"^(?:https?://)?(?:www\.)?tver\.jp/(episodes|series)/([A-Za-z0-9_-]+)", re.IGNORECASE)
 """TVer 주소에서 종류와 ID만 뽑는다. 뒤에 붙은 쿼리·프래그먼트는 보지 않는다."""
 
 
@@ -189,8 +195,16 @@ MEDIA_URL_RE = re.compile(
 
 
 def is_media_url(text: str) -> bool:
-    """yt-dlp에 넘겨 볼 만한 주소인지."""
-    return bool(MEDIA_URL_RE.match((text or "").strip()))
+    """yt-dlp에 넘겨 볼 만한 주소인지. TVer 주소만 체계가 없어도 받는다(`match_tver_url`)."""
+    return bool(MEDIA_URL_RE.match((text or "").strip())) or match_tver_url(text) is not None
+
+
+def normalize_input_url(text: str) -> str:
+    """입력으로 들어온 주소를 넘길 모양으로. 체계가 빠진 TVer 주소에 `https://`를 붙인다.
+
+    다른 사이트는 손대지 않는다 - 그쪽은 is_media_url이 체계를 요구해 여기까지 오지 않는다.
+    """
+    return match_tver_url(text) or (text or "").strip()
 
 
 def resolve_ffprobe_path(ffmpeg_path: str):

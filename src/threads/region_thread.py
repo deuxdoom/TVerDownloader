@@ -13,10 +13,23 @@ from __future__ import annotations
 
 from typing import Optional
 
-import requests
 from PyQt6.QtCore import QMutex, QThread, QWaitCondition, pyqtSignal
 
 from src.i18n import t
+
+requests = None
+"""처음 물어볼 때 들여온다(`_requests`). 시작할 때 들여오면 창이 뜨기 전에 60ms를 더 쓴다(실측).
+
+모듈 이름으로 들고 있는 것은 검사가 이 자리에 대역을 넣기 때문이다 - 넣어 둔 것이 있으면 그것을 쓴다.
+"""
+
+
+def _requests():
+    global requests
+    if requests is None:
+        import requests as module
+        requests = module
+    return requests
 
 TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 """국가를 물어보는 곳. 무료 티어를 둔 상품이 아니라 Cloudflare가 프록시 사이트마다 깔아
@@ -157,7 +170,7 @@ class RegionCheckThread(QThread):
         않고 넘어간다.
         """
         try:
-            with requests.get(TRACE_URL, headers={"User-Agent": USER_AGENT},
+            with _requests().get(TRACE_URL, headers={"User-Agent": USER_AGENT},
                               timeout=TIMEOUT, stream=True) as response:
                 if response.status_code != 200:
                     return None

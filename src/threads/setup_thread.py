@@ -3,15 +3,51 @@ import shutil
 import zipfile
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
-import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.i18n import t
 from src.utils import github_api_headers, is_rate_limited, rate_limit_message
 
+
+def describe_network_error(error: BaseException, host: str) -> str:
+    """통신 예외를 사람이 읽을 한 줄로 줄인다. 예외 원문은 로그에 싣지 않는다.
+
+    requests는 `HTTPSConnectionPool(host=..., port=443): Max retries exceeded ...
+    (Caused by NameResolutionError(...))`처럼 두 줄 가까운 원문을 내놓아, 인터넷이 끊겼다는
+    한마디가 그 안에 묻혔다(사용자 지적, 2026-09-22). 종류만 가르고 원문은 버린다.
+    """
+    import requests
+
+    text = str(error)
+    if isinstance(error, requests.exceptions.SSLError):
+        return t("setup.net_ssl", host=host)
+    if isinstance(error, requests.exceptions.Timeout):
+        return t("setup.net_timeout", host=host)
+    if ("NameResolutionError" in text or "getaddrinfo failed" in text
+            or "Name or service not known" in text or "11001" in text):
+        return t("setup.net_dns", host=host)
+    if isinstance(error, requests.exceptions.ConnectionError):
+        return t("setup.net_connect", host=host)
+    return t("setup.net_other", host=host, name=type(error).__name__)
+
+
+def is_unreachable(error: BaseException) -> bool:
+    """서버 쪽 문제가 아니라 이쪽 회선이 닿지 않는 실패인가. 그렇다면 다음 확인도 실패한다."""
+    import requests
+
+    return isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+
+
 class SetupThread(QThread):
-    """yt-dlp와 ffmpeg 실행 파일 경로를 찾아 준비 상태를 알리는 스레드."""
+    """yt-dlp와 ffmpeg 실행 파일 경로를 찾아 준비 상태를 알리는 스레드.
+
+    **받아 둔 것이 있으면 새 버전 확인은 덤이다.** 켤 때 인터넷이 없으면 예전에는 도구마다
+    3초·6초를 쉬며 다시 걸어, 그동안 입력이 잠긴 채 로그에 예외 원문이 쌓였다. 지금은 한 번
+    물어보고 안 되면 쓰던 것으로 곧장 넘어간다. 다시 거는 것은 파일이 없을 때와 사용자가
+    직접 업데이트를 누른 때뿐이다(`manual`).
+    """
     log = pyqtSignal(str)
     finished = pyqtSignal(bool, str, str)
 
@@ -24,6 +60,13 @@ class SetupThread(QThread):
     API_USER_AGENT = "TVerDownloader-Setup"
     API_MAX_ATTEMPTS = 3
     API_RETRY_BASE_DELAY = 3
+    API_TIMEOUT = (5, 10)
+    """(연결, 읽기) 제한 시간. 연결을 짧게 두는 것은 응답 없는 회선에서 준비가 오래 묶이지 않게 하려는 것이다."""
+
+    def __init__(self, parent=None, manual: bool = False):
+        super().__init__(parent)
+        self.manual = manual
+        self._unreachable = False
 
     def run(self):
         try:
@@ -37,22 +80,33 @@ class SetupThread(QThread):
             self.log.emit(t("setup.fatal", error=e))
             self.finished.emit(False, "", "")
 
-    def _get_api_info(self, url: str) -> Optional[dict]:
+    def _get_api_info(self, url: str, required: bool = True) -> Optional[dict]:
         """GitHub 릴리스 정보를 받아 온다. 실패하면 None.
 
         raise_for_status()로 묶으면 한도 초과가 네트워크 오류와 구분되지 않아, 풀리지도
         않을 상태를 붙잡고 재시도하게 된다. 그래서 상태 코드를 먼저 갈라 본다.
+        `required`는 받아 둔 파일이 없어 이 답이 꼭 있어야 한다는 뜻이다.
         """
+        import requests
+
+        if self._unreachable and not required:
+            self.log.emit(t("setup.skip_unreachable"))
+            return None
+        host = urlparse(url).hostname or url
+        attempts = self.API_MAX_ATTEMPTS if (required or self.manual) else 1
         headers = github_api_headers(self.API_USER_AGENT)
 
-        for attempt in range(1, self.API_MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             try:
-                response = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(url, headers=headers, timeout=self.API_TIMEOUT)
             except requests.exceptions.RequestException as e:
-                if not self._retry_pause(attempt, t("setup.call_failed", error=e)):
-                    self.log.emit(t("setup.api_failed", error=e))
-                    return None
-                continue
+                reason = describe_network_error(e, host)
+                if attempt < attempts:
+                    self._retry_pause(attempt, attempts, reason)
+                    continue
+                self._unreachable = is_unreachable(e)
+                self.log.emit(t("setup.api_failed", error=reason))
+                return None
 
             if is_rate_limited(response):
                 self.log.emit(t("setup.api_error_prefix", message=rate_limit_message(response)))
@@ -65,25 +119,21 @@ class SetupThread(QThread):
                     self.log.emit(t("setup.api_parse_failed", error=e))
                     return None
 
-            if response.status_code < 500:
+            if response.status_code < 500 or attempt >= attempts:
                 self.log.emit(t("setup.api_status", status=response.status_code))
                 return None
 
-            if not self._retry_pause(attempt, t("setup.server_error", status=response.status_code)):
-                self.log.emit(t("setup.api_status", status=response.status_code))
-                return None
+            self._retry_pause(attempt, attempts,
+                              t("setup.server_error", status=response.status_code))
 
         return None
 
-    def _retry_pause(self, attempt: int, reason: str) -> bool:
-        """재시도 여지가 남았으면 지수 백오프만큼 쉬고 True. 마지막 시도였으면 쉬지 않고 False."""
-        if attempt >= self.API_MAX_ATTEMPTS:
-            return False
+    def _retry_pause(self, attempt: int, attempts: int, reason: str):
+        """지수 백오프만큼 쉰다. 마지막 시도 뒤에는 부르지 않는다."""
         delay = self.API_RETRY_BASE_DELAY * (2 ** (attempt - 1))
         self.log.emit(t("setup.retry_in", reason=reason, seconds=delay,
-                        attempt=attempt + 1, total=self.API_MAX_ATTEMPTS))
+                        attempt=attempt + 1, total=attempts))
         self.msleep(delay * 1000)
-        return True
 
     def _download_headers(self) -> dict:
         """에셋 내려받기용 헤더. 파일을 받는 요청이라 JSON Accept는 붙이지 않는다."""
@@ -103,6 +153,8 @@ class SetupThread(QThread):
         ffmpeg 쪽(_download_and_unzip)은 이렇게 하지 않아도 된다 - 임시 폴더에 받고
         다음 실행에서 그 폴더를 통째로 지우므로 잘린 zip이 남지 않는다.
         """
+        import requests
+
         self.log.emit(t("setup.download_start", url=url))
         target_path.parent.mkdir(parents=True, exist_ok=True)
         partial = target_path.with_name(target_path.name + self.PARTIAL_SUFFIX)
@@ -123,6 +175,8 @@ class SetupThread(QThread):
         return True
 
     def _download_and_unzip(self, url: str, target_dir: Path, file_name: str) -> bool:
+        import requests
+
         target_dir.mkdir(parents=True, exist_ok=True)
         zip_path = target_dir / file_name
         self.log.emit(t("setup.download_start", url=url))
@@ -140,14 +194,21 @@ class SetupThread(QThread):
             pass
         return True
 
+    def _keep_installed(self, path: Path, name: str) -> Optional[Path]:
+        """새 버전을 못 받았을 때 쓰던 것으로 넘어간다. 없으면 None."""
+        if path.exists():
+            self.log.emit(t("setup.keep_installed", name=name))
+            return path
+        return None
+
     def _update_ytdlp(self) -> Optional[Path]:
         self.log.emit(t("setup.ytdlp_check"))
         ytdlp_exe_path = self.BIN_DIR / "yt-dlp.exe"
         version_file = self.BIN_DIR / "ytdlp_version.txt"
 
-        info = self._get_api_info(self.YTDLP_API_URL)
+        info = self._get_api_info(self.YTDLP_API_URL, required=not ytdlp_exe_path.exists())
         if not info:
-            return ytdlp_exe_path if ytdlp_exe_path.exists() else None
+            return self._keep_installed(ytdlp_exe_path, "yt-dlp")
 
         latest = info.get("tag_name")
         current = version_file.read_text().strip() if version_file.exists() else None
@@ -163,9 +224,15 @@ class SetupThread(QThread):
             self.log.emit(t("setup.ytdlp_no_asset"))
             return ytdlp_exe_path if ytdlp_exe_path.exists() else None
 
-        if self._download_and_place(asset["browser_download_url"], ytdlp_exe_path):
-            version_file.write_text(latest or "")
-            self.log.emit(t("setup.ytdlp_done"))
+        try:
+            self._download_and_place(asset["browser_download_url"], ytdlp_exe_path)
+        except Exception as error:
+            if not ytdlp_exe_path.exists():
+                raise
+            self.log.emit(t("setup.ytdlp_replace_failed", error=error))
+            return ytdlp_exe_path
+        version_file.write_text(latest or "")
+        self.log.emit(t("setup.ytdlp_done"))
         return ytdlp_exe_path
 
     def _update_ffmpeg(self) -> Optional[Path]:
@@ -179,15 +246,16 @@ class SetupThread(QThread):
         ffmpeg_exe_path = self.BIN_DIR / "ffmpeg.exe"
         ffprobe_exe_path = self.BIN_DIR / "ffprobe.exe"
         version_file = self.BIN_DIR / "ffmpeg_version.txt"
+        installed = ffmpeg_exe_path.exists() and ffprobe_exe_path.exists()
 
-        info = self._get_api_info(self.FFMPEG_API_URL)
+        info = self._get_api_info(self.FFMPEG_API_URL, required=not installed)
         if not info:
-            return ffmpeg_exe_path if ffmpeg_exe_path.exists() and ffprobe_exe_path.exists() else None
+            return self._keep_installed(ffmpeg_exe_path, "FFmpeg") if installed else None
 
         latest = info.get("tag_name")
         current = version_file.read_text().strip() if version_file.exists() else None
 
-        if latest == current and ffmpeg_exe_path.exists() and ffprobe_exe_path.exists():
+        if latest == current and installed:
             self.log.emit(t("setup.ffmpeg_up_to_date", version=latest))
             return ffmpeg_exe_path
 
@@ -205,8 +273,13 @@ class SetupThread(QThread):
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
 
-        if not self._download_and_unzip(asset["browser_download_url"], temp_dir, asset["name"]):
-            return ffmpeg_exe_path if ffmpeg_exe_path.exists() else None
+        try:
+            self._download_and_unzip(asset["browser_download_url"], temp_dir, asset["name"])
+        except Exception as error:
+            if not installed:
+                raise
+            self.log.emit(t("setup.ffmpeg_replace_failed", error=error))
+            return ffmpeg_exe_path
 
         extracted_root = next((p for p in temp_dir.iterdir() if p.is_dir()), None)
         if not extracted_root:

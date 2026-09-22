@@ -26,6 +26,10 @@ class SeriesParser(QObject):
     def set_ytdlp_path(self, path: str):
         self.ytdlp_path = path
 
+    def is_busy(self) -> bool:
+        """분석이 돌고 있거나 줄에 남아 있다. 도구를 갈아 끼워도 되는지 가를 때 본다."""
+        return self._thread is not None or bool(self._queue)
+
     def update_config(self, config: Dict):
         self.config = config
 

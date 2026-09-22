@@ -86,6 +86,23 @@ class MetadataPrefetcher(QObject):
         if url == self._current and self._thread is not None:
             self._thread.stop()
 
+    def suspend(self):
+        """yt-dlp를 갈아 끼우는 동안 묻기를 멈춘다. 묻던 것은 줄 맨 앞으로 되돌린다.
+
+        **도는 질의가 yt-dlp.exe를 붙잡고 있으면 교체가 막힌다.** 다시 set_ytdlp_path가
+        불리면 그 자리부터 이어서 묻는다.
+        """
+        self.ytdlp_path = None
+        url, thread = self._current, self._thread
+        if thread is None:
+            return
+        self._thread = None
+        self._current = None
+        thread.stop()
+        thread.wait(QDeadlineTimer(self.STOP_WAIT_MS))
+        if url and url not in self._pending:
+            self._pending.insert(0, url)
+
     def stop_all(self):
         """앱을 끝낼 때 부른다. 담아 둔 것을 버리고 도는 질의를 거둔다."""
         self._shutting_down = True

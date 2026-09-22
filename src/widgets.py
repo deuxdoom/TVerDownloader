@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os
-from pathlib import Path
 from typing import Optional, Dict
 
 from PyQt6 import sip
@@ -17,11 +16,11 @@ from PyQt6.QtWidgets import (
 from src.icons import get_icon
 from src.i18n import t
 from src.qss import blend, palette
-from src.window_frame import apply_dialog_frame
-from src.thumbnails import (THUMBNAIL_CACHE_DIR, ThumbnailDownloader,
-                            cached_thumbnail, discard_thumbnail_requests,
-                            rounded_thumbnail, start_thumbnail_download,
-                            write_thumbnail_cache)
+from src.window_frame import apply_dialog_frame, run_dialog
+from src.thumbnails import (ThumbnailDownloader, cache_key_for,
+                            discard_thumbnail_requests, lookup_thumbnail,
+                            original_path, remember_thumbnail,
+                            start_thumbnail_download)
 from src.utils import (ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS,
                        format_duration, item_percent,
                        STATUS_QUEUED, STATUS_DOWNLOADING,
@@ -136,12 +135,26 @@ class EmptyStateOverlay(QWidget):
         self.icon_label.setPixmap(icon.pixmap(QSize(self.ICON_SIZE, self.ICON_SIZE),
                                               self.devicePixelRatioF()))
 
+    def set_messages(self, title: str, description: str,
+                     filtered_title: str = "", filtered_description: str = ""):
+        """언어를 바꾼 뒤 문구를 갈아 끼운다. 검색으로 비었는지는 그대로 둔다."""
+        self._messages = {
+            False: (title, description),
+            True: (filtered_title or title, filtered_description or description),
+        }
+        self._show_messages()
+
     def set_filtered(self, filtered: bool):
         """검색으로 걸러져 빈 것인지 알려 준다. 기록·즐겨찾기는 검색 때 목록을 새로 채운다."""
         if self._filtered == filtered:
             return
         self._filtered = filtered
-        title, description = self._messages[filtered]
+        self._show_messages()
+
+    def _show_messages(self):
+        if not self._usable():
+            return
+        title, description = self._messages[self._filtered]
         self.title_label.setText(title)
         self.description_label.setText(description)
         self._fit()
@@ -349,11 +362,11 @@ class ThumbnailCard(QWidget):
         super().__init__(parent)
         self.url = url
         self._thumb_url: Optional[str] = None
-        self._cache_path: Optional[Path] = None
+        self._cache_key: str = ""
         self._thumb_downloader: Optional[ThumbnailDownloader] = None
 
     def load_thumbnail(self, url: str, cache_key: str = ""):
-        """캐시에 있으면 그것을 얹고, 없으면 받아 온다. 주소를 걸어 두는 곳도 여기다.
+        """메모리·작은 사본에 있으면 곧바로 얹고, 없으면 작업 스레드에 맡긴다.
 
         주소가 비어도 걸어 둔 것은 지운다 - 남겨 두면 앞선 요청이 뒤늦게 돌아왔을 때
         이미 갈아탄 카드에 옛 그림이 붙는다.
@@ -361,13 +374,15 @@ class ThumbnailCard(QWidget):
         self._thumb_url = url or None
         if not url:
             return
-        if cache_key:
-            self._cache_path = THUMBNAIL_CACHE_DIR / f"{cache_key}.jpg"
-            cached = cached_thumbnail(self._cache_path)
-            if cached is not None:
-                self._apply_thumbnail(cached)
-                return
-        self._thumb_downloader = start_thumbnail_download(url, self._on_thumb_finished)
+        self._cache_key = cache_key_for(cache_key, url)
+        width, height = self.THUMB_SIZE
+        pixmap = lookup_thumbnail(self._cache_key, width, height,
+                                  self.devicePixelRatioF(), self.THUMB_CORNER)
+        if pixmap is not None:
+            self._apply_thumbnail(pixmap)
+            return
+        self._thumb_downloader = start_thumbnail_download(url, self._on_thumb_finished,
+                                                          self._cache_key)
 
     def _url_tail(self) -> str:
         """주소 끝 토막. 캐시 이름과 시리즈 판별이 이것으로 갈린다.
@@ -392,31 +407,31 @@ class ThumbnailCard(QWidget):
             pass
 
     def _on_thumb_finished(self, result: tuple):
-        """받아 온 것을 그림으로 읽어 보고, 읽히는 것만 캐시에 남긴다.
+        """작업 스레드가 만든 작은 그림을 얹는다. 그림으로 읽히지 않은 응답은 image가 None이다.
 
         사라진 영상 자리에 오류 쪽지가 200으로 오는 일이 있다(VPN 중간 페이지도 그렇다).
-        그대로 적어 두면 파일이 있다는 이유로 다시 받지 않아 빈 카드가 굳는다.
+        그것을 캐시에 적지 않는 일은 스레드가 이미 했다.
         """
         try:
-            url, data = result
+            url, data, image = result
         except (TypeError, ValueError):
             return
-        if url != self._thumb_url or not data:
+        if url != self._thumb_url or image is None or image.isNull():
             return
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(data):
-            return
-        write_thumbnail_cache(self._cache_path, data)
-        self._apply_thumbnail(pixmap)
+        self._keep_source(data)
+        width, height = self.THUMB_SIZE
+        self._apply_thumbnail(remember_thumbnail(self._cache_key, image, width, height,
+                                                 self.devicePixelRatioF(), self.THUMB_CORNER))
+
+    def _keep_source(self, data: Optional[bytes]):
+        """원본을 다시 볼 일이 있는 카드만 재정의한다. 목록 카드는 작은 그림이면 충분하다."""
 
     def _apply_thumbnail(self, pixmap: QPixmap):
-        """모서리를 둥글려 라벨에 얹는다. 라벨이 이미 헐렸을 수 있다."""
+        """완성본을 라벨에 얹는다. 라벨이 이미 헐렸을 수 있다."""
         if pixmap is None or pixmap.isNull():
             return
-        width, height = self.THUMB_SIZE
         try:
-            self.thumb_label.setPixmap(rounded_thumbnail(
-                pixmap, width, height, self.devicePixelRatioF(), self.THUMB_CORNER))
+            self.thumb_label.setPixmap(pixmap)
         except RuntimeError:
             pass
 
@@ -435,7 +450,11 @@ class DownloadItemWidget(ThumbnailCard):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.status: str = STATUS_QUEUED
         self.final_filepath: Optional[str] = None
-        self._orig_thumb_pm: Optional[QPixmap] = None
+        self._thumb_data: Optional[bytes] = None
+        self._has_thumb = False
+        self._title_known = False
+        self._duration = None
+        self._status_detail: Dict[str, str] = {}
         self._colors = palette(theme)
         self._selected = False
 
@@ -570,15 +589,30 @@ class DownloadItemWidget(ThumbnailCard):
             self.play_requested.emit(self.final_filepath)
         super().mouseDoubleClickEvent(event)
 
+    def has_thumbnail(self) -> bool:
+        """원본을 꺼낼 수 있는가. 메뉴를 열 때마다 원본을 풀지 않으려고 따로 둔다."""
+        return self._has_thumb and (self._thumb_data is not None
+                                    or original_path(self._cache_key).exists())
+
     def thumbnail_pixmap(self) -> Optional[QPixmap]:
-        """저장에 쓸 원본 썸네일. 카드가 그리는 것은 모서리를 둥글린 축소본이라 따로 내준다."""
-        if self._orig_thumb_pm is None or self._orig_thumb_pm.isNull():
+        """저장·확대에 쓸 원본. **필요할 때 푼다.**
+
+        예전에는 카드마다 원본(1280x720, 3.7MB)을 풀어 들고 있어 쉰 개면 180MB였다.
+        캐시에 적힌 것은 파일에서, 적지 못한 것만 받아 둔 바이트에서 읽는다.
+        """
+        if not self.has_thumbnail():
             return None
-        return self._orig_thumb_pm
+        pixmap = QPixmap()
+        if self._thumb_data is not None:
+            pixmap.loadFromData(self._thumb_data)
+        else:
+            pixmap.load(str(original_path(self._cache_key)))
+        return None if pixmap.isNull() else pixmap
 
     def _on_thumb_clicked(self, event):
-        if self._orig_thumb_pm and not self._orig_thumb_pm.isNull():
-            ImagePreviewDialog(self._orig_thumb_pm, self, self._theme).exec()
+        pixmap = self.thumbnail_pixmap()
+        if pixmap is not None:
+            run_dialog(ImagePreviewDialog(pixmap, self, self._theme))
 
     def _animate_progress(self, target: int):
         target = max(0, min(100, int(target)))
@@ -614,14 +648,43 @@ class DownloadItemWidget(ThumbnailCard):
         빈 라벨을 남겨 두면 그 폭만큼 단추가 안쪽으로 밀려, 길이를 아는 카드와 모르는
         카드에서 단추 자리가 어긋난다.
         """
+        self._duration = seconds
         text = format_duration(seconds)
         self.duration_label.setText(text)
         self.duration_label.setVisible(bool(text))
 
+    def _status_text(self) -> str:
+        """지금 상태를 지금 언어로. 받는 속도 같은 자세한 값은 마지막 진행 보고의 것이다."""
+        detail = self._status_detail
+        if self.status == STATUS_DOWNLOADING:
+            speed, eta = detail.get("speed", ""), detail.get("eta", "")
+            text = (t("status.downloading_detail", speed=speed, eta=eta)
+                    if speed and eta else t("status.downloading_ellipsis"))
+            component = detail.get("component", "")
+            return (t("status.downloading_with_component", component=component, detail=text)
+                    if component else t("status.downloading", detail=text))
+        if self.status == STATUS_CONVERTING:
+            return t("status.converting", codec=detail.get("codec", ""))
+        return _status_label(self.status)
+
+    def retranslate(self):
+        """언어를 바꾼 뒤 카드 문구를 다시 넣는다.
+
+        '비디오 다운로드 중'의 구성 요소 이름은 다운로드 스레드가 번역해 보내므로 다음 진행
+        보고(1초 안쪽)에 새 언어로 바뀐다.
+        """
+        if not self._title_known:
+            self.title_label.setText(t("card.title_loading"))
+        self.status_label.setText(self._status_text())
+        self.play_btn.setToolTip(t("card.play_tooltip"))
+        self.folder_btn.setToolTip(t("card.folder_open_tooltip"))
+        self.set_duration(self._duration)
+
     def update_progress(self, payload: dict):
         if "thumbnail" in payload and payload["thumbnail"] != self._thumb_url:
-            self.load_thumbnail(payload["thumbnail"] or "")
+            self.load_thumbnail(payload["thumbnail"] or "", self._url_tail())
         if payload.get("title"):
+            self._title_known = True
             self.title_label.setText(payload["title"])
         if "duration" in payload:
             self.set_duration(payload["duration"])
@@ -634,18 +697,9 @@ class DownloadItemWidget(ThumbnailCard):
 
         if "status" in payload:
             self.status = payload["status"]
-            if self.status == STATUS_DOWNLOADING:
-                speed = payload.get("speed", "")
-                eta = payload.get("eta", "")
-                detail = (t("status.downloading_detail", speed=speed, eta=eta)
-                          if speed and eta else t("status.downloading_ellipsis"))
-                status_text = (t("status.downloading_with_component", component=component, detail=detail)
-                               if component else t("status.downloading", detail=detail))
-            elif self.status == STATUS_CONVERTING:
-                status_text = t("status.converting", codec=payload.get("codec", ""))
-            else:
-                status_text = _status_label(self.status)
-            self.status_label.setText(status_text)
+            self._status_detail = {"speed": payload.get("speed", ""), "eta": payload.get("eta", ""),
+                                   "component": component or "", "codec": payload.get("codec", "")}
+            self.status_label.setText(self._status_text())
 
             state_prop = "active"
             if self.status == STATUS_DONE:
@@ -671,9 +725,13 @@ class DownloadItemWidget(ThumbnailCard):
         self._progress_anim.stop()
         super().cleanup()
 
+    def _keep_source(self, data: Optional[bytes]):
+        """캐시에 적히지 못한 원본만 바이트로 든다. 적힌 것은 파일에서 다시 읽는다."""
+        self._thumb_data = (data if data and not original_path(self._cache_key).exists()
+                            else None)
+
     def _apply_thumbnail(self, pixmap: QPixmap):
-        """원본을 따로 든다. 눌러 크게 볼 때와 저장할 때 쓰는 것이 축소본이 아니라 이 그림이다."""
-        self._orig_thumb_pm = pixmap
+        self._has_thumb = pixmap is not None and not pixmap.isNull()
         super()._apply_thumbnail(pixmap)
 
 

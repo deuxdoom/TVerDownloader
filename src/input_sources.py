@@ -12,9 +12,10 @@ from typing import List, Optional
 from PyQt6.QtGui import QGuiApplication
 
 from src.i18n import t
-from src.utils import is_media_url, match_tver_url
+from src.utils import is_media_url, match_tver_url, normalize_input_url
 from src.message import notify
 from src.bulk_dialog import BulkAddDialog
+from src.window_frame import run_dialog
 
 
 class InputSources:
@@ -141,7 +142,7 @@ class InputSources:
         if not is_media_url(url):
             self._notify_bad_url(t("dialog.bad_url_title"), t("dialog.bad_url_lead"), [url])
             return
-        self.process_url(url); window.ui.url_input.clear()
+        self.process_url(normalize_input_url(url)); window.ui.url_input.clear()
 
     def process_url(self, url: str):
         window = self.window
@@ -171,13 +172,13 @@ class InputSources:
                                theme=window.config.get("theme", "light"))
         self._bulk_dialog = dialog
         try:
-            accepted = dialog.exec()
+            accepted = run_dialog(dialog)
         finally:
             self._bulk_dialog = None
         if accepted:
             urls = dialog.get_urls()
             rejected = [u for u in urls if not is_media_url(u)]
-            urls = [u for u in urls if is_media_url(u)]
+            urls = [normalize_input_url(u) for u in urls if is_media_url(u)]
             if rejected:
                 window.append_log(t("log.bulk_skipped", count=len(rejected)))
                 self._notify_bad_url(t("dialog.bad_url_skipped_title"),

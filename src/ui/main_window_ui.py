@@ -99,9 +99,57 @@ class MainWindowUI(QObject):
             row.addWidget(widget)
         return group
 
-    def _make_pane_title(self, text: str) -> QLabel:
+    def _tr(self, setter, key: str, **kwargs):
+        """번역 문구를 넣고, 언어를 바꿀 때 다시 넣도록 적어 둔다.
+
+        **재시작 없이 언어를 바꾸는 근거가 이 목록이다**(4.3.0). 위젯은 만들어질 때 문구를
+        받아 두므로 무엇을 어디에 넣었는지 한 곳에 모아야 다시 넣을 수 있다. 상태에 따라
+        문구가 갈리는 것(테마·최대화·로그 단추)은 여기 넣지 않고 retranslate가 그 함수를 부른다.
+        """
+        def apply():
+            setter(t(key, **kwargs))
+        apply()
+        self._retranslators.append(apply)
+
+    def _text_button(self, key: str, tooltip_key: str = "", object_name: str = "") -> QPushButton:
+        """번역 문구를 단 글자 단추. 툴팁도 같은 목록에 적어 언어를 따라가게 한다."""
+        button = QPushButton(objectName=object_name) if object_name else QPushButton()
+        self._tr(button.setText, key)
+        if tooltip_key:
+            self._tr(button.setToolTip, tooltip_key)
+        return button
+
+    def _add_tab(self, tab, key: str):
+        index = self.tabs.addTab(tab, "")
+        self._tr(lambda text: self.tabs.setTabText(index, text), key)
+
+    def retranslate(self):
+        """언어를 바꾼 뒤 화면 문구를 다시 넣는다. 로그처럼 이미 적힌 기록은 그대로 둔다.
+
+        목록 카드와 트레이 메뉴는 여기서 다루지 않는다 - 카드는 목록을 새로 그리고,
+        메뉴는 retranslate_tray가 새로 짠다.
+        """
+        alive = []
+        for apply in self._retranslators:
+            try:
+                apply()
+            except RuntimeError:
+                continue
+            alive.append(apply)
+        self._retranslators = alive
+        self._set_hinted_tooltip("settings_button", t("main_window.settings_tooltip"))
+        self.update_log_toggle_button(self._log_visible)
+        self.update_theme_button(self._theme)
+        self._refresh_max_tooltip()
+        self._apply_tab_tooltips()
+        self._apply_title_logo()
+        self._paint_notice()
+        self._layout_timer.start(0)
+
+    def _make_pane_title(self, key: str) -> QLabel:
         """탭 제목 라벨. 높이를 고정해 제목 줄 전체 높이를 붙든다."""
-        label = QLabel(text, objectName="PaneTitle")
+        label = QLabel(objectName="PaneTitle")
+        self._tr(label.setText, key)
         label.setMinimumHeight(self.HEADER_ROW_HEIGHT)
         return label
 
@@ -109,22 +157,25 @@ class MainWindowUI(QObject):
         """고른 행에 사각 초점 선이 그려지지 않게 한다. 델리게이트는 목록과 수명을 같이한다."""
         list_widget.setItemDelegate(NoFocusDelegate(list_widget))
 
-    def _add_empty_state(self, list_widget, icon_name, title, description,
-                         filtered_title="", filtered_description=""):
-        """목록에 빈 상태 안내를 얹고 테마 전환 대상으로 등록한다."""
-        overlay = EmptyStateOverlay(list_widget, icon_name, title, description,
-                                    filtered_title, filtered_description,
-                                    theme=self._theme)
+    def _add_empty_state(self, list_widget, icon_name, title_key, description_key,
+                         filtered_title_key="", filtered_description_key=""):
+        """목록에 빈 상태 안내를 얹고 테마·언어 전환 대상으로 등록한다. 문구는 키로 받는다."""
+        def messages():
+            return (t(title_key), t(description_key),
+                    t(filtered_title_key) if filtered_title_key else "",
+                    t(filtered_description_key) if filtered_description_key else "")
+        overlay = EmptyStateOverlay(list_widget, icon_name, *messages(), theme=self._theme)
+        self._retranslators.append(lambda: overlay.set_messages(*messages()))
         self._empty_states.append(overlay)
         return overlay
 
-    def _make_search_input(self, placeholder: str = None) -> QLineEdit:
+    def _make_search_input(self, placeholder_key: str = "common.search_placeholder") -> QLineEdit:
         """탭 제목 줄 오른쪽에 놓는 검색칸. 세 탭이 같은 모양을 쓴다.
 
-        기본값을 None으로 두는 것은 t()를 매개변수 자리에 직접 넣으면 이 메서드를
-        정의하는 모듈 로드 시점에 언어가 굳기 때문이다 - 본문에서 매번 새로 구한다.
+        안내 문구는 키로 받는다 - 문구를 기본값 자리에 두면 모듈 로드 시점에 언어가 굳는다.
         """
-        box = QLineEdit(placeholderText=placeholder or t("common.search_placeholder"))
+        box = QLineEdit()
+        self._tr(box.setPlaceholderText, placeholder_key)
         box.setClearButtonEnabled(True)
         box.setFixedWidth(self.SEARCH_INPUT_WIDTH)
         return box
@@ -158,6 +209,12 @@ class MainWindowUI(QObject):
         self._notice = ("", "notice")
         self._notice_warned = False
         """경고를 한 번이라도 보여 줬는가. 좋은 소식을 보일지 가르는 기준이다."""
+        self._tray_icon_percent = None
+        """트레이에 마지막으로 그린 진행률. 개수만 바뀌었을 때 아이콘 여덟 장을 다시 그리지 않는다."""
+        self._retranslators = []
+        """언어를 바꿀 때 다시 부를 문구 넣기들. `_tr`이 넣을 때마다 함께 적는다."""
+        self._tray_version = ""
+        self._maximized = False
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
         self._notice_timer.timeout.connect(self._retire_notice)
@@ -187,8 +244,11 @@ class MainWindowUI(QObject):
             return
         btn.setIcon(get_icon(name, color))
 
-    def _make_icon_button(self, icon_name, tooltip, checkable=False):
-        btn = QToolButton(objectName="IconButton", toolTip=tooltip)
+    def _make_icon_button(self, icon_name, tooltip_key="", checkable=False):
+        """아이콘 단추. 툴팁이 상태를 따라 바뀌는 단추는 키를 비우고 제 함수가 넣는다."""
+        btn = QToolButton(objectName="IconButton")
+        if tooltip_key:
+            self._tr(btn.setToolTip, tooltip_key)
         btn.setFixedSize(self.ICON_BUTTON_SIZE, self.ICON_BUTTON_SIZE)
         btn.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         btn.setCheckable(checkable)
@@ -338,13 +398,16 @@ class MainWindowUI(QObject):
         self.app_title = QLabel(objectName="AppTitle")
         self.app_title.setFixedHeight(LOGO_HEIGHT)
         self._apply_title_logo()
-        self.settings_button = self._make_icon_button("settings", t("main_window.settings_tooltip"))
-        self.theme_button = self._make_icon_button("theme_dark", t("main_window.theme_dark_tooltip"))
-        self.on_top_btn = self._make_icon_button("pin", t("main_window.pin_tooltip"), checkable=True)
-        self.about_button = self._make_icon_button("info", t("main_window.about_tooltip"))
-        self.min_button = self._make_icon_button("window_minimize", t("main_window.minimize_tooltip"))
-        self.max_button = self._make_icon_button("window_maximize", t("main_window.maximize_tooltip"))
-        self.close_button = self._make_icon_button("cancel", t("common.close"))
+        self.settings_button = self._make_icon_button("settings")
+        self.settings_button.setToolTip(t("main_window.settings_tooltip"))
+        self.theme_button = self._make_icon_button("theme_dark")
+        self.theme_button.setToolTip(t("main_window.theme_dark_tooltip"))
+        self.on_top_btn = self._make_icon_button("pin", "main_window.pin_tooltip", checkable=True)
+        self.about_button = self._make_icon_button("info", "main_window.about_tooltip")
+        self.min_button = self._make_icon_button("window_minimize", "main_window.minimize_tooltip")
+        self.max_button = self._make_icon_button("window_maximize")
+        self.max_button.setToolTip(t("main_window.maximize_tooltip"))
+        self.close_button = self._make_icon_button("cancel", "common.close")
         self.close_button.setProperty("window_close", "true")
         self.close_button.setProperty("icon_hover_key", "danger_fg")
         self._paint_icon(self.close_button)
@@ -379,9 +442,14 @@ class MainWindowUI(QObject):
             widget.style().polish(widget)
         self.max_button.setProperty("icon_name",
                                     "window_restore" if maximized else "window_maximize")
-        self.max_button.setToolTip(t("main_window.restore_tooltip") if maximized
-                                   else t("main_window.maximize_tooltip"))
+        self._maximized = maximized
+        self._refresh_max_tooltip()
         self._paint_icon(self.max_button)
+
+    def _refresh_max_tooltip(self):
+        """누르면 갈 곳을 알린다. 상태는 마지막으로 받은 알림을 따른다."""
+        self.max_button.setToolTip(t("main_window.restore_tooltip") if self._maximized
+                                   else t("main_window.maximize_tooltip"))
 
     def toggle_maximized(self):
         """최대화와 원래 크기를 오간다. 최대화 단추와 헤더 더블클릭이 같은 길을 쓴다."""
@@ -392,10 +460,11 @@ class MainWindowUI(QObject):
         self.input_bar = input_bar
         layout = QHBoxLayout(input_bar)
         layout.setContentsMargins(SIDE_MARGIN, 12, SIDE_MARGIN, 12); layout.setSpacing(10)
-        self.url_input = QLineEdit(placeholderText=t("main_window.url_placeholder"), objectName="UrlInput")
-        self.url_input.setToolTip(t("main_window.url_tooltip"))
-        self.bulk_button = QPushButton(t("main_window.bulk_add_button"))
-        self.add_button = QPushButton(t("main_window.download_button"), objectName="PrimaryButton")
+        self.url_input = QLineEdit(objectName="UrlInput")
+        self._tr(self.url_input.setPlaceholderText, "main_window.url_placeholder")
+        self._tr(self.url_input.setToolTip, "main_window.url_tooltip")
+        self.bulk_button = self._text_button("main_window.bulk_add_button")
+        self.add_button = self._text_button("main_window.download_button", object_name="PrimaryButton")
         self._register_icon(self.bulk_button, "bulk_add")
         self._register_icon(self.add_button, "download", color_key="primary_fg")
         for btn in (self.bulk_button, self.add_button):
@@ -454,16 +523,20 @@ class MainWindowUI(QObject):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(self.TAB_SPACING)
         self.download_toolbar, row = self._toolbar(left_layout)
-        self.queue_start_button = QPushButton(t("download_tab.queue_start_button"), objectName="QueueStartButton")
-        self.queue_start_button.setToolTip(t("download_tab.queue_start_tooltip"))
+        self.queue_start_button = self._text_button("download_tab.queue_start_button",
+                                                    "download_tab.queue_start_tooltip",
+                                                    "QueueStartButton")
         self.queue_start_button.setVisible(False)
-        self.cancel_selected_button = QPushButton(t("download_tab.cancel_selected_button"), objectName="DangerButton")
-        self.cancel_selected_button.setToolTip(t("download_tab.cancel_selected_tooltip"))
+        self.cancel_selected_button = self._text_button("download_tab.cancel_selected_button",
+                                                        "download_tab.cancel_selected_tooltip",
+                                                        "DangerButton")
         self.cancel_selected_button.setEnabled(False)
-        self.clear_completed_button = QPushButton(t("download_tab.clear_completed_button"), objectName="CautionButton")
+        self.clear_completed_button = self._text_button("download_tab.clear_completed_button",
+                                                        object_name="CautionButton")
         self.queue_count_label = QLabel(t("download_tab.queue_count", queued=0, active=0), objectName="PaneSubtitle")
-        self.log_toggle_btn = self._make_icon_button("log", t("download_tab.log_hide_tooltip"))
-        summary = self._button_group(self._make_pane_title(t("download_tab.pane_title")), self.queue_count_label)
+        self.log_toggle_btn = self._make_icon_button("log")
+        self.log_toggle_btn.setToolTip(t("download_tab.log_hide_tooltip"))
+        summary = self._button_group(self._make_pane_title("download_tab.pane_title"), self.queue_count_label)
         row.addWidget(summary)
         row.addStretch()
         row.addWidget(self._button_group(self.queue_start_button, self.cancel_selected_button,
@@ -481,8 +554,8 @@ class MainWindowUI(QObject):
         self._hide_focus_rect(self.download_list)
         apply_smooth_wheel(self.download_list)
         self.download_empty = self._add_empty_state(
-            self.download_list, "download", t("download_tab.empty_title"),
-            t("download_tab.empty_description"))
+            self.download_list, "download", "download_tab.empty_title",
+            "download_tab.empty_description")
         left_layout.addWidget(self.download_list, 1)
 
         right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
@@ -492,9 +565,12 @@ class MainWindowUI(QObject):
         row_log = QHBoxLayout(self.log_header)
         row_log.setContentsMargins(0, 0, 0, 0)
         row_log.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.clear_log_button = QPushButton(t("download_tab.log_clear_button"))
-        self.clear_log_button.setToolTip(t("download_tab.log_clear_tooltip"))
-        row_log.addWidget(self._make_pane_title(t("download_tab.log_pane_title"))); row_log.addStretch(1)
+        self.clear_log_button = self._text_button("download_tab.log_clear_button",
+                                                  "download_tab.log_clear_tooltip")
+        self.tools_update_button = self._text_button("download_tab.tools_update_button",
+                                                     "download_tab.tools_update_tooltip")
+        row_log.addWidget(self._make_pane_title("download_tab.log_pane_title")); row_log.addStretch(1)
+        row_log.addWidget(self.tools_update_button)
         row_log.addWidget(self.clear_log_button)
         self.log_output = QTextEdit(objectName="LogOutput", readOnly=True)
         right_layout.addWidget(self.log_header); right_layout.addWidget(self.log_output, 1)
@@ -503,7 +579,7 @@ class MainWindowUI(QObject):
         self.log_pane = right_pane
         left_pane.setMinimumWidth(self.LEFT_PANE_MIN_WIDTH)
         panes.addWidget(left_pane, 1); panes.addWidget(right_pane)
-        layout.addLayout(panes, 1); self.tabs.addTab(tab, t("download_tab.tab_title"))
+        layout.addLayout(panes, 1); self._add_tab(tab, "download_tab.tab_title")
 
     def set_queue_start_visible(self, visible: bool):
         """되살린 항목이 있을 때만 시작 단추를 보여 주고 도구 행 높이를 다시 맞춘다."""
@@ -619,13 +695,14 @@ class MainWindowUI(QObject):
     def _create_history_tab(self):
         tab, layout = self._tab_page("HistoryTab")
         self.history_toolbar, top_controls = self._toolbar(layout)
-        self.history_del_btn = QPushButton(t("history_tab.delete_button"), objectName="DangerButton")
-        self.history_del_btn.setToolTip(t("history_tab.delete_tooltip"))
+        self.history_del_btn = self._text_button("history_tab.delete_button",
+                                                 "history_tab.delete_tooltip", "DangerButton")
         self.history_sort_combo = QComboBox()
-        self.history_sort_combo.addItem(t("history_tab.sort_recent"))
-        self.history_sort_combo.addItem(t("history_tab.sort_title"))
+        for index, key in enumerate(("history_tab.sort_recent", "history_tab.sort_title")):
+            self.history_sort_combo.addItem("")
+            self._tr(lambda text, i=index: self.history_sort_combo.setItemText(i, text), key)
         self.history_search_input = self._make_search_input()
-        top_controls.addWidget(self._make_pane_title(t("history_tab.pane_title")))
+        top_controls.addWidget(self._make_pane_title("history_tab.pane_title"))
         top_controls.addStretch()
         top_controls.addWidget(self.history_del_btn)
         top_controls.addWidget(self.history_sort_combo)
@@ -637,23 +714,23 @@ class MainWindowUI(QObject):
         self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_empty = self._add_empty_state(
-            self.history_list, "tab_history", t("history_tab.empty_title"),
-            t("history_tab.empty_description"),
-            t("history_tab.empty_filtered_title"), t("history_tab.empty_filtered_description"))
+            self.history_list, "tab_history", "history_tab.empty_title",
+            "history_tab.empty_description",
+            "history_tab.empty_filtered_title", "history_tab.empty_filtered_description")
         layout.addWidget(self.history_list, 1)
-        self.tabs.addTab(tab, t("history_tab.tab_title"))
+        self._add_tab(tab, "history_tab.tab_title")
 
     def _create_favorites_tab(self):
         tab, layout = self._tab_page("FavoritesTab")
         self.favorites_toolbar, row = self._toolbar(layout)
-        row.addWidget(self._make_pane_title(t("favorites_tab.pane_title")))
+        row.addWidget(self._make_pane_title("favorites_tab.pane_title"))
         row.addStretch()
         self.fav_input = QLineEdit(placeholderText="https://tver.jp/series/...")
         self.fav_input.setFixedWidth(self.FAV_INPUT_WIDTH)
-        self.fav_add_btn = QPushButton(t("favorites_tab.add_button"), objectName="AddButton")
-        self.fav_del_btn = QPushButton(t("favorites_tab.delete_button"), objectName="DangerButton")
-        self.fav_chk_btn = QPushButton(t("favorites_tab.refresh_button"), objectName="RefreshButton")
-        self.fav_chk_btn.setToolTip(t("favorites_tab.refresh_tooltip"))
+        self.fav_add_btn = self._text_button("favorites_tab.add_button", object_name="AddButton")
+        self.fav_del_btn = self._text_button("favorites_tab.delete_button", object_name="DangerButton")
+        self.fav_chk_btn = self._text_button("favorites_tab.refresh_button",
+                                             "favorites_tab.refresh_tooltip", "RefreshButton")
         self.fav_search_input = self._make_search_input()
         for widget in (self._button_group(self.fav_input, self.fav_add_btn),
                        self._button_group(self.fav_del_btn, self.fav_chk_btn), self.fav_search_input):
@@ -668,10 +745,10 @@ class MainWindowUI(QObject):
         self.fav_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fav_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.fav_empty = self._add_empty_state(
-            self.fav_list, "tab_favorites", t("favorites_tab.empty_title"),
-            t("favorites_tab.empty_description"),
-            t("favorites_tab.empty_filtered_title"), t("favorites_tab.empty_filtered_description"))
-        layout.addWidget(self.fav_list, 1); self.tabs.addTab(tab, t("favorites_tab.tab_title"))
+            self.fav_list, "tab_favorites", "favorites_tab.empty_title",
+            "favorites_tab.empty_description",
+            "favorites_tab.empty_filtered_title", "favorites_tab.empty_filtered_description")
+        layout.addWidget(self.fav_list, 1); self._add_tab(tab, "favorites_tab.tab_title")
 
     TRAY_GITHUB_URL = "https://github.com/deuxdoom/TVerDownloader"
 
@@ -683,37 +760,51 @@ class MainWindowUI(QObject):
         체크는 열 때마다 레지스트리를 다시 읽는다 - 밖에서 꺼 놓았을 수 있다.
         """
         tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
+        self._tray_version = app_version
         self._tray_name = f"{localized_app_name()} {app_version}"
         self.update_tray_status(0, 0, None)
+        tray_icon.setContextMenu(self._build_tray_menu()); tray_icon.show()
+
+    def retranslate_tray(self):
+        """언어를 바꾼 뒤 트레이 메뉴를 새로 짠다. 옛 메뉴는 헐어 낸다 - 트레이가 쥐고 있지 않다."""
+        tray_icon = self.main_window.tray_icon
+        self._tray_name = f"{localized_app_name()} {self._tray_version}"
+        old_menu = tray_icon.contextMenu()
+        tray_icon.setContextMenu(self._build_tray_menu())
+        if old_menu is not None:
+            old_menu.deleteLater()
+
+    def _build_tray_menu(self) -> RoundedMenu:
+        """트레이 메뉴 한 벌. 항목의 부모를 메뉴로 두어 메뉴를 헐면 함께 사라지게 한다."""
         tray_menu = RoundedMenu()
 
-        restore_action = QAction(t("tray.open", app_name=localized_app_name()), self.main_window,
+        restore_action = QAction(t("tray.open", app_name=localized_app_name()), tray_menu,
                                  triggered=self.main_window.bring_to_front)
         bold = QFont(restore_action.font()); bold.setBold(True)
         restore_action.setFont(bold)
         tray_menu.addAction(restore_action)
         tray_menu.addSeparator()
 
-        self.autostart_action = QAction(t("tray.autostart"), self.main_window, checkable=True)
+        self.autostart_action = QAction(t("tray.autostart"), tray_menu, checkable=True)
         self.autostart_action.toggled.connect(self.main_window.set_autostart)
         if not autostart.supported():
             self.autostart_action.setEnabled(False)
             self.autostart_action.setToolTip(t("tray.autostart_disabled_tooltip"))
         tray_menu.addAction(self.autostart_action)
 
-        tray_menu.addAction(QAction(t("tray.github"), self.main_window,
+        tray_menu.addAction(QAction(t("tray.github"), tray_menu,
                                     triggered=lambda: webbrowser.open(self.TRAY_GITHUB_URL)))
 
-        tray_menu.addAction(QAction(t("tray.settings"), self.main_window,
+        tray_menu.addAction(QAction(t("tray.settings"), tray_menu,
                                     triggered=self.main_window.open_settings))
         tray_menu.addSeparator()
 
-        tray_menu.addAction(QAction(t("tray.quit"), self.main_window,
+        tray_menu.addAction(QAction(t("tray.quit"), tray_menu,
                                     triggered=self.main_window.quit_application))
 
         tray_menu.aboutToShow.connect(self.sync_autostart_check)
         self.sync_autostart_check()
-        tray_icon.setContextMenu(tray_menu); tray_icon.show()
+        return tray_menu
 
     def update_tray_status(self, queued: int, active: int, percent=None):
         """트레이 툴팁을 지금 상태로 바꾼다.
@@ -727,7 +818,9 @@ class MainWindowUI(QObject):
             head = t("tray.status", queued=queued, active=active)
             lines.append(f"{head} · {percent}%" if percent is not None else head)
         self.main_window.tray_icon.setToolTip("\n".join(lines))
-        self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))
+        if percent != self._tray_icon_percent:
+            self._tray_icon_percent = percent
+            self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))
 
     def sync_autostart_check(self):
         """레지스트리의 실제 상태로 체크를 맞춘다. toggled가 되돌아 또 쓰지 않게 잠시 끊는다."""

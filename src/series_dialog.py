@@ -1,18 +1,20 @@
-from pathlib import Path
 from typing import Dict, List
 
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QPixmap, QIcon
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QDialogButtonBox
 )
 from src.i18n import t
-from src.thumbnails import start_thumbnail_download, THUMBNAIL_CACHE_DIR
+from src.thumbnails import (cache_key_for, discard_thumbnail_requests, lookup_thumbnail,
+                            remember_thumbnail, start_thumbnail_download)
 from src.window_frame import apply_dialog_frame
 
 class SeriesSelectionDialog(QDialog):
     """시리즈의 회차 목록에서 받을 것을 고르는 창."""
+
+    ICON_W, ICON_H = 128, 72
 
     def __init__(self, episode_info: List[Dict[str, str]], parent=None,
                  theme: str = "light"):
@@ -20,15 +22,14 @@ class SeriesSelectionDialog(QDialog):
         self.setWindowTitle(t("series.title"))
         self.setMinimumSize(720, 540)
 
-        self._pending_thumbs: Dict[str, List[tuple[QListWidgetItem, Path]]] = {}
-        THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._pending_thumbs: Dict[str, List[tuple[QListWidgetItem, str]]] = {}
 
         root = QVBoxLayout(self); root.setContentsMargins(16, 16, 16, 16); root.setSpacing(10)
         desc_label = QLabel(t("series.description", count=len(episode_info))); root.addWidget(desc_label)
 
         self.list_widget = QListWidget()
         self.list_widget.setViewMode(QListWidget.ViewMode.ListMode)
-        self.list_widget.setIconSize(QSize(128, 72))
+        self.list_widget.setIconSize(QSize(self.ICON_W, self.ICON_H))
         root.addWidget(self.list_widget, 1)
 
         for episode in episode_info:
@@ -58,37 +59,42 @@ class SeriesSelectionDialog(QDialog):
                            color_key="ctx_download")
 
     def _load_or_download_thumbnail(self, item: QListWidgetItem, episode_meta: Dict[str, str]):
-        thumb_url = episode_meta.get("thumbnail_url")
-        if not thumb_url: return
+        """캐시에 있으면 곧바로 얹고, 없으면 작업 스레드에 맡긴다. 같은 그림은 한 번만 받는다.
 
-        try:
-            episode_id = episode_meta["url"].strip('/').split('/')[-1]
-            cache_path = THUMBNAIL_CACHE_DIR / f"{episode_id}.jpg"
-            if cache_path.exists():
-                pixmap = QPixmap(str(cache_path))
-                if not pixmap.isNull(): item.setIcon(QIcon(pixmap))
-            else:
-                waiting = self._pending_thumbs.setdefault(thumb_url, [])
-                waiting.append((item, cache_path))
-                if len(waiting) == 1:
-                    start_thumbnail_download(thumb_url, self._on_thumb_finished)
-        except Exception:
-            pass
+        **원본을 풀어 아이콘에 넣지 않는다.** 예전에는 회차마다 1280x720을 창 스레드에서 풀어
+        예순 화짜리 창 하나가 뜨는 데 0.57초, 그림만 200MB가 넘었다(실측).
+        """
+        thumb_url = episode_meta.get("thumbnail_url")
+        if not thumb_url:
+            return
+        episode_id = str(episode_meta.get("url", "")).strip('/').split('/')[-1]
+        key = cache_key_for(episode_id, thumb_url)
+        pixmap = lookup_thumbnail(key, self.ICON_W, self.ICON_H, self.devicePixelRatioF(), 0)
+        if pixmap is not None:
+            item.setIcon(QIcon(pixmap))
+            return
+        waiting = self._pending_thumbs.setdefault(thumb_url, [])
+        waiting.append((item, key))
+        if len(waiting) == 1:
+            start_thumbnail_download(thumb_url, self._on_thumb_finished, key)
 
     def _on_thumb_finished(self, result: tuple):
-        try: url, data = result
-        except (TypeError, ValueError): return
-
+        try:
+            url, _data, image = result
+        except (TypeError, ValueError):
+            return
         waiting = self._pending_thumbs.pop(url, None)
-        if not waiting or not data: return
+        if not waiting or image is None or image.isNull():
+            return
+        for item, key in waiting:
+            item.setIcon(QIcon(remember_thumbnail(key, image, self.ICON_W, self.ICON_H,
+                                                  self.devicePixelRatioF(), 0)))
 
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(data): return
-        icon = QIcon(pixmap)
-        for item, cache_path in waiting:
-            try: cache_path.write_bytes(data)
-            except OSError: pass
-            item.setIcon(icon)
+    def done(self, result: int):
+        """닫힐 때 아직 시작하지 않은 그림 요청을 거둔다. 남기면 닫힌 창의 몫이 자리를 차지한다."""
+        discard_thumbnail_requests(self)
+        self._pending_thumbs.clear()
+        super().done(result)
 
     def _toggle_all_checkboxes(self, check: bool = True):
         state = Qt.CheckState.Checked if check else Qt.CheckState.Unchecked

@@ -169,7 +169,7 @@ class DownloadListController:
         할 수 있는 것만 붙이고, 구분선은 뒤에 실제로 붙은 것이 있을 때만 긋는다.
         """
         actions = []
-        if widget.thumbnail_pixmap() is not None:
+        if widget.has_thumbnail():
             actions.append((t("menu.save_thumbnail"), lambda: self._save_thumbnail(widget)))
         if widget.final_filepath and os.path.exists(widget.final_filepath):
             actions.append((t("menu.play_file"), lambda: self.window.play_file(widget.final_filepath)))

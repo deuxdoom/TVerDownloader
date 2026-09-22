@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
 
 from src.i18n import t
-from src.window_frame import apply_dialog_frame, center_dialog
+from src.window_frame import apply_dialog_frame, center_dialog, run_dialog
 
 
 class _ConfirmBox(QMessageBox):
@@ -148,7 +148,7 @@ def notify(parent: QWidget | None, title: str, text: str, *,
     ok_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(ok_button)
     _frame(box, theme, icon_name, color_key)
-    box.exec()
+    run_dialog(box)
 
 
 def confirm(parent: QWidget | None, title: str, text: str, *,
@@ -164,7 +164,7 @@ def confirm(parent: QWidget | None, title: str, text: str, *,
     box.setDefaultButton(yes_button if default_yes else no_button)
 
     _frame(box, theme, icon_name, color_key)
-    box.exec()
+    run_dialog(box)
     return box.clickedButton() is yes_button
 
 
@@ -249,7 +249,7 @@ def confirm_single(parent: QWidget | None, title: str, text: str, *, ok_text: st
     box.arm_escape()
 
     _frame(box, theme, icon_name, color_key)
-    box.exec()
+    run_dialog(box)
     return box.clickedButton() is ok_button
 
 
@@ -275,5 +275,5 @@ def confirm_with_link(parent: QWidget | None, title: str, text: str, *,
     box.arm_escape()
 
     _frame(box, theme, icon_name, color_key)
-    box.exec()
+    run_dialog(box)
     return box.clickedButton() is yes_button

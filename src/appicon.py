@@ -13,11 +13,20 @@ from PyQt6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 APP_ICON_PATH = "assets/appicon.ico"
 
 
-def get_app_icon() -> QIcon:
-    """소스 실행과 배포본 모두 같은 리소스 경로를 써 작업 폴더에 영향받지 않는다."""
-    from src.utils import get_resource_path
+_app_icon: Optional[QIcon] = None
 
-    return QIcon(str(get_resource_path(APP_ICON_PATH)))
+
+def get_app_icon() -> QIcon:
+    """소스 실행과 배포본 모두 같은 리소스 경로를 써 작업 폴더에 영향받지 않는다.
+
+    한 번 읽은 것을 들고 있는다 - 트레이가 대기 개수가 바뀔 때마다 불러, 예순 개를 넣는
+    동안 ICO를 예순 번 다시 읽었다(실측 74ms).
+    """
+    global _app_icon
+    if _app_icon is None:
+        from src.utils import get_resource_path
+        _app_icon = QIcon(str(get_resource_path(APP_ICON_PATH)))
+    return _app_icon
 
 
 TRAY_ICON_SIZES = (16, 20, 24, 30, 32, 36, 40, 48)

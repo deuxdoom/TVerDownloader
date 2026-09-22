@@ -15,6 +15,7 @@ from src import self_update
 from src.i18n import t
 from src.message import confirm, confirm_single, confirm_with_link, notify
 from src.utils import github_api_headers, is_rate_limited, rate_limit_message
+from src.window_frame import run_dialog
 
 API_URL = "https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest"
 RELEASE_PAGE_URL = "https://github.com/deuxdoom/TVerDownloader/releases/latest"
@@ -184,7 +185,7 @@ def start_update(parent, asset: dict, latest_tag: str, log=print,
     log(t("log.update_start", tag=latest_tag))
     dialog = UpdateProgressDialog(asset.get("browser_download_url", ""), work,
                                   latest_tag, parent, theme)
-    ok = dialog.exec()
+    ok = run_dialog(dialog)
 
     if not ok:
         self_update.cleanup_workspace()

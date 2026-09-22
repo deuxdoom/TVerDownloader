@@ -17,7 +17,7 @@ from src.qss import palette, blend, FILENAME_PART_COLORS, FILENAME_PART_MUTED
 from src.utils import (save_config, PARALLEL_MAX, FRAGMENTS_MIN, FRAGMENTS_MAX,
                        MAX_TOTAL_CONNECTIONS, canonicalize_config_fragments,
                        canonicalize_config_codec, canonicalize_config_encoder)
-from src.thumbnails import THUMBNAIL_CACHE_DIR
+from src.thumbnails import THUMBNAIL_CACHE_DIR, forget_memory_cache
 from src.window_frame import apply_dialog_frame
 from src.qtparts import WrappingCheckBox
 
@@ -205,6 +205,7 @@ class SettingsDialog(QDialog):
                    t("settings.cache_error_body", error=e),
                    icon_name="nav_cache", color_key="danger", theme=self._theme)
         finally:
+            forget_memory_cache()
             self._update_cache_label()
 
     def _create_general_tab(self):

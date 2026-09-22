@@ -497,3 +497,17 @@ def apply_dialog_frame(dialog, theme: str = "light", *, title: str = "",
     """본문 상자. 원래 레이아웃이 이 안으로 옮겨져 있어, 그 레이아웃을 직접 손보던
     쪽(QMessageBox의 단추 정렬)은 `dialog.layout()`이 아니라 여기를 봐야 한다."""
     return shell
+
+
+def run_dialog(dialog) -> int:
+    """모달로 띄우고 결과를 돌려준 뒤 헐어 낸다. 대화상자는 모두 이것으로 띄운다.
+
+    **부모를 준 대화상자는 exec()가 끝나도 사라지지 않는다** - 부모가 들고 있어서다(실측:
+    시리즈 선택 창 셋을 닫은 뒤에도 셋이 메인 창의 자식으로 남았고, 회차 그림까지 든 채였다).
+    deleteLater는 이 호출이 속한 이벤트 루프로 돌아가야 처리되므로, 돌려받은 뒤 곧바로 창의
+    값을 읽는 것은 안전하다. 그 사이에 다른 모달 창을 열어도 먼저 헐리지 않는다.
+    """
+    try:
+        return dialog.exec()
+    finally:
+        dialog.deleteLater()

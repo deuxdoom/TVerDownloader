@@ -9,9 +9,7 @@
 
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
 from PyQt6.QtCore import QTimer
-from PyQt6.QtNetwork import QLocalServer
 
-from src import app_restart
 from src.utils import localized_app_name
 from src.i18n import t
 from src.message import confirm
@@ -52,16 +50,27 @@ class TrayController:
         queued, active = self._queue_counts
         self._tray_state = (queued, active,
                             self.window.download_manager.overall_progress() if active else None)
+        was_active = bool(self._tray_shown and self._tray_shown[1])
         if active:
             if not self._timer.isActive():
                 self._timer.start()
                 self._sync()
             return
-        self._timer.stop()
-        self._sync()
+        if was_active or self._tray_shown is None:
+            self._timer.stop()
+            self._sync()
+            return
+        if not self._timer.isActive():
+            self._timer.start()
 
     def _sync(self):
-        """계산해 둔 값을 트레이에 실제로 넣는다. 달라진 것이 없으면 손대지 않는다."""
+        """계산해 둔 값을 트레이에 실제로 넣는다. 달라진 것이 없으면 손대지 않는다.
+
+        쉬는 동안 대기 개수만 바뀐 것도 타이머로 묶는다 - 시리즈 예순 화를 넣으면 툴팁을
+        예순 번 바꾸는 셸 호출이 창 스레드에서 줄지어 돌았다. 다 쉬고 나면 타이머를 멈춘다.
+        """
+        if not self._tray_state[1]:
+            self._timer.stop()
         if self._tray_state == self._tray_shown:
             return
         self._tray_shown = self._tray_state
@@ -122,21 +131,11 @@ class TrayController:
             window.append_log(t("log.queue_stopped", count=stopped))
         window.force_quit = True; window.tray_icon.hide(); QApplication.instance().quit()
 
-    def restart_for_language_change(self) -> bool:
-        """언어를 바꾼 뒤 앱을 다시 띄운다. 성공 여부를 돌려준다.
+    def retranslate(self):
+        """언어를 바꾼 뒤 개수 줄과 트레이 툴팁을 새 언어로 다시 쓴다.
 
-        **되돌릴 수 있는 일(소켓 비우기)을 먼저 하고, 되돌릴 수 없는 정리는 새 프로세스가
-        확실히 뜬 뒤에만 한다.** 새 프로세스가 뜨는 시점에 소켓 자리가 이미 비어 있으므로
-        PID가 죽기를 기다릴 필요가 없고, spawn이 실패해도 소켓을 되살려 그대로 계속 쓴다 -
-        '새것도 못 띄우고 기존 것도 잃는' 상황이 설계적으로 나오지 않는다.
+        마지막으로 넣은 값과 같으면 _sync가 건너뛰므로, 넣은 값을 잊게 하고 다시 넣는다.
         """
-        server = getattr(self.window, "_local_server", None)
-        if server is not None:
-            server.close()
-            QLocalServer.removeServer(app_restart.SOCKET_NAME)
-        if not app_restart.spawn_new_instance():
-            if server is not None:
-                server.listen(app_restart.SOCKET_NAME)
-            return False
-        self.quit_application()
-        return True
+        self.on_queue_changed(*self._queue_counts)
+        self._tray_shown = None
+        self._sync()

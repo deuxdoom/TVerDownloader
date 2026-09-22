@@ -1,4 +1,5 @@
 import sys, os
+from collections import deque
 from html import escape
 from typing import List, Dict
 from pathlib import Path
@@ -7,11 +8,11 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QFileDi
                              QAbstractSpinBox, QLineEdit, QMenu, QTextEdit, QComboBox)
 from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QTranslator, QLibraryInfo
 from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
-from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+from PyQt6.QtNetwork import QLocalServer
 
 from src import autostart, self_update, shortcuts, i18n
-from src.app_restart import (SOCKET_NAME, SHOW_REQUEST, TRAY_REQUEST,
-                             REQUEST_WAIT_MS)
+from src.single_instance import (SOCKET_NAME, SHOW_REQUEST, TRAY_REQUEST, REQUEST_WAIT_MS,
+                                 acquire_instance_lock, notify_running_instance)
 from src.i18n import t
 from src.utils import (load_config, save_config, handle_exception,
                        retired_option_notes,
@@ -35,7 +36,7 @@ from src.threads.region_thread import (RegionCheckThread, JAPAN_CODE, country_na
                                        STOP_WAIT_MS as REGION_STOP_WAIT_MS)
 from src.net_watch import NetworkChangeWatcher
 from src.ui.main_window_ui import MainWindowUI
-from src.window_frame import center_on_screen, handle_system_command, make_frameless
+from src.window_frame import center_on_screen, handle_system_command, make_frameless, run_dialog
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 from src.controllers.download_list import DownloadListController
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         make_frameless(self)
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self._local_server = None
+        self._selection_queue: deque = deque(); self._selection_open = False
         self_update.cleanup_workspace()
         self._shortcuts: List[QShortcut] = []; self._guarded_shortcuts: List[QShortcut] = []
         self.setAcceptDrops(True)
@@ -83,8 +85,11 @@ class MainWindow(QMainWindow):
             self.append_log(note)
         self._restore_queue()
         self._start_region_check()
+        self._tools_updating = False
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
-        self.setup_thread.finished.connect(self._on_setup_finished); self.setup_thread.start()
+        self.setup_thread.finished.connect(self._on_setup_finished)
+        QTimer.singleShot(0, self.setup_thread.start)
+        """창이 뜬 뒤에 띄운다 - 스레드가 requests를 들여오는 동안 창을 짓는 쪽과 GIL을 다툰다."""
 
     def open_settings(self):
         """설정 창을 연다. 메인 창이 트레이에 들어가 있어도 뜬다.
@@ -94,7 +99,7 @@ class MainWindow(QMainWindow):
         """
         dialog = SettingsDialog(self.config, self)
         QTimer.singleShot(0, lambda: self._place_dialog(dialog))
-        if dialog.exec():
+        if run_dialog(dialog):
             self.config = load_config()
             self.download_manager.update_config(self.config)
             self.series_parser.update_config(self.config)
@@ -103,27 +108,36 @@ class MainWindow(QMainWindow):
             parallel = self.config["max_concurrent_downloads"]
             fragments = canonicalize_config_fragments(self.config)
             self.append_log(t("log.settings_saved", parallel=parallel, fragments=fragments))
+            if dialog.language_changed:
+                self.apply_language()
             self.library.refresh_history_list()
             self.library.refresh_fav_list()
-            if dialog.language_changed:
-                self._offer_language_restart()
 
-    def _offer_language_restart(self):
-        """언어를 바꿨을 때만 다시 시작할지 묻는다.
+    def apply_language(self):
+        """설정에서 고른 언어를 곧바로 화면에 옮긴다. 앱을 다시 띄우지 않는다.
 
-        문구는 아직 **바꾸기 전 언어**로 나온다 - 지금 화면을 읽고 있는 사람이 아는 언어가
-        그쪽이라서다. 다시 띄우지 못하면 그대로 실행을 이어가고, 바꾼 값은 설정 파일에
-        남아 있으므로 다음에 켤 때 반영된다.
+        **4.3.0 전에는 다시 시작해야 했다.** 받는 중이던 것은 대기열로 되살아나도 처음부터
+        다시 받았고, 다시 띄우는 동안 창이 사라졌다. 이미 적힌 로그는 그 언어로 남는다 -
+        지난 기록이라 바꿔 적을 이유가 없다. 목록 카드는 호출부가 새로 그린다.
         """
-        if not confirm(self, t("settings.restart_title"), t("settings.restart_body"),
-                       icon_name="settings", color_key="ctx_settings",
-                       theme=self.config.get("theme", "light"),
-                       yes_text=t("settings.restart_yes"), no_text=t("settings.restart_no")):
-            return
-        if not self.tray.restart_for_language_change():
-            notify(self, t("settings.restart_failed_title"), t("settings.restart_failed_body"),
-                   icon_name="info", color_key="warn",
-                   theme=self.config.get("theme", "light"))
+        app = QApplication.instance()
+        i18n.setup(self.config)
+        setup_translations(app)
+        app_name = localized_app_name()
+        self.setWindowTitle(app_name)
+        app.setApplicationName(app_name)
+        self.ui.retranslate()
+        self.ui.retranslate_tray()
+        self.tray.retranslate()
+        for row in range(self.ui.download_list.count()):
+            widget = self.ui.download_list.itemWidget(self.ui.download_list.item(row))
+            if isinstance(widget, DownloadItemWidget):
+                widget.retranslate()
+        self._retranslate_region_notice()
+        code = i18n.current_code()
+        name = next((info.display_name for info in i18n.available_languages()
+                     if info.code == code), code)
+        self.append_log(t("log.language_applied", language=name))
 
     def apply_theme(self, theme: str, persist: bool = True):
         """QSS와 아이콘 색을 한 번에 새 테마로 맞춘다."""
@@ -240,8 +254,9 @@ class MainWindow(QMainWindow):
         self.ui.add_button.clicked.connect(self.input_sources.process_input_url); self.ui.url_input.returnPressed.connect(self.input_sources.process_input_url)
         self.ui.bulk_button.clicked.connect(lambda: self.input_sources.open_bulk_add()); self.ui.settings_button.clicked.connect(self.open_settings)
         self.ui.about_button.clicked.connect(
-            lambda: AboutDialog(APP_VERSION, self, self.config.get("theme", "light")).exec())
+            lambda: run_dialog(AboutDialog(APP_VERSION, self, self.config.get("theme", "light"))))
         self.ui.clear_log_button.clicked.connect(self.clear_log); self.ui.on_top_btn.toggled.connect(self.set_always_on_top)
+        self.ui.tools_update_button.clicked.connect(self.update_tools)
         self.ui.min_button.clicked.connect(self.showMinimized)
         self.ui.max_button.clicked.connect(self.ui.toggle_maximized)
         self.ui.close_button.clicked.connect(self.close)
@@ -361,6 +376,7 @@ class MainWindow(QMainWindow):
         self.ui.url_input.setEnabled(enabled); self.ui.add_button.setEnabled(enabled)
         self.ui.bulk_button.setEnabled(enabled); self.ui.fav_chk_btn.setEnabled(enabled)
         self.ui.queue_start_button.setEnabled(enabled)
+        self.ui.tools_update_button.setEnabled(enabled)
         self.ui.set_primary_action_enabled(enabled)
 
     def _ensure_download_folder(self) -> bool:
@@ -383,12 +399,41 @@ class MainWindow(QMainWindow):
             if not again: self.append_log(t("log.duplicate_canceled", url=url)); return False
         return self.download_manager.add_task(url, title=title, thumbnail=thumbnail)
 
+    def update_tools(self):
+        """yt-dlp·FFmpeg를 지금 새로 확인해 받는다(로그 옆 `도구 업데이트` 단추).
+
+        **쓰는 중인 exe는 갈아 끼울 수 없어** 받는 중·변환 중·분석 중이면 막는다. 교체하는
+        동안에는 준비 전처럼 입력을 잠가 그 사이에 새 작업이 도구를 붙잡지 않게 한다. 켤 때의
+        확인이 인터넷 없이 지나갔을 때 다시 켜지 않고 받을 수 있게 하려는 자리다.
+        """
+        if self._tools_updating or not self.env_ready:
+            return
+        if self.download_manager.running_count() or self.series_parser.is_busy():
+            notify(self, t("dialog.tools_busy_title"), t("dialog.tools_busy_body"),
+                   icon_name="download", color_key="warn",
+                   theme=self.config.get("theme", "light"))
+            return
+        self._tools_updating = True
+        self.env_ready = False
+        self._set_input_enabled(False)
+        self.download_manager.suspend_prefetch()
+        self.append_log(t("log.tools_update_start"))
+        previous = self.setup_thread
+        self.setup_thread = SetupThread(self, manual=True)
+        self.setup_thread.log.connect(self.append_log)
+        self.setup_thread.finished.connect(self._on_setup_finished)
+        self.setup_thread.start()
+        if previous is not None and not previous.isRunning():
+            previous.deleteLater()
+
     def _on_setup_finished(self, ok: bool, ytdlp_path: str, ffmpeg_path: str):
-        """준비가 끝났음을 알린다.
+        """준비가 끝났음을 알린다. 수동 업데이트가 끝난 것도 이리로 온다.
 
         **'다운로드를 시작할 수 있습니다'를 덧붙이지 않는다** - 바로 위 지역 안내가 VPN이
         없어 받을 수 없다고 말한 뒤라, 준비된 것은 프로그램이라는 뜻이 반대로 읽힌다.
         """
+        manual = self._tools_updating
+        self._tools_updating = False
         if not ok:
             self.append_log(t("log.setup_failed"))
             self.ui.set_notice(t("log.setup_failed"), "danger")
@@ -398,6 +443,10 @@ class MainWindow(QMainWindow):
             return
         self.download_manager.set_paths(ytdlp_path, ffmpeg_path); self.series_parser.set_ytdlp_path(ytdlp_path); self.env_ready = True
         self._set_input_enabled(True)
+        if manual:
+            self.append_log(t("log.tools_update_done"))
+            self.download_manager.check_queue_and_start()
+            return
         self._show_region_notice()
         self.append_log(t("log.setup_done"))
         if self.config.get("auto_update_check", True):
@@ -448,13 +497,31 @@ class MainWindow(QMainWindow):
                           pending_downloads=self.download_manager.pending_count())
 
     def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
-        """에피소드 선택 창을 띄우고 고른 것만 대기열에 넣는다. 제목·표지 그림도 함께 넘긴다."""
+        """에피소드 선택 창을 차례로 띄운다. 이미 하나 떠 있으면 줄에 세우고 돌아간다.
+
+        **창을 겹쳐 띄우지 않는다.** 분석이 여럿 끝나면 예전에는 선택 창의 exec() 안에서 다음
+        창의 exec()가 또 돌아, 맨 아래 창에서 확인을 눌러도 위의 창을 다 닫기 전까지 아무것도
+        대기열에 들어가지 않았다. 창 하나가 닫힐 때마다 줄의 다음 것을 연다.
+        """
+        self._selection_queue.append((episode_info, label))
+        if self._selection_open:
+            return
+        self._selection_open = True
+        try:
+            while self._selection_queue:
+                self._run_selection(*self._selection_queue.popleft())
+        finally:
+            self._selection_open = False
+
+    def _run_selection(self, episode_info: List[Dict[str, str]], label: str):
+        """선택 창 하나를 띄우고 고른 것만 대기열에 넣는다. 제목·표지 그림도 함께 넘긴다."""
         dialog = SeriesSelectionDialog(episode_info, self,
                                        self.config.get("theme", "light"))
-        if not dialog.exec():
+        accepted = run_dialog(dialog)
+        selected_urls = dialog.get_selected_urls() if accepted else []
+        if not accepted:
             self.append_log(t("log.selection_canceled", label=label))
             return
-        selected_urls = dialog.get_selected_urls()
         if not selected_urls:
             self.append_log(t("log.selection_empty", label=label))
             return
@@ -598,19 +665,27 @@ class MainWindow(QMainWindow):
         state = self._region_code or ("" if self._region_failed else None)
         if state is None or state == self._region_notified:
             return
-        if state == JAPAN_CODE:
-            lines = [t("log.region_ok")]
-            color_key = "log_success"
-        elif state:
-            lines = [t("log.region_not_japan"),
-                     t("log.region_use_vpn", country=country_name(state)),
-                     t("log.region_restricted")]
-            color_key = "notice"
-        else:
-            lines = [t(key) for key in self.REGION_FALLBACK_KEYS]
-            color_key = "notice"
+        lines, color_key = self._region_message(state)
         self._region_notified = state
         self.append_notice(t("log.heading_notice"), lines, color_key=color_key)
+
+    def _region_message(self, state: str):
+        """알릴 상태(국가 코드, 실패면 빈 문자열)를 지금 언어의 안내 줄과 색으로 바꾼다."""
+        if state == JAPAN_CODE:
+            return [t("log.region_ok")], "log_success"
+        if state:
+            return [t("log.region_not_japan"),
+                    t("log.region_use_vpn", country=country_name(state)),
+                    t("log.region_restricted")], "notice"
+        return [t(key) for key in self.REGION_FALLBACK_KEYS], "notice"
+
+    def _retranslate_region_notice(self):
+        """목록 위 안내 줄만 새 언어로 다시 쓴다. 로그에 같은 안내를 또 붙이지 않는다."""
+        state = getattr(self, "_region_notified", None)
+        if state is None:
+            return
+        lines, color_key = self._region_message(state)
+        self.ui.set_notice(lines[0], color_key)
 
     def stop_region_check(self):
         """지역 확인을 거둔다. 아직 답을 기다리는 중이면 그 답을 버리고 그냥 끝낸다.
@@ -881,9 +956,14 @@ def setup_translations(app: QApplication) -> None:
     정한 언어를 보는 것은, 설정에서 영어를 골랐는데 그 메뉴만 한국어로 남는 것이 이
     프로젝트의 다국어 작업을 시작하게 만든 불일치와 같은 종류이기 때문이다. 싣는 언어는
     spec의 TRANSLATION_LANGS가 정하고, 거기 없는 언어는 아무것도 설치하지 않아 Qt
-    기본값인 영어로 나온다.
+    기본값인 영어로 나온다. 언어를 바꿀 때 다시 불러도 되도록 앞서 건 번역은 떼어 낸다.
     """
     try:
+        previous = getattr(app, "_qt_translator", None)
+        if previous is not None:
+            app.removeTranslator(previous)
+            previous.deleteLater()
+            app._qt_translator = None
         locale = i18n.qt_locale()
         translator = QTranslator(app)
         candidates = [
@@ -893,6 +973,7 @@ def setup_translations(app: QApplication) -> None:
         for directory in candidates:
             if translator.load(locale, "qtbase", "_", directory):
                 app.installTranslator(translator)
+                app._qt_translator = translator
                 return
         print(f"INFO: {locale.name()} 용 Qt 번역을 찾지 못했습니다. 영어로 표시됩니다.")
     except Exception as e:
@@ -927,6 +1008,12 @@ def setup_app_font(app: QApplication) -> None:
 if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
+    if not acquire_instance_lock():
+        notify_running_instance(TRAY_REQUEST if autostart.launched_for_tray() else SHOW_REQUEST)
+        sys.exit(0)
+    QLocalServer.removeServer(SOCKET_NAME)
+    server = QLocalServer()
+    server.listen(SOCKET_NAME)
     config = load_config()
     i18n.setup(config)
     theme = config.get("theme", "light")
@@ -934,22 +1021,11 @@ if __name__ == "__main__":
     setup_translations(app)
     setup_app_font(app)
     app.setStyleSheet(build_qss(theme))
-    socket = QLocalSocket()
-    socket.connectToServer(SOCKET_NAME)
-    if socket.waitForConnected(500):
-        socket.writeData(TRAY_REQUEST if autostart.launched_for_tray() else SHOW_REQUEST)
-        socket.flush(); socket.waitForBytesWritten(1000)
-        socket.close()
-        sys.exit(0)
-    else:
-        QLocalServer.removeServer(SOCKET_NAME)
-        server = QLocalServer()
-        server.listen(SOCKET_NAME)
-        app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
-        app.setStyle("Fusion")
-        window = MainWindow()
-        window._local_server = server
-        server.newConnection.connect(window._handle_new_instance)
-        if not autostart.launched_for_tray():
-            window.show()
-        sys.exit(app.exec())
+    app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
+    app.setStyle("Fusion")
+    window = MainWindow()
+    window._local_server = server
+    server.newConnection.connect(window._handle_new_instance)
+    if not autostart.launched_for_tray():
+        window.show()
+    sys.exit(app.exec())

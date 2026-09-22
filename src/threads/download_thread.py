@@ -33,6 +33,35 @@ DRIVE_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:)+")
 UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*]')
 """윈도우가 파일 이름에 허용하지 않는 글자. 벗어난 이름을 한 덩이로 접을 때 지운다."""
 
+VIDEO_CODEC_KEY = "_video_codec"
+"""끝난 신호의 메타데이터에 영상 코덱을 실어 보내는 키.
+
+**변환할지 가르는 ffprobe를 창 스레드에서 돌리지 않으려고 둔다.** 예전에는 다운로드가
+끝날 때마다 DownloadManager가 창 스레드에서 ffprobe를 띄워 기다렸다. 음성 확인과 같은
+호출에서 함께 읽어 오므로 띄우는 횟수도 하나 줄었다.
+"""
+
+
+def parse_stream_entries(text: str) -> List[Dict[str, str]]:
+    """`ffprobe -of default=noprint_wrappers=1`이 스트림마다 늘어놓은 `키=값` 줄을 스트림별로 묶는다.
+
+    구분자가 없어서 이미 본 키가 다시 나오면 다음 스트림으로 넘어간 것으로 본다.
+    """
+    streams: List[Dict[str, str]] = []
+    current: Dict[str, str] = {}
+    for line in (text or "").splitlines():
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            continue
+        if key in current:
+            streams.append(current)
+            current = {}
+        current[key] = value.strip()
+    if current:
+        streams.append(current)
+    return streams
+
 
 def sanitize_relative_path(path_without_ext: str) -> str:
     """이름을 지키면서 흔한 이탈을 걷어낸다. **폴더 안이라는 보장은 여기서 서지 않는다.**
@@ -210,6 +239,7 @@ class DownloadThread(QThread):
         self._parts = self.DEFAULT_PARTS; self._part_index = -1; self._aside = False
         self._sidecar_paths: set = set()
         self._thumbnail_embed_failed = False
+        self._video_codec: Optional[str] = None
         self._metadata: Dict = {}
         self._preloaded_metadata: Dict = preloaded_metadata or {}
         """대기열에서 기다리는 동안 미리 받아 둔 영상 정보.
@@ -291,7 +321,10 @@ class DownloadThread(QThread):
             is_successful = False
             self.progress.emit(self.url, {"status": STATUS_ERROR,
                                           "log": t("download.thread_error", error=e)})
-        self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", self._metadata)
+        metadata = self._metadata
+        if is_successful and self._video_codec:
+            metadata = {**(metadata or {}), VIDEO_CODEC_KEY: self._video_codec}
+        self.finished.emit(self.url, is_successful, self._final_filepath if is_successful else "", metadata)
 
     def _convert_vtt_to_srt(self, vtt_filepath: Path):
         """VTT를 SRT로 바꾸고 원본 VTT를 지운다.
@@ -447,9 +480,9 @@ class DownloadThread(QThread):
             return None
 
         command = [
-            ffprobe_path, '-v', 'error', '-select_streams', 'a',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
+            ffprobe_path, '-v', 'error',
+            '-show_entries', 'stream=codec_name,codec_type',
+            '-of', 'default=noprint_wrappers=1',
             filepath
         ]
         try:
@@ -465,7 +498,10 @@ class DownloadThread(QThread):
                                                    error=(proc.stderr or "").strip())})
             return None
 
-        return bool(proc.stdout.strip())
+        streams = parse_stream_entries(proc.stdout)
+        self._video_codec = next((s.get("codec_name") for s in streams
+                                  if s.get("codec_type") == "video" and s.get("codec_name")), None)
+        return any(s.get("codec_type") == "audio" for s in streams)
 
     def _warn_missing_audio(self):
         """음성이 빠진 이유를 짐작해 로그에 남긴다.
