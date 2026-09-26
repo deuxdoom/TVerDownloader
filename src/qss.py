@@ -664,6 +664,34 @@ def build_qss(theme: str = "dark") -> str:
     QProgressBar#Progress[state="error"]::chunk {{ background: {colors["danger"]}; }}
     QProgressBar#Progress[state="warn"]::chunk {{ background: {colors["warn"]}; }}
 
+    #UpdateFlowHeader, #UpdateFlow {{ background: transparent; }}
+    #UpdateFlowSteps {{ background: transparent; border-top: 1px solid {colors["border"]}; border-bottom: 1px solid {colors["border"]}; }}
+    #UpdateFlowFooter {{ background: transparent; border-top: 1px solid {colors["border"]}; }}
+    #UpdateFlowTitle {{ color: {colors["text"]}; font-size: 17px; font-weight: 700; }}
+    #UpdateFlowSubtitle, #UpdateFlowMono {{ font-family: {mono}; font-size: 12px; color: {colors["text_dim"]}; }}
+    #UpdateFlowSubtitle[tone="done"] {{ color: {colors["refresh"]}; }}
+    #UpdateFlowSubtitle[tone="failed"] {{ color: {colors["danger"]}; }}
+    #UpdateFlowStepText {{ font-size: 12px; font-weight: 700; color: {colors["text_dim"]}; }}
+    #UpdateFlowStepText[tone="active"] {{ color: {colors["primary"]}; }}
+    #UpdateFlowStepText[tone="done"] {{ color: {colors["refresh"]}; }}
+    #UpdateFlowStepText[tone="failed"] {{ color: {colors["danger"]}; }}
+    #UpdateFlowStepLine {{ background: {colors["border"]}; }}
+    #UpdateFlowStepLine[tone="done"] {{ background: {colors["refresh"]}; }}
+    #UpdateFlowDim {{ color: {colors["text_dim"]}; font-size: 12px; }}
+    #UpdateFlowSmallTitle {{ font-size: 12px; font-weight: 700; color: {colors["text_dim"]}; }}
+    #UpdateFlowPercent {{ font-family: {mono}; font-size: 28px; font-weight: 700; color: {colors["text"]}; }}
+    QProgressBar#UpdateFlowProgress {{ background: {colors["border"]}; border: none; border-radius: 3px; min-height: 6px; max-height: 6px; }}
+    QProgressBar#UpdateFlowProgress::chunk {{ background: {colors["primary"]}; border-radius: 3px; }}
+    QProgressBar#UpdateFlowProgress[state="done"]::chunk {{ background: {colors["refresh"]}; }}
+    QProgressBar#UpdateFlowProgress[state="error"]::chunk {{ background: {colors["danger"]}; }}
+    #UpdateFlowNotice {{ background: {colors["bg_alt"]}; border: 1px solid {colors["border"]}; border-radius: 8px; padding: 10px; color: {colors["text_dim"]}; }}
+    #UpdateFlowSummary {{ background: {blend(colors["refresh"], colors["surface"], 0.07)}; border: 1px solid {blend(colors["refresh"], colors["surface"], 0.22)}; border-radius: 8px; }}
+    #UpdateFlowCause {{ background: {blend(colors["danger"], colors["surface"], 0.07)}; border: 1px solid {blend(colors["danger"], colors["surface"], 0.20)}; border-radius: 8px; }}
+    #UpdateFlowCauseTitle {{ color: {colors["danger"]}; font-weight: 700; }}
+    QLabel[tone="pending"] {{ color: {colors["text_dim"]}; }}
+    QLabel[tone="failed"] {{ color: {colors["danger"]}; }}
+    QPushButton#UpdateFlowSecondary {{ border-color: {colors["border_strong"]}; background: {colors["surface"]}; }}
+
     /* 구분선 */
     #Separator {{ background: {colors["border"]}; border: none; }}
 

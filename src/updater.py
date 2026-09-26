@@ -2,20 +2,23 @@
 
 예전에는 알리고 브라우저만 열어 줬는데, 어느 파일을 남겨야 하는지가 분명하지 않아 bin이나
 설정까지 함께 지우는 일이 생겼다. **다만 교체 자체는 여기서 하지 않는다** - 실행 중인 exe는
-자기를 덮어쓸 수 없어 받아 놓기까지만 하고 나머지는 배치에 넘긴다(src/self_update.py).
+자기를 덮어쓸 수 없어 받아 놓기까지만 하고 나머지는 별도 적용 창에 넘긴다.
 
 소스로 돌릴 때는 확인만 하고 버튼을 내준다. 개발 중인 폴더를 릴리스로 덮으면 고치던 것이 날아간다.
 """
 from __future__ import annotations
 
+import os
 import re
 import webbrowser
 
 from src import self_update
 from src.i18n import t
-from src.message import confirm, confirm_single, confirm_with_link, notify
-from src.utils import github_api_headers, is_rate_limited, rate_limit_message
+from src.message import confirm_single, notify
+from src.utils import (expected_sha256, github_api_headers, is_rate_limited,
+                       rate_limit_message)
 from src.window_frame import run_dialog
+from versioninfo import APP_VERSION
 
 API_URL = "https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest"
 RELEASE_PAGE_URL = "https://github.com/deuxdoom/TVerDownloader/releases/latest"
@@ -91,12 +94,7 @@ def maybe_show_update(parent, current_version: str, log=print, *,
 
 def prompt_and_update(parent, release: dict, log=print, *,
                       pending_downloads: int = 0, single_button: bool = False) -> None:
-    """새 버전 안내창을 띄우고, 받겠다고 하면 끝까지 진행한다.
-
-    시작할 때의 확인과 정보 창의 확인이 같은 흐름을 쓰도록 여기 하나로 모았다. **단추
-    구성만 다르다** - 시작할 때 뜨는 것은 묻지도 않았는데 나온 창이라 둘을 주고, 정보
-    창에서 눌러 들어온 쪽은 이미 받겠다고 누른 것이라 하나면 된다(single_button).
-    """
+    """확인과 받기를 같은 창에서 이어, 받던 항목 경고도 결정 전에 보여 준다."""
     latest_tag = release_tag(release)
     html_url = release.get("html_url") or RELEASE_PAGE_URL
     theme = _theme_of(parent)
@@ -106,39 +104,9 @@ def prompt_and_update(parent, release: dict, log=print, *,
         _offer_browser(parent, latest_tag, html_url, theme, asset is None)
         return
 
-    body = t("update.available_body", tag=latest_tag)
-
-    def open_release_page():
-        """무엇이 바뀌었는지 브라우저로 보여 준다. 창은 닫히고 받지는 않는다."""
-        log(t("log.update_open_release", url=html_url))
-        try:
-            webbrowser.open(html_url)
-        except Exception:
-            pass
-
-    if single_button:
-        accepted = confirm_single(parent, t("update.check_title"), body,
-                                  ok_text=t("update.auto_update"),
-                                  icon_name="download", theme=theme)
-    else:
-        accepted = confirm_with_link(parent, t("update.check_title"), body,
-                                     yes_text=t("update.now"),
-                                     link_text=t("update.changelog"),
-                                     on_link=open_release_page,
-                                     icon_name="download", theme=theme)
-    if not accepted:
-        log(t("log.update_later", tag=latest_tag))
-        return
-
-    if pending_downloads and not confirm(
-            parent, t("update.pending_title"),
-            t("update.pending_body", count=pending_downloads),
-            icon_name="download", color_key="danger", theme=theme,
-            yes_text=t("update.pending_yes"), no_text=t("common.cancel")):
-        log(t("log.update_pending_canceled"))
-        return
-
-    start_update(parent, asset, latest_tag, log, theme)
+    start_update(parent, asset, latest_tag, log, theme, release=release,
+                 pending_downloads=pending_downloads, single_button=single_button,
+                 html_url=html_url)
 
 
 def _theme_of(parent) -> str:
@@ -168,39 +136,51 @@ def _offer_browser(parent, latest_tag: str, html_url: str, theme: str,
 
 
 def start_update(parent, asset: dict, latest_tag: str, log=print,
-                 theme: str = "light") -> None:
-    """받아서 준비하고, 다 되면 배치에 넘기고 앱을 끝낸다.
-
-    준비가 끝나기 전까지는 지금 쓰는 버전에 아무 일도 일어나지 않는다.
-    """
+                 theme: str = "light", *, release: dict | None = None,
+                 pending_downloads: int = 0, single_button: bool = False,
+                 html_url: str = "") -> None:
+    """확인·받기 창의 성공 뒤에만 새 실행본을 띄워 본체를 닫는다."""
     from src.ui.update_dialog import UpdateProgressDialog
 
-    work = self_update.prepare_workspace()
-    if work is None:
+    work = None if release is not None else self_update.prepare_workspace()
+    if release is None and work is None:
         notify(parent, t("update.cannot_title"), t("update.cannot_body"),
                icon_name="info", color_key="warn", theme=theme)
-        log(t("log.update_no_write"))
         return
-
-    log(t("log.update_start", tag=latest_tag))
     dialog = UpdateProgressDialog(asset.get("browser_download_url", ""), work,
-                                  latest_tag, parent, theme)
+                                  latest_tag, parent, theme, expected_sha256(asset),
+                                  release=release, asset=asset,
+                                  pending_count=pending_downloads,
+                                  single_button=single_button,
+                                  html_url=html_url, log=log)
     ok = run_dialog(dialog)
+    work = dialog.work_dir
 
     if not ok:
-        self_update.cleanup_workspace()
+        if work is not None:
+            self_update.cleanup_workspace()
         reason = dialog.failure_reason
         if reason:
             log(t("log.update_failed", reason=reason))
-            notify(parent, t("update.failed_title"),
-                   t("update.failed_body", reason=reason),
-                   icon_name="info", color_key="warn", theme=theme)
         else:
-            log(t("log.update_user_canceled"))
+            log(t("log.update_user_canceled") if dialog.started_download
+                else t("log.update_later", tag=latest_tag))
         return
 
     log(t("log.update_ready"))
-    if not self_update.launch_updater(work):
+    if not self_update.staged_payload_ok(work):
+        self_update.cleanup_workspace()
+        notify(parent, t("update.failed_title"), t("update.err_incomplete"),
+               icon_name="info", color_key="warn", theme=theme)
+        return
+    point = dialog.frameGeometry().topLeft()
+    manager = getattr(parent, "download_manager", None)
+    queued = manager.pending_count() if manager is not None else pending_downloads
+    launched = self_update.launch_apply_mode(work, os.getpid(), APP_VERSION,
+                                             (point.x(), point.y()), queued=queued)
+    if not launched:
+        launched = self_update.launch_updater(work)
+    if not launched:
         self_update.cleanup_workspace()
         notify(parent, t("update.failed_title"), t("update.launch_failed_body"),
                icon_name="info", color_key="warn", theme=theme)

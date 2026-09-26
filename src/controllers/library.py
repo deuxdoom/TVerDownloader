@@ -17,7 +17,7 @@ from PyQt6.QtGui import QCursor
 
 from src.i18n import t
 from src.message import confirm, notify
-from src.utils import open_file_location
+from src.utils import canonical_url, match_tver_url, open_file_location, pick_thumbnail
 from src.qtparts import RoundedMenu
 from src.widgets import (FavoriteItemWidget, HistoryItemWidget,
                          clear_item_widgets)
@@ -99,10 +99,13 @@ class LibraryController:
         return entries
 
     def _add_history_row(self, url: str, meta: dict):
-        """카드 한 장을 목록 끝에 붙인다. 표지 그림도 회차 id도 없으면 글자 줄로 세운다."""
+        """카드 한 장을 목록 끝에 붙인다. 그림을 얻을 길도 시리즈 id도 없으면 글자 줄로 세운다.
+
+        TVer 회차는 적어 둔 주소가 비어 있어도 id로 그림을 얻는다(그림 주소 없이 쌓인 옛 기록 92개).
+        """
         window = self.window
         item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, url)
-        if meta.get("series_id") or meta.get("thumbnail_url"):
+        if meta.get("series_id") or pick_thumbnail(url, meta.get("thumbnail_url")):
             widget = HistoryItemWidget(url, meta, window.config.get("theme", "light")); item.setSizeHint(widget.sizeHint())
             window.ui.history_list.addItem(item); window.ui.history_list.setItemWidget(item, widget)
         else:
@@ -231,11 +234,12 @@ class LibraryController:
                    icon_name="tab_favorites", color_key="warn", theme=window.config.get("theme", "light"))
             return
 
-        url = window.ui.fav_input.text().strip()
+        url = match_tver_url(window.ui.fav_input.text())
         if not url or "/series/" not in url:
             notify(window, t("dialog.notice_title"), t("dialog.favorite_invalid_url"),
                    icon_name="info", color_key="warn", theme=window.config.get("theme", "light"))
             return
+        url = canonical_url(url)
         if window.fav_store.exists(url):
             notify(window, t("dialog.notice_title"), t("dialog.favorite_exists"),
                    icon_name="tab_favorites", theme=window.config.get("theme", "light"))

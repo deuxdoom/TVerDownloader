@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from src.i18n import t
 from src.thumbnails import (cache_key_for, discard_thumbnail_requests, lookup_thumbnail,
                             remember_thumbnail, start_thumbnail_download)
+from src.utils import THUMB_LIST_SIZE, pick_thumbnail
 from src.window_frame import apply_dialog_frame
 
 class SeriesSelectionDialog(QDialog):
@@ -64,10 +65,11 @@ class SeriesSelectionDialog(QDialog):
         **원본을 풀어 아이콘에 넣지 않는다.** 예전에는 회차마다 1280x720을 창 스레드에서 풀어
         예순 화짜리 창 하나가 뜨는 데 0.57초, 그림만 200MB가 넘었다(실측).
         """
-        thumb_url = episode_meta.get("thumbnail_url")
+        page_url = str(episode_meta.get("url", ""))
+        thumb_url = pick_thumbnail(page_url, episode_meta.get("thumbnail_url"), THUMB_LIST_SIZE)
         if not thumb_url:
             return
-        episode_id = str(episode_meta.get("url", "")).strip('/').split('/')[-1]
+        episode_id = page_url.strip('/').split('/')[-1]
         key = cache_key_for(episode_id, thumb_url)
         pixmap = lookup_thumbnail(key, self.ICON_W, self.ICON_H, self.devicePixelRatioF(), 0)
         if pixmap is not None:

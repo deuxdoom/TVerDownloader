@@ -1,12 +1,13 @@
 """새 버전으로 자기 자신을 갈아 끼우는 일.
 
-실행 중인 exe는 자기를 덮어쓸 수 없어 교체는 배치가 맡는다. 바꾸는 것은 exe와
+실행 중인 exe는 자기를 덮어쓸 수 없어 교체는 새 실행본이 맡고, 실패하면 배치로 넘긴다. 바꾸는 것은 exe와
 _internal 둘뿐이고 나머지(bin·설정·기록·썸네일)는 사용자 것이라 손대지 않는다.
 백신이 드로퍼로 보지 않도록 %TEMP%·taskkill·자기 삭제·powershell·내려받기는 쓰지 않는다.
 """
 from __future__ import annotations
 
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -230,8 +231,8 @@ def build_batch(app_directory: Path, work_directory: Path, pid: int,
     돌아간 뒤 줄 중간부터 실행되어 주석의 꼬리가 명령이 된다. 앞으로만 가는 구간은 멀쩡해
     사용자가 읽을 안내를 t()로 넣는다 - 값은 반드시 echo_safe를 거친다.
     """
-    app = str(app_directory)
-    work = str(work_directory)
+    app = str(app_directory).replace("%", "%%")
+    work = str(work_directory).replace("%", "%%")
     say = lambda key, **kw: echo_safe(t(key, **kw))
     return f"""@echo off
 chcp 65001 > nul
@@ -342,6 +343,8 @@ def prepare_workspace() -> Optional[Path]:
     if base is None or not is_writable(base):
         return None
     shutil.rmtree(work, ignore_errors=True)
+    if (work / NEW_DIR_NAME).exists():
+        return None
     try:
         (work / NEW_DIR_NAME).mkdir(parents=True, exist_ok=True)
         (work / BACKUP_DIR_NAME).mkdir(parents=True, exist_ok=True)
@@ -350,14 +353,73 @@ def prepare_workspace() -> Optional[Path]:
     return work
 
 
-def cleanup_workspace() -> None:
-    """남아 있는 작업 폴더를 지운다. 앱이 켜질 때 부른다.
-
-    여기까지 왔다는 것은 새 버전이 실제로 떴다는 뜻이라 그때 백업을 버려도 안전하다.
-    """
+def cleanup_workspace(preserve_new: bool = False) -> None:
+    """새 적용 창이 자기 실행본을 쓰는 동안에는 new를 남기고 다음 실행에 지운다."""
     work = work_dir()
-    if work is not None and work.exists():
+    if work is None or not work.exists():
+        return
+    if preserve_new:
+        try:
+            items = list(work.iterdir())
+        except OSError:
+            return
+        for item in items:
+            if item.name == NEW_DIR_NAME:
+                continue
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink()
+            except OSError:
+                pass
+    else:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def read_result() -> Optional[dict]:
+    work = work_dir()
+    if work is None:
+        return None
+    try:
+        result = json.loads((work / "result.json").read_text(encoding="utf-8-sig"))
+        return result if isinstance(result, dict) else None
+    except (ValueError, OSError):
+        return None
+
+
+def clear_result() -> None:
+    work = work_dir()
+    if work is not None:
+        try:
+            (work / "result.json").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def previous_window_open() -> bool:
+    work = work_dir()
+    return work is not None and (work / NEW_DIR_NAME).exists()
+
+
+def launch_apply_mode(work: Path, pid: int, from_version: str,
+                      pos: tuple[int, int] | None = None, queued: int = 0) -> bool:
+    base = app_dir()
+    if base is None:
+        return False
+    exe = work / NEW_DIR_NAME / APP_EXE_NAME
+    command = [str(exe), "--apply-update", "--pid", str(pid),
+               "--app-dir", str(base), "--work-dir", str(work),
+               "--from-version", from_version, "--queued", str(queued)]
+    if pos is not None:
+        command.extend(["--pos", f"{pos[0]},{pos[1]}"])
+    try:
+        subprocess.Popen(command, cwd=str(work / NEW_DIR_NAME),
+                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                         close_fds=True)
+        return True
+    except OSError:
+        return False
 
 
 def launch_updater(work: Path, pid: Optional[int] = None) -> bool:

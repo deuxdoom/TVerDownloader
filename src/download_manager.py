@@ -1,5 +1,6 @@
 import os
 import subprocess
+from contextlib import contextmanager
 from typing import List, Dict, Optional, Any
 from PyQt6.QtCore import QObject, QDeadlineTimer, pyqtSignal
 
@@ -10,7 +11,7 @@ from src.metadata_prefetch import MetadataPrefetcher
 from src.i18n import t
 from src.queue_store import QueueStore
 from src.utils import (get_startupinfo, DEFAULT_PARALLEL, resolve_ffprobe_path,
-                       item_percent, canonical_url, canonicalize_config_fragments,
+                       item_percent, canonical_url, canonicalize_config_fragments, pick_thumbnail,
                        canonicalize_config_codec, canonicalize_config_encoder,
                        STATUS_CONVERTING, STATUS_DONE, STATUS_CONVERT_ERROR)
 
@@ -49,6 +50,8 @@ class DownloadManager(QObject):
         """
         self._concurrency_logged = False
         self._shutting_down = False
+        self._queue_batch_depth = 0
+        self._queue_dirty = False
         self._item_percent: Dict[str, int] = {}
         self._prefetch = MetadataPrefetcher(self)
         self._prefetch.set_wanted_check(self.is_queued)
@@ -132,7 +135,7 @@ class DownloadManager(QObject):
         비우기 전에 남은 대기열을 적고(뒤에 적으면 빈 목록으로 덮인다), 멈춘 뒤에는 쓰다 만
         파일을 지우는 스레드를 STOP_WAIT_MS만큼 기다린다.
         """
-        self._persist_queue()
+        self._persist_queue(force=True)
         self._shutting_down = True
         self._task_queue.clear()
         self._conversion_queue.clear()
@@ -181,6 +184,8 @@ class DownloadManager(QObject):
         같은 회차가 대기열에 둘 서면 한 파일을 두 프로세스가 함께 쓴다.
         """
         url = canonical_url(url)
+        if url in self._active_urls and not self.is_pending(url):
+            self.reset_for_redownload(url)
         if not url or url in self._active_urls:
             if url in self._active_urls: self.log.emit(t("queue.already_queued", url=url))
             return False
@@ -216,7 +221,7 @@ class DownloadManager(QObject):
         """
         if not self.is_queued(url):
             return
-        self._emit_preview(url, metadata.get("title") or "", metadata.get("thumbnail") or "",
+        self._emit_preview(url, metadata.get("title") or "", pick_thumbnail(url, metadata),
                            metadata.get("duration"))
         self._persist_queue()
 
@@ -478,15 +483,29 @@ class DownloadManager(QObject):
                  "thumbnail": self._queue_meta.get(url, {}).get("thumbnail", "")}
                 for url in urls]
 
-    def _persist_queue(self):
+    @contextmanager
+    def batch_queue_changes(self):
+        """일괄 조작이 끝날 때 한 번 저장하되 예외로 빠져도 이미 바뀐 대기열은 남긴다."""
+        self._queue_batch_depth += 1
+        try:
+            yield
+        finally:
+            self._queue_batch_depth -= 1
+            if not self._queue_batch_depth and self._queue_dirty:
+                self._persist_queue()
+
+    def _persist_queue(self, force: bool = False):
         """지금 남은 대기열을 파일에 적는다.
 
         멈추는 중이면 쓰지 않는다 - stop_all이 적어 둔 것을 빈 목록으로 덮어쓴다.
         """
         if self._queue_store is None or self._shutting_down:
             return
+        if self._queue_batch_depth and not force:
+            self._queue_dirty = True
+            return
         self._queue_store.replace(self._snapshot_pending())
-        self._queue_store.save()
+        self._queue_dirty = not self._queue_store.save()
 
     def _update_queue_counter(self):
         """대기·진행 개수를 알리고, 남은 대기열을 파일에도 반영한다.

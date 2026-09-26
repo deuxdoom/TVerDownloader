@@ -10,54 +10,24 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout, QProgressBar, QDialog,
-    QScrollArea, QToolButton, QListWidget, QSizePolicy
+    QScrollArea, QToolButton, QListWidget
 )
 
 from src.icons import get_icon
 from src.i18n import t
 from src.qss import blend, palette
+from src.qtparts import ElidedLabel
 from src.window_frame import apply_dialog_frame, run_dialog
-from src.thumbnails import (ThumbnailDownloader, cache_key_for,
-                            discard_thumbnail_requests, lookup_thumbnail,
+from src.thumbnails import (cache_key_for, discard_thumbnail_requests, lookup_thumbnail,
                             original_path, remember_thumbnail,
                             start_thumbnail_download)
 from src.utils import (ERROR_STATUSES, FINISHED_STATUSES, NO_AUDIO_STATUS,
-                       format_duration, item_percent,
+                       format_duration, item_percent, pick_thumbnail,
+                       THUMB_LIST_SIZE, THUMB_ORIGINAL_SIZE,
                        STATUS_QUEUED, STATUS_DOWNLOADING,
                        STATUS_CONVERTING, STATUS_DONE)
 
 LIST_THUMB_W, LIST_THUMB_H = 128, 72
-
-
-class ElidedLabel(QLabel):
-    """폭이 모자라면 말줄임표로 줄여 보여 주는 라벨. QLabel은 문장을 그냥 잘라 낸다."""
-
-    def __init__(self, text: str = "", mode=Qt.TextElideMode.ElideRight, parent=None):
-        super().__init__(parent)
-        self._full_text = text
-        self._mode = mode
-        self.setWordWrap(False)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.setMinimumWidth(0)
-        self._apply_elide()
-
-    def setText(self, text: str):
-        self._full_text = text
-        self._apply_elide()
-
-    def full_text(self) -> str:
-        return self._full_text
-
-    def _apply_elide(self):
-        width = max(0, self.width())
-        if width <= 0:
-            super().setText(self._full_text)
-            return
-        super().setText(self.fontMetrics().elidedText(self._full_text, self._mode, width))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._apply_elide()
 
 
 class EmptyStateOverlay(QWidget):
@@ -357,19 +327,31 @@ class ThumbnailCard(QWidget):
 
     THUMB_SIZE = (LIST_THUMB_W, LIST_THUMB_H)
     THUMB_CORNER = 4
+    SOURCE_SIZE = THUMB_LIST_SIZE
+    """TVer에서 받을 그림 크기. 목록 카드는 작은 사본만 쓰므로 작은 것을 받는다."""
+    WANT_ORIGINAL = False
+    """원본을 캐시에 남길지. 저장·확대를 하는 다운로드 카드만 켠다."""
 
     def __init__(self, url: str, parent=None):
         super().__init__(parent)
         self.url = url
         self._thumb_url: Optional[str] = None
         self._cache_key: str = ""
-        self._thumb_downloader: Optional[ThumbnailDownloader] = None
+
+    def load_page_thumbnail(self, source=""):
+        """이 카드 주소의 그림을 건다. TVer는 id로 주소를 만들고, 그 밖은 source를 쓴다.
+
+        source는 yt-dlp 메타데이터나 적어 둔 주소다. 같은 그림이면 다시 걸지 않는다.
+        """
+        url = pick_thumbnail(self.url, source, self.SOURCE_SIZE)
+        if url != (self._thumb_url or ""):
+            self.load_thumbnail(url, self._url_tail())
 
     def load_thumbnail(self, url: str, cache_key: str = ""):
         """메모리·작은 사본에 있으면 곧바로 얹고, 없으면 작업 스레드에 맡긴다.
 
         주소가 비어도 걸어 둔 것은 지운다 - 남겨 두면 앞선 요청이 뒤늦게 돌아왔을 때
-        이미 갈아탄 카드에 옛 그림이 붙는다.
+        이미 갈아탄 카드에 옛 그림이 붙는다. 원본이 필요한 카드는 사본을 얹은 뒤에도 원본을 받는다.
         """
         self._thumb_url = url or None
         if not url:
@@ -380,9 +362,10 @@ class ThumbnailCard(QWidget):
                                   self.devicePixelRatioF(), self.THUMB_CORNER)
         if pixmap is not None:
             self._apply_thumbnail(pixmap)
-            return
-        self._thumb_downloader = start_thumbnail_download(url, self._on_thumb_finished,
-                                                          self._cache_key)
+            if not self.WANT_ORIGINAL or original_path(self._cache_key).exists():
+                return
+        start_thumbnail_download(url, self._on_thumb_finished, self._cache_key,
+                                 self.WANT_ORIGINAL)
 
     def _url_tail(self) -> str:
         """주소 끝 토막. 캐시 이름과 시리즈 판별이 이것으로 갈린다.
@@ -395,16 +378,8 @@ class ThumbnailCard(QWidget):
         return self.url.strip('/').split('/')[-1]
 
     def cleanup(self):
-        """목록에서 빠지기 전에 썸네일 요청과 콜백을 끊는다. 지워진 라벨을 건드리면 앱이 죽는다."""
+        """목록에서 빠지기 전에 썸네일 요청에서 빠진다. 지워진 라벨을 건드리면 앱이 죽는다."""
         discard_thumbnail_requests(self)
-        downloader = self._thumb_downloader
-        self._thumb_downloader = None
-        if downloader is None or sip.isdeleted(downloader):
-            return
-        try:
-            downloader.loaded.disconnect(self._on_thumb_finished)
-        except (TypeError, RuntimeError):
-            pass
 
     def _on_thumb_finished(self, result: tuple):
         """작업 스레드가 만든 작은 그림을 얹는다. 그림으로 읽히지 않은 응답은 image가 None이다.
@@ -443,6 +418,8 @@ class DownloadItemWidget(ThumbnailCard):
     PROGRESS_ANIM_MS = 240
     THUMB_SIZE = (THUMB_W, THUMB_H)
     THUMB_CORNER = THUMB_RADIUS
+    SOURCE_SIZE = THUMB_ORIGINAL_SIZE
+    WANT_ORIGINAL = True
 
     def __init__(self, url: str, theme: str = "light", parent=None):
         super().__init__(url, parent)
@@ -520,6 +497,7 @@ class DownloadItemWidget(ThumbnailCard):
         self.folder_btn.clicked.connect(self._emit_open_folder)
         self._set_actions_visible(False)
         self.apply_theme(theme)
+        self.load_page_thumbnail()
 
     def _make_action_button(self, icon_name: str, tooltip: str) -> HoverTintButton:
         return HoverTintButton(icon_name, tooltip, self)
@@ -681,8 +659,8 @@ class DownloadItemWidget(ThumbnailCard):
         self.set_duration(self._duration)
 
     def update_progress(self, payload: dict):
-        if "thumbnail" in payload and payload["thumbnail"] != self._thumb_url:
-            self.load_thumbnail(payload["thumbnail"] or "", self._url_tail())
+        if "thumbnail" in payload:
+            self.load_page_thumbnail(payload["thumbnail"] or "")
         if payload.get("title"):
             self._title_known = True
             self.title_label.setText(payload["title"])
@@ -741,7 +719,6 @@ class FavoriteItemWidget(ThumbnailCard):
     CARD_HEIGHT = 112
     TITLE_LINES = 2
     TITLE_PADDING = 4
-    THUMB_URL = "https://statics.tver.jp/images/content/thumbnail/series/large/{series_id}.jpg"
 
     def __init__(self, url: str, meta: Dict[str, str], theme: str = "light", parent=None):
         super().__init__(url, parent)
@@ -776,7 +753,7 @@ class FavoriteItemWidget(ThumbnailCard):
         root.addLayout(body, 1)
 
         self.apply_theme(theme)
-        self._load_or_download_thumbnail()
+        self.load_page_thumbnail()
 
     def sizeHint(self) -> QSize:
         return QSize(super().sizeHint().width(), self.CARD_HEIGHT)
@@ -787,13 +764,6 @@ class FavoriteItemWidget(ThumbnailCard):
 
     def set_selected(self, selected: bool):
         set_selected_style((self, self.title_label, self.url_label, self.last_check_label), selected)
-
-    def _load_or_download_thumbnail(self):
-        """시리즈 표지는 주소를 따로 받지 않고 시리즈 id에서 규칙으로 만든다."""
-        series_id = self._url_tail()
-        if not series_id.startswith('sr'):
-            return
-        self.load_thumbnail(self.THUMB_URL.format(series_id=series_id), series_id)
 
 
 class HistoryItemWidget(ThumbnailCard):
@@ -818,7 +788,7 @@ class HistoryItemWidget(ThumbnailCard):
         info_layout.addWidget(self.url_label); info_layout.addStretch(1); body.addLayout(info_layout, 1)
         root.addLayout(body, 1)
         self.apply_theme(theme)
-        self._load_or_download_thumbnail()
+        self.load_page_thumbnail(self.meta.get("thumbnail_url") or "")
 
     def apply_theme(self, theme: str):
         self._colors = palette(theme)
@@ -826,7 +796,3 @@ class HistoryItemWidget(ThumbnailCard):
 
     def set_selected(self, selected: bool):
         set_selected_style((self, self.title_label, self.date_label, self.url_label), selected)
-
-    def _load_or_download_thumbnail(self):
-        """회차 표지 주소는 기록에 적혀 있다. 캐시 이름은 회차 id로 짓는다."""
-        self.load_thumbnail(self.meta.get("thumbnail_url") or "", self._url_tail())

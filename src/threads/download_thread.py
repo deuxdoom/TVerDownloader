@@ -1,9 +1,9 @@
-import os, re, json, signal, subprocess, threading
+import os, re, json, signal, subprocess, threading, hashlib
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.utils import (get_startupinfo, FILENAME_TITLE_MAX_LENGTH,
-                       NO_AUDIO_STATUS, resolve_ffprobe_path,
+                       NO_AUDIO_STATUS, resolve_ffprobe_path, pick_thumbnail,
                        STATUS_DOWNLOADING, STATUS_CANCELING, STATUS_SUBTITLE_CONVERTING,
                        STATUS_MERGING, STATUS_EMBEDDING_SUBS,
                        STATUS_DONE, STATUS_ERROR, STATUS_CANCELED)
@@ -31,6 +31,8 @@ DRIVE_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:)+")
 """
 
 UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*]')
+YTDLP_FORBIDDEN_RE = re.compile(r'[<>:"|?*]')
+YTDLP_TRAILING_RE = re.compile(r'[\s.]$')
 """윈도우가 파일 이름에 허용하지 않는 글자. 벗어난 이름을 한 덩이로 접을 때 지운다."""
 
 VIDEO_CODEC_KEY = "_video_codec"
@@ -81,12 +83,17 @@ def sanitize_relative_path(path_without_ext: str) -> str:
     """
     parts: List[str] = []
     for part in path_without_ext.replace("\\", "/").split("/"):
-        cleaned = part.strip()
+        cleaned = part.lstrip()
         if not parts:
-            cleaned = DRIVE_PREFIX_RE.sub("", cleaned).strip()
-        if not cleaned or set(cleaned) == {"."}:
+            cleaned = DRIVE_PREFIX_RE.sub("", cleaned).lstrip()
+        if not cleaned.strip() or set(cleaned.strip()) == {"."}:
             continue
         parts.append(cleaned)
+    for index, part in enumerate(parts):
+        part = YTDLP_FORBIDDEN_RE.sub("#", part)
+        if index < len(parts) - 1:
+            part = YTDLP_TRAILING_RE.sub("#", part)
+        parts[index] = part
     return "/".join(parts)
 
 
@@ -378,7 +385,7 @@ class DownloadThread(QThread):
             self.progress.emit(self.url, {"status": STATUS_ERROR, "log": t("download.metadata_failed")}); return False
 
         self.progress.emit(self.url, {"title": self._metadata.get("title") or t("download.title_unknown"),
-                                      "thumbnail": self._metadata.get("thumbnail"),
+                                      "thumbnail": pick_thumbnail(self.url, self._metadata),
                                       "duration": self._metadata.get("duration")})
         self._final_filepath = self._build_final_filepath(self._metadata)
         command = self._build_command(self._final_filepath)
@@ -568,16 +575,22 @@ class DownloadThread(QThread):
 
             episode_title = re.sub(r'^[:\-\s\u3000]+', '', episode_title).strip()
 
+        fallback_id = str(metadata.get('id') or hashlib.sha256(self.url.encode('utf-8')).hexdigest())
+
         def replacer(match):
             key = match.group(1)
             if key == 'title':
                 return episode_title[:FILENAME_TITLE_MAX_LENGTH]
             elif key == 'series,playlist_title': return series_title
             elif key == 'upload_date>%Y-%m-%d': return (metadata.get('upload_date') or '')[:8]
+            elif key == 'id': return fallback_id
             else: return str(metadata.get(key, ''))
 
         path_without_ext = re.sub(r'%\((.*?)\)s', replacer, template)
         path_without_ext = re.sub(r'\s+', ' ', path_without_ext).strip()
+        directory, separator, name = path_without_ext.rpartition('/')
+        if not name.strip(' .'):
+            path_without_ext = f"{directory}{separator}[{fallback_id}]"
 
         full_dir = os.path.abspath(self.download_folder)
         final_ext = metadata.get('ext', ext)

@@ -3,17 +3,21 @@
 35MB쯤 되는 파일이라 창에서 받으면 그동안 앱이 굳고, 받는 중에 그만둘 수도 없다.
 
 **여기서는 아무것도 갈아 끼우지 않는다.** 받고, 깨지지 않았는지 보고, 작업 폴더에 펴 두는
-데까지다. 실제 교체는 본체가 닫힌 뒤 배치가 하므로(src/self_update.py) 이 단계에서 무엇이
-실패해도 지금 쓰는 버전은 그대로다.
+데까지다. 교체는 본체가 닫힌 뒤 별도 적용 창이 맡으므로 이 단계에서 실패해도 지금
+쓰는 버전은 그대로다.
 """
 from __future__ import annotations
 
+import hashlib
+import time
 from pathlib import Path
+from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src import self_update
 from src.i18n import t
+from src.ui.update_flow import SpeedMeter
 from src.utils import github_api_headers, is_rate_limited, rate_limit_message
 
 CHUNK_SIZE = 256 * 1024
@@ -34,15 +38,36 @@ class UpdateDownloadThread(QThread):
 
     finished = pyqtSignal(bool, str)
     """(성공 여부, 실패 사유). 성공이면 사유는 빈 문자열."""
+    detail = pyqtSignal(dict)
+    """속도와 작업 단계 등 새 업데이트 창에 필요한 값."""
 
     DOWNLOAD_SHARE = 85
-    """진행률에서 내려받기가 차지하는 몫. 나머지(확인·압축 풀기)보다 압도적으로 오래 걸린다."""
+    """받기가 확인과 압축 풀기보다 오래 걸리므로 진행률 대부분을 배정한다."""
+    SIGNAL_INTERVAL = 0.1
+    """진행 신호가 너무 잦으면 창의 배치·그리기가 다운로드를 따라잡지 못한다."""
 
-    def __init__(self, asset_url: str, work_dir: Path, parent=None):
+    def __init__(self, asset_url: str, work_dir: Path, parent=None,
+                 expected_digest: Optional[str] = None):
         super().__init__(parent)
         self.asset_url = asset_url
         self.work_dir = Path(work_dir)
+        self.expected_digest = expected_digest
         self._stop_flag = False
+        self._last_signal = 0.0
+        self._meter = SpeedMeter()
+
+    def _report(self, percent: int, message: str, task: str, *,
+                received: int = 0, total: int = 0, force: bool = False):
+        now = time.monotonic()
+        speed = self._meter.add(received, now) if task == "download" else 0.0
+        if not force and now - self._last_signal < self.SIGNAL_INTERVAL:
+            return
+        self._last_signal = now
+        self.progress.emit(percent, message)
+        self.detail.emit({"received": received, "total": total,
+                          "speed_bps": speed,
+                          "eta_s": (total - received) / speed if total and speed else None,
+                          "task": task, "task_state": "active"})
 
     def stop(self):
         """받기를 그만둔다. 다음 덩이를 읽을 때 빠져나온다."""
@@ -62,7 +87,7 @@ class UpdateDownloadThread(QThread):
             return False, t("update.err_no_requests")
 
         zip_path = self.work_dir / "package.zip"
-        self.progress.emit(0, t("update.downloading"))
+        self._report(0, t("update.downloading"), "download", force=True)
 
         try:
             response = requests.get(
@@ -79,6 +104,7 @@ class UpdateDownloadThread(QThread):
 
             total = int(response.headers.get("Content-Length") or 0)
             received = 0
+            digest = hashlib.sha256()
             try:
                 with open(zip_path, "wb") as out:
                     for chunk in response.iter_content(CHUNK_SIZE):
@@ -87,31 +113,40 @@ class UpdateDownloadThread(QThread):
                         if not chunk:
                             continue
                         out.write(chunk)
+                        digest.update(chunk)
                         received += len(chunk)
                         if total:
                             percent = int(received * self.DOWNLOAD_SHARE / total)
-                            self.progress.emit(
-                                percent,
-                                t("update.downloading_progress",
-                                  done=f"{received // (1024 * 1024)}MB",
-                                  total=f"{total // (1024 * 1024)}MB"))
+                            self._report(percent,
+                                         t("update.downloading_progress",
+                                           done=f"{received // (1024 * 1024)}MB",
+                                           total=f"{total // (1024 * 1024)}MB"),
+                                         "download", received=received, total=total,
+                                         force=received >= total)
             except Exception as error:
                 return False, t("update.err_download", error=error)
 
         if self._stop_flag:
             return False, ""
 
-        self.progress.emit(self.DOWNLOAD_SHARE, t("update.verifying"))
+        self._report(self.DOWNLOAD_SHARE, t("update.verifying"), "verify",
+                     received=received, total=total, force=True)
+        if self.expected_digest and digest.hexdigest() != self.expected_digest:
+            zip_path.unlink(missing_ok=True)
+            return False, t("update.err_digest")
         ok, root, message = self_update.verify_package(zip_path)
         if not ok:
             return False, message
 
-        self.progress.emit(self.DOWNLOAD_SHARE + 3, t("update.extracting"))
+        self._report(self.DOWNLOAD_SHARE + 3, t("update.extracting"), "extract",
+                     received=received, total=total, force=True)
         span = 100 - self.DOWNLOAD_SHARE - 3
 
         def on_extract(index: int, count: int):
-            self.progress.emit(self.DOWNLOAD_SHARE + 3 + int(index * span / count),
-                               t("update.extracting"))
+            self._report(self.DOWNLOAD_SHARE + 3 + int(index * span / count),
+                         t("update.extracting"), "extract",
+                         received=received, total=total,
+                         force=index == count)
 
         try:
             self_update.extract_payload(
@@ -130,5 +165,6 @@ class UpdateDownloadThread(QThread):
         except OSError:
             pass
 
-        self.progress.emit(100, t("update.ready"))
+        self._report(100, t("update.ready"), "extract", received=received,
+                     total=total, force=True)
         return True, ""

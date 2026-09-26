@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.i18n import t
 from src.threads import ytdlp_run
+from src.utils import pick_thumbnail
 
 class SeriesParseThread(QThread):
     """시리즈 URL을 받아 하위 회차 정보(dict) 목록을 돌려주는 스레드."""
@@ -19,12 +20,16 @@ class SeriesParseThread(QThread):
     """
 
     def __init__(self, series_url: str, ytdlp_exe_path: str, exclude_keywords: List[str],
-                 title_only: bool = False, parent=None):
+                 title_only: bool = False, parent=None, ignore_ssl_errors: bool = False):
         super().__init__(parent)
         self.series_url = series_url
         self.ytdlp_exe_path = ytdlp_exe_path
         self.exclude_keywords = [k.lower() for k in exclude_keywords if k.strip()]
         self.title_only = title_only
+        self.ignore_ssl_errors = ignore_ssl_errors
+
+    def _ssl_option(self) -> list[str]:
+        return ["--no-check-certificate"] if self.ignore_ssl_errors else []
 
     def _is_excluded(self, title: str) -> bool:
         if not self.exclude_keywords:
@@ -41,7 +46,7 @@ class SeriesParseThread(QThread):
             if not isinstance(meta, dict): continue
             url = meta.get("webpage_url") or meta.get("url")
             title = meta.get("title") or t("download.title_unknown")
-            thumbnail_url = meta.get("thumbnail")
+            thumbnail_url = pick_thumbnail(url, meta)
             if url and title and not self._is_excluded(title):
                 results.append({
                     "url": url.strip(),
@@ -84,7 +89,7 @@ class SeriesParseThread(QThread):
         """
         self.log.emit(t("series_parse.title_checking", url=self.series_url))
         command = [self.ytdlp_exe_path, "--flat-playlist", "--playlist-items", "1", "-J", "--skip-download",
-                   *ytdlp_run.network_options(), self.series_url]
+                   *ytdlp_run.network_options(), *self._ssl_option(), self.series_url]
         ok, out, err = ytdlp_run.run(command, self.TITLE_ONLY_TIMEOUT,
                                      t("series_parse.title_label"), self.log.emit)
         if not ok:
@@ -106,7 +111,7 @@ class SeriesParseThread(QThread):
                 return
             self.log.emit(t("series_parse.first_pass", url=self.series_url))
             command1 = [self.ytdlp_exe_path, "-J", "--skip-download",
-                        *ytdlp_run.network_options(), self.series_url]
+                        *ytdlp_run.network_options(), *self._ssl_option(), self.series_url]
             ok1, out1, err1 = ytdlp_run.run(command1, self.PARSE_TIMEOUT,
                                             t("series_parse.first_label"), self.log.emit)
 
@@ -128,7 +133,7 @@ class SeriesParseThread(QThread):
                 self.log.emit(t("series_parse.first_empty"))
                 command2 = [self.ytdlp_exe_path, "--flat-playlist",
                             "--print", "%(url)s\t%(title)s", "--skip-download",
-                            *ytdlp_run.network_options(), self.series_url]
+                            *ytdlp_run.network_options(), *self._ssl_option(), self.series_url]
                 ok2, out2, err2 = ytdlp_run.run(command2, self.PARSE_TIMEOUT,
                                                 t("series_parse.second_label"), self.log.emit)
 

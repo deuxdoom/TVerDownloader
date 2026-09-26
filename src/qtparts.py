@@ -11,8 +11,46 @@ from PyQt6.QtGui import QPainter, QPalette
 from PyQt6.QtWidgets import (
     QWidget, QMenu, QListWidget, QListView, QTabBar,
     QAbstractItemView, QStyledItemDelegate, QStyle, QLayout, QSpacerItem, QSizePolicy,
-    QCheckBox, QStyleOptionButton,
+    QCheckBox, QStyleOptionButton, QLabel,
 )
+
+
+class ElidedLabel(QLabel):
+    """폭이 모자라면 말줄임표로 줄여 보여 주는 라벨. QLabel은 문장을 그냥 잘라 낸다.
+
+    tooltip_when_elided를 켜면 줄였을 때만 전체 문장을 툴팁으로 보인다. 업데이트 창도 쓰므로
+    카드 모듈(widgets.py)이 아니라 여기에 둔다 - 적용 모드가 썸네일까지 끌어오지 않게.
+    """
+
+    def __init__(self, text: str = "", mode=Qt.TextElideMode.ElideRight, parent=None,
+                 tooltip_when_elided: bool = False):
+        super().__init__(parent)
+        self._full_text = text
+        self._mode = mode
+        self._tooltip_when_elided = tooltip_when_elided
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(0)
+        self._apply_elide()
+
+    def setText(self, text: str):
+        self._full_text = text
+        self._apply_elide()
+
+    def full_text(self) -> str:
+        return self._full_text
+
+    def _apply_elide(self):
+        width = max(0, self.width())
+        shown = (self._full_text if width <= 0 else
+                 self.fontMetrics().elidedText(self._full_text, self._mode, width))
+        super().setText(shown)
+        if self._tooltip_when_elided:
+            self.setToolTip(self._full_text if shown != self._full_text else "")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_elide()
 
 
 class WrappingCheckBox(QCheckBox):

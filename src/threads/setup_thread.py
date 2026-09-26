@@ -1,4 +1,5 @@
 import os
+import hashlib
 import shutil
 import zipfile
 from pathlib import Path
@@ -8,7 +9,8 @@ from urllib.parse import urlparse
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.i18n import t
-from src.utils import github_api_headers, is_rate_limited, rate_limit_message
+from src.utils import (expected_sha256, github_api_headers, is_rate_limited,
+                       rate_limit_message)
 
 
 def describe_network_error(error: BaseException, host: str) -> str:
@@ -142,7 +144,8 @@ class SetupThread(QThread):
     PARTIAL_SUFFIX = ".part"
     """다 받기 전까지 쓰는 이름. 옮기고 나면 남지 않는다."""
 
-    def _download_and_place(self, url: str, target_path: Path) -> bool:
+    def _download_and_place(self, url: str, target_path: Path,
+                            expected_digest: Optional[str] = None) -> bool:
         """받아서 제자리에 놓는다. **다 받은 뒤에 옮긴다.**
 
         목적지에 바로 쓰면 중간에 끊겼을 때 잘린 exe가 그 이름으로 남는다. 다음 실행에서
@@ -158,6 +161,7 @@ class SetupThread(QThread):
         self.log.emit(t("setup.download_start", url=url))
         target_path.parent.mkdir(parents=True, exist_ok=True)
         partial = target_path.with_name(target_path.name + self.PARTIAL_SUFFIX)
+        digest = hashlib.sha256()
         try:
             with requests.get(url, headers=self._download_headers(),
                               stream=True, timeout=60) as r:
@@ -165,6 +169,9 @@ class SetupThread(QThread):
                 with open(partial, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
+                        digest.update(chunk)
+            if expected_digest and digest.hexdigest() != expected_digest:
+                raise ValueError(t("setup.digest_mismatch"))
             os.replace(partial, target_path)
         except BaseException:
             try:
@@ -174,17 +181,23 @@ class SetupThread(QThread):
             raise
         return True
 
-    def _download_and_unzip(self, url: str, target_dir: Path, file_name: str) -> bool:
+    def _download_and_unzip(self, url: str, target_dir: Path, file_name: str,
+                            expected_digest: Optional[str] = None) -> bool:
         import requests
 
         target_dir.mkdir(parents=True, exist_ok=True)
         zip_path = target_dir / file_name
+        digest = hashlib.sha256()
         self.log.emit(t("setup.download_start", url=url))
         with requests.get(url, headers=self._download_headers(), stream=True, timeout=60) as r:
             r.raise_for_status()
             with open(zip_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
+                    digest.update(chunk)
+        if expected_digest and digest.hexdigest() != expected_digest:
+            zip_path.unlink(missing_ok=True)
+            raise ValueError(t("setup.digest_mismatch"))
         self.log.emit(t("setup.extracting", path=zip_path))
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(target_dir)
@@ -225,7 +238,11 @@ class SetupThread(QThread):
             return ytdlp_exe_path if ytdlp_exe_path.exists() else None
 
         try:
-            self._download_and_place(asset["browser_download_url"], ytdlp_exe_path)
+            digest = expected_sha256(asset)
+            if digest:
+                self._download_and_place(asset["browser_download_url"], ytdlp_exe_path, digest)
+            else:
+                self._download_and_place(asset["browser_download_url"], ytdlp_exe_path)
         except Exception as error:
             if not ytdlp_exe_path.exists():
                 raise
@@ -274,7 +291,12 @@ class SetupThread(QThread):
             shutil.rmtree(temp_dir)
 
         try:
-            self._download_and_unzip(asset["browser_download_url"], temp_dir, asset["name"])
+            digest = expected_sha256(asset)
+            if digest:
+                self._download_and_unzip(asset["browser_download_url"], temp_dir,
+                                         asset["name"], digest)
+            else:
+                self._download_and_unzip(asset["browser_download_url"], temp_dir, asset["name"])
         except Exception as error:
             if not installed:
                 raise

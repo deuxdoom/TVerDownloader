@@ -124,8 +124,10 @@ class RegionCheckThread(QThread):
         **깨우지 않으면 스레드가 영원히 기다린다.** 다음 요청이 올 때까지 시간 제한 없이
         멎어 있는 구조라, 끝내라는 뜻을 같은 조건 변수로 전해야 빠져나온다.
         """
+        self._mutex.lock()
         self._stop_flag = True
         self._wake.wakeAll()
+        self._mutex.unlock()
 
     def request_recheck(self):
         """다시 물어보라고 시킨다. 네트워크가 바뀌었을 때 창이 부른다.

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 import traceback
 import subprocess
@@ -33,6 +34,32 @@ def localized_app_name(language: QLocale.Language | None = None) -> str:
 
 
 CONFIG_FILE = "downloader_config.json"
+_load_warnings: List[dict] = []
+
+
+def preserve_corrupt_file(path: Path) -> str:
+    """읽지 못한 원본은 다음 저장 전에 같은 폴더에 따로 남긴다."""
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    copy = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        shutil.copy2(path, copy)
+    except OSError:
+        return ""
+    return str(copy)
+
+
+def take_load_warnings() -> List[dict]:
+    warnings = _load_warnings[:]
+    _load_warnings.clear()
+    return warnings
+
+
+def expected_sha256(asset: dict) -> Optional[str]:
+    digest = asset.get("digest") if isinstance(asset, dict) else None
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        return None
+    value = digest.removeprefix("sha256:")
+    return value.lower() if re.fullmatch(r"[0-9a-fA-F]{64}", value) else None
 DEFAULT_PARALLEL = 5
 PARALLEL_MIN = 1
 PARALLEL_MAX = 20
@@ -207,6 +234,34 @@ def normalize_input_url(text: str) -> str:
     return match_tver_url(text) or (text or "").strip()
 
 
+TVER_THUMBNAIL_URL = "https://statics.tver.jp/images/content/thumbnail/{kind}/{size}/{id}.jpg"
+"""TVer 사이트가 목록에 보여 주는 그림. 1년 지난 회차도 남아 있다(실측: 2025-08 회차 모두 200)."""
+
+TVER_THUMBNAIL_KINDS = {"episodes": ("episode", "ep"), "series": ("series", "sr")}
+"""주소 종류마다 (그림 경로, id 머리). 머리가 다르면 없는 그림을 요청해 403만 받으므로 만들지 않는다."""
+
+THUMB_LIST_SIZE = "small"
+"""목록 카드가 받는 크기(480x270, 약 150KB). 작은 사본(320x180)을 만들기에 충분하다."""
+
+THUMB_ORIGINAL_SIZE = "xlarge"
+"""저장·확대에 쓰는 크기(1280x720, 약 690KB). 다운로드 카드만 받는다."""
+
+
+def pick_thumbnail(page_url: Any, source: Any = "", size: str = THUMB_ORIGINAL_SIZE) -> str:
+    """이 영상·시리즈의 그림 주소. TVer는 id로 statics.tver.jp 주소를 만들고, 그 밖은 source를 쓴다.
+
+    yt-dlp의 대표 `thumbnail`은 2026-07부터 streaks.jp 그림인데 テレビ朝日는 그 자리가 방송사 로고다.
+    source는 yt-dlp 메타데이터(dict)나 이미 적어 둔 주소(str)다.
+    """
+    matched = TVER_ID_RE.match(page_url.strip()) if isinstance(page_url, str) else None
+    kind = TVER_THUMBNAIL_KINDS.get(matched.group(1).lower()) if matched else None
+    if kind and matched.group(2).startswith(kind[1]):
+        return TVER_THUMBNAIL_URL.format(kind=kind[0], size=size, id=matched.group(2))
+    if isinstance(source, dict):
+        source = source.get("thumbnail")
+    return source if isinstance(source, str) else ""
+
+
 def resolve_ffprobe_path(ffmpeg_path: str):
     """ffmpeg 경로에서 짝이 되는 ffprobe 경로를 찾는다. 없으면 None.
 
@@ -307,15 +362,20 @@ def load_config() -> Dict[str, Any]:
     }
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(CONFIG_FILE, "r", encoding="utf-8-sig") as f:
                 loaded = json.load(f)
+                if not isinstance(loaded, dict):
+                    raise ValueError("config root must be an object")
                 for k, v in loaded.items():
                     if isinstance(v, dict) and k in config and isinstance(config[k], dict):
                         config[k].update(v)
                     else:
                         config[k] = v
-        except (json.JSONDecodeError, IOError):
-            pass
+        except (ValueError, OSError):
+            if not any(warning["name"] == CONFIG_FILE for warning in _load_warnings):
+                _load_warnings.append({"name": CONFIG_FILE,
+                                       "corrupt": preserve_corrupt_file(Path(CONFIG_FILE)),
+                                       "backup": ""})
 
     config["max_concurrent_downloads"] = canonicalize_config_parallel(config)
     return config
@@ -343,6 +403,7 @@ def save_config(config: dict) -> bool:
 
 
 def construct_filename_template(config: Dict[str, Any]) -> str:
+    """옛 설정이 이름을 비워 두어도 서로 다른 영상이 한 파일을 덮어쓰지 않게 ID를 남긴다."""
     parts_cfg = config.get("filename_parts", {})
     order = config.get("filename_order", [])
     key_map = {
@@ -353,6 +414,8 @@ def construct_filename_template(config: Dict[str, Any]) -> str:
         "id": "[%(id)s]"
     }
     selected_parts = [key_map[key] for key in order if parts_cfg.get(key, False) and key in key_map]
+    if not selected_parts:
+        selected_parts = [key_map["id"]]
     if parts_cfg.get("series"):
         return f"%(series,playlist_title)s/{' '.join(selected_parts)}.%(ext)s"
     else:
@@ -487,8 +550,16 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     from src.i18n import t
     error_message = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     log_file = "TVerDownloader_crash.log"
-    with open(log_file, "w", encoding="utf-8") as f:
-        f.write(error_message)
+    try:
+        from versioninfo import APP_VERSION
+    except Exception:
+        APP_VERSION = "unknown"
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n{'=' * 60}\n{datetime.now():%Y-%m-%d %H:%M:%S} "
+                    f"TVerDownloader {APP_VERSION}\n{error_message}")
+    except OSError:
+        pass
     error_box = QMessageBox()
     error_box.setIcon(QMessageBox.Icon.Critical)
     error_box.setWindowTitle(t("dialog.crash_title"))

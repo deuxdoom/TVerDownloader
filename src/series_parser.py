@@ -65,7 +65,8 @@ class SeriesParser(QObject):
         exclude_keywords = self.config.get("series_exclude_keywords", [])
         self._thread = SeriesParseThread(
             self._current_url, self.ytdlp_path, exclude_keywords,
-            title_only=self._current_context in self.TITLE_ONLY_CONTEXTS)
+            title_only=self._current_context in self.TITLE_ONLY_CONTEXTS,
+            ignore_ssl_errors=self.config.get("ignore_ssl_errors", False))
         self._thread.log.connect(lambda msg: self.log.emit(self._current_context, msg))
         self._thread.finished.connect(self._on_parse_finished)
         self._thread.start()

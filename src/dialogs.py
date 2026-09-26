@@ -416,6 +416,7 @@ class SettingsDialog(QDialog):
         self.order_list.model().rowsMoved.connect(self._update_preview)
         self.order_list.model().rowsInserted.connect(self._update_preview)
         self._update_preview()
+        self._filename_page_row = self.nav.count()
         self._add_page(tab, t("settings.nav_filename"), "nav_filename")
 
     def _update_preview(self, *args):
@@ -668,6 +669,11 @@ class SettingsDialog(QDialog):
         for i in range(self.order_list.count()):
             it = self.order_list.item(i); key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
+        if not any(filename_parts.values()):
+            self.nav.setCurrentRow(self._filename_page_row)
+            notify(self, t("settings.nav_filename"), t("settings.filename_required"),
+                   icon_name="nav_filename", color_key="warn", theme=self._theme)
+            return
         pending["filename_parts"] = filename_parts; pending["filename_order"] = filename_order
 
         if self.quality_button_group.checkedButton(): pending["quality"] = self.quality_button_group.checkedButton().property("config_value")

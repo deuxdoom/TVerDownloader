@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from src.utils import preserve_corrupt_file
+
 
 def _text(value: Any) -> str:
     """글이 아닌 것이 들어 있으면 빈 글로 본다."""
@@ -27,6 +29,7 @@ class QueueStore:
     def __init__(self, path: str = DEFAULT_PATH):
         self.path = path
         self._items: List[Dict[str, str]] = []
+        self.load_warnings: List[dict] = []
 
     def load(self) -> bool:
         """파일을 읽는다. 읽지 못하면 빈 채로 열되 실패를 알린다.
@@ -34,13 +37,19 @@ class QueueStore:
         없는 파일과 깨진 파일을 가른다 - 없는 것은 대기열이 비어 있었다는 뜻이라 정상이다.
         """
         target = Path(self.path)
+        self.load_warnings.clear()
         if not target.exists():
             self._items = []
             return True
         try:
-            raw = json.loads(target.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            raw = json.loads(target.read_text(encoding="utf-8-sig"))
+            if not isinstance(raw, list):
+                raise ValueError("queue root must be a list")
+        except (ValueError, OSError):
             self._items = []
+            self.load_warnings.append({"name": target.name,
+                                       "corrupt": preserve_corrupt_file(target),
+                                       "backup": ""})
             return False
         self._items = self._clean(raw)
         return True

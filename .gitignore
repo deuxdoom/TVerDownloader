@@ -64,5 +64,5 @@ favoritbak/
 update-workspace/
 
 # 아래는 생성물이지만 반드시 커밋해야 한다. 실수로 무시되지 않도록 남겨 둔다.
-#   src/icons_data.py   : Fluent 아이콘 19종 임베드 (tools/gen_icons.py)
+#   src/icons_data.py   : Fluent 아이콘 25종 임베드 (tools/gen_icons.py)
 #   assets/title/*.png  : 헤더 로고 6종 (tools/gen_titlelogo.py)

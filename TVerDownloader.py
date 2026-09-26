@@ -1,4 +1,5 @@
 import sys, os
+import threading
 from collections import deque
 from html import escape
 from typing import List, Dict
@@ -6,7 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QFileDialog, QWidget,
                              QAbstractSpinBox, QLineEdit, QMenu, QTextEdit, QComboBox)
-from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QTranslator, QLibraryInfo
+from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QTranslator, QLibraryInfo, pyqtSignal
 from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
 from PyQt6.QtNetwork import QLocalServer
 
@@ -17,7 +18,7 @@ from src.i18n import t
 from src.utils import (load_config, save_config, handle_exception,
                        retired_option_notes,
                        localized_app_name, get_resource_path,
-                       canonicalize_config_fragments)
+                       canonicalize_config_fragments, take_load_warnings, pick_thumbnail)
 from src.qss import build_qss, palette, UI_FONT_FALLBACKS
 from src.icons import is_monochrome_white, tint_icon
 from src.message import confirm, notify
@@ -30,7 +31,8 @@ from src.queue_store import QueueStore
 from src.qtparts import (apply_popup_shape, apply_combo_popup_shape,
                          flatten_combo_popup_margins, COMBO_POPUP_OBJECT)
 from src.widgets import DownloadItemWidget
-from src.updater import maybe_show_update
+from src.thumbnails import start_cache_maintenance
+from src.updater import fetch_latest, has_newer, prompt_and_update
 from src.threads.setup_thread import SetupThread
 from src.threads.region_thread import (RegionCheckThread, JAPAN_CODE, country_name,
                                        STOP_WAIT_MS as REGION_STOP_WAIT_MS)
@@ -45,6 +47,10 @@ from src.tray_controller import TrayController
 from src.input_sources import InputSources
 from versioninfo import APP_VERSION
 
+
+class UpdateResult(QObject):
+    ready = pyqtSignal(object, object)
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -58,10 +64,13 @@ class MainWindow(QMainWindow):
         make_frameless(self)
         self.force_quit = False; self.env_ready = False; self.config = load_config()
         self._local_server = None
+        self._update_result = None
+        self._update_worker = None
         self._selection_queue: deque = deque(); self._selection_open = False
-        self_update.cleanup_workspace()
+        update_result = self_update.read_result()
         self._shortcuts: List[QShortcut] = []; self._guarded_shortcuts: List[QShortcut] = []
         self.setAcceptDrops(True)
+        start_cache_maintenance()
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.queue_store = QueueStore(); self._queue_file_ok = self.queue_store.load()
         self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
@@ -81,6 +90,18 @@ class MainWindow(QMainWindow):
         self.apply_shortcuts()
         QApplication.instance().focusChanged.connect(self._sync_shortcut_guard)
         self.append_log(t("log.app_start"))
+        if update_result is not None:
+            if update_result.get("stage") == "done":
+                self.append_log(t("log.update_applied", **update_result))
+            elif update_result.get("stage") == "rolled_back":
+                self.append_log(t("log.update_apply_failed", **update_result))
+            self_update.clear_result()
+        self_update.cleanup_workspace(preserve_new=update_result is not None)
+        warnings = (take_load_warnings() + self.history_store.load_warnings
+                    + self.fav_store.load_warnings + self.queue_store.load_warnings)
+        for warning in warnings:
+            key = "log.data_file_restored" if warning["backup"] else "log.data_file_reset"
+            self.append_log(t(key, **warning))
         for note in retired_option_notes(self.config):
             self.append_log(note)
         self._restore_queue()
@@ -449,7 +470,7 @@ class MainWindow(QMainWindow):
             return
         self._show_region_notice()
         self.append_log(t("log.setup_done"))
-        if self.config.get("auto_update_check", True):
+        if self.config.get("auto_update_check", True) and not self.setup_thread._unreachable:
             QTimer.singleShot(1000, self._check_for_update)
         if self.config.get("auto_check_favorites_on_start", False):
             QTimer.singleShot(2500, self.library.check_all_favorites)
@@ -470,10 +491,11 @@ class MainWindow(QMainWindow):
         entries = self.queue_store.entries()
         if not entries:
             return
-        restored = sum(1 for entry in entries
-                       if self.download_manager.restore_task(entry.get("url", ""),
-                                                             title=entry.get("title", ""),
-                                                             thumbnail=entry.get("thumbnail", "")))
+        with self.download_manager.batch_queue_changes():
+            restored = sum(1 for entry in entries
+                           if self.download_manager.restore_task(entry.get("url", ""),
+                                                                 title=entry.get("title", ""),
+                                                                 thumbnail=entry.get("thumbnail", "")))
         if restored:
             self.append_log(t("log.queue_restored", count=restored))
 
@@ -492,9 +514,33 @@ class MainWindow(QMainWindow):
         self.append_log(t("log.queue_started", count=started))
 
     def _check_for_update(self):
-        """새 버전을 확인한다. 개수는 download_manager가 센다 - 직접 세면 변환만 남은 것을 빠뜨린다."""
-        maybe_show_update(self, APP_VERSION, self.append_log,
-                          pending_downloads=self.download_manager.pending_count())
+        """느린 DNS 조회를 창 밖에서 하고, 결과 처리는 창 스레드에서 맡는다."""
+        if self.setup_thread._unreachable or self.force_quit:
+            return
+        self._update_result = UpdateResult(self)
+        self._update_result.ready.connect(self._on_update_result)
+
+        result = self._update_result
+
+        def fetch():
+            logs = []
+            release = fetch_latest(logs.append)
+            try:
+                result.ready.emit(release, logs)
+            except RuntimeError:
+                pass
+
+        self._update_worker = threading.Thread(target=fetch, daemon=True)
+        self._update_worker.start()
+
+    def _on_update_result(self, release, logs):
+        if self.force_quit:
+            return
+        for message in logs:
+            self.append_log(message)
+        if release and has_newer(release, APP_VERSION):
+            prompt_and_update(self, release, self.append_log,
+                              pending_downloads=self.download_manager.pending_count())
 
     def _add_from_selection(self, episode_info: List[Dict[str, str]], label: str):
         """에피소드 선택 창을 차례로 띄운다. 이미 하나 떠 있으면 줄에 세우고 돌아간다.
@@ -527,11 +573,12 @@ class MainWindow(QMainWindow):
             return
         known = {ep.get("url"): ep for ep in episode_info if ep.get("url")}
         added_count = 0
-        for url in selected_urls:
-            episode = known.get(url) or {}
-            if self._request_add_task(url, title=episode.get("title", ""),
-                                      thumbnail=episode.get("thumbnail_url", "")):
-                added_count += 1
+        with self.download_manager.batch_queue_changes():
+            for url in selected_urls:
+                episode = known.get(url) or {}
+                if self._request_add_task(url, title=episode.get("title", ""),
+                                          thumbnail=episode.get("thumbnail_url", "")):
+                    added_count += 1
         self.append_log(t("log.selection_added", label=label, count=added_count))
 
     def _on_series_parsed(self, context: str, series_url: str, series_title: str, episode_info: List[Dict[str, str]]):
@@ -553,7 +600,7 @@ class MainWindow(QMainWindow):
         if not widget or not isinstance(widget, DownloadItemWidget): return
         if success and final_filepath:
             title = meta.get('title', widget.title_label.text())
-            series_id = meta.get('series_id'); thumbnail_url = meta.get('thumbnail')
+            series_id = meta.get('series_id'); thumbnail_url = pick_thumbnail(url, meta)
             self.history_store.add(url, title, final_filepath, series_id=series_id, thumbnail_url=thumbnail_url)
             self.history_store.save(); self.library.refresh_history_list()
 
@@ -1001,9 +1048,42 @@ def setup_app_font(app: QApplication) -> None:
     except Exception as e:
         print(f"WARNING: 기본 서체 지정에 실패했습니다: {e}. Qt 기본값을 사용합니다.")
 
+
+def run_apply_mode(app: QApplication):
+    """본체 잠금 전에 독립 창을 띄워 교체 중 본체와 새 앱이 공존하게 한다."""
+    from src.apply_update import parse_arguments
+    from src.ui.apply_update_window import ApplyUpdateWindow
+    options = parse_arguments(sys.argv[1:])
+    if options is not None:
+        try:
+            os.chdir(options.app_dir)
+        except OSError:
+            pass
+    config = load_config() if options is not None else {}
+    i18n.setup(config)
+    theme = config.get("theme", "light")
+    setup_menu_icons(app, theme)
+    setup_translations(app)
+    setup_app_font(app)
+    app.setStyleSheet(build_qss(theme))
+    app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
+    app.setStyle("Fusion")
+    window = ApplyUpdateWindow(options, theme)
+    window.show()
+    return window
+
+
 if __name__ == "__main__":
     sys.excepthook = handle_exception
+    if getattr(sys, "frozen", False) and "--apply-update" not in sys.argv:
+        try:
+            os.chdir(Path(sys.executable).resolve().parent)
+        except OSError:
+            pass
     app = QApplication(sys.argv)
+    if "--apply-update" in sys.argv:
+        window = run_apply_mode(app)
+        sys.exit(app.exec())
     if not acquire_instance_lock():
         notify_running_instance(TRAY_REQUEST if autostart.launched_for_tray() else SHOW_REQUEST)
         sys.exit(0)

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 
-from src.utils import canonical_url
+from src.utils import canonical_url, preserve_corrupt_file
 
 def _key(url: str) -> str:
     """기록을 찾고 담을 때 쓰는 키. TVer 주소는 쿼리를 뗀 형태로 모은다.
@@ -37,28 +37,53 @@ class HistoryStore:
         self.backup_dir: Path = backup_dir or self.DEFAULT_BAK_DIR
         self.keep_backups: int = max(0, int(keep_backups))
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self.load_warnings: List[dict] = []
 
     def load(self) -> bool:
+        self.load_warnings.clear()
         p = Path(self.path)
         if not p.exists():
             self._data = {}
             return True
         try:
-            obj = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(obj, dict):
-                self._data = self._merge_by_key(obj)
-            elif isinstance(obj, list):
-                self._data = self._merge_by_key({
-                    item.get("url"): {
-                        "title": item.get("title", ""), "date": item.get("date", ""),
-                        "filepath": item.get("filepath", ""), "series_id": item.get("series_id"),
-                        "thumbnail_url": item.get("thumbnail_url")
-                    } for item in obj if isinstance(item, dict) and item.get("url")
-                })
-            else: self._data = {}
+            self._data = self._read_data(p)
             return True
-        except (json.JSONDecodeError, IOError):
-            self._data = {}; return False
+        except (ValueError, OSError):
+            corrupt = preserve_corrupt_file(p)
+            backup_used = ""
+            self._data = {}
+            try:
+                backups = sorted(self.backup_dir.glob("urlhistory_*.bak.json"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)
+            except OSError:
+                backups = []
+            for backup in backups:
+                try:
+                    self._data = self._read_data(backup)
+                    backup_used = str(backup)
+                    break
+                except (ValueError, OSError):
+                    continue
+            self.load_warnings.append({"name": p.name, "corrupt": corrupt,
+                                       "backup": backup_used})
+            return False
+
+    def _read_data(self, path: Path) -> Dict[str, dict]:
+        obj = json.loads(path.read_text(encoding="utf-8-sig"))
+        if isinstance(obj, dict):
+            return self._merge_by_key(obj)
+        if isinstance(obj, list):
+            if any(isinstance(item, dict) and "url" in item
+                   and not isinstance(item["url"], str) for item in obj):
+                raise ValueError("history url must be a string")
+            return self._merge_by_key({
+                item.get("url"): {
+                    "title": item.get("title", ""), "date": item.get("date", ""),
+                    "filepath": item.get("filepath", ""), "series_id": item.get("series_id"),
+                    "thumbnail_url": item.get("thumbnail_url")
+                } for item in obj if isinstance(item, dict) and item.get("url")
+            })
+        raise ValueError("history root must be an object or list")
 
     @staticmethod
     def _merge_by_key(raw: Dict[str, dict]) -> Dict[str, dict]:
@@ -77,6 +102,12 @@ class HistoryStore:
             key = _key(url if isinstance(url, str) else "")
             if not key or not isinstance(entry, dict):
                 continue
+            for field in ("title", "date", "filepath", "series_id", "thumbnail_url"):
+                value = entry.get(field, "")
+                if value is None and field in ("series_id", "thumbnail_url"):
+                    continue
+                if not isinstance(value, str):
+                    raise ValueError(f"history {field} must be a string")
             kept = merged.get(key)
             if kept is None or entry.get("date", "") >= kept.get("date", ""):
                 merged[key] = entry

@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Tuple, Iterable, List, Optional
+
+from src.utils import canonical_url, preserve_corrupt_file
 
 
 def _now_str() -> str:
@@ -23,17 +26,41 @@ class FavoritesStore:
         self.path = path
         self._data: Dict[str, Dict[str, str]] = {}
         self.keep_backups: int = max(0, int(keep_backups))
+        self.load_warnings: List[dict] = []
 
     def load(self) -> None:
+        self.load_warnings.clear()
         if not os.path.exists(self.path):
             self._data = {}
             return
         try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-        except Exception:
-            self._data = {}
+            self._data = self._read_data(Path(self.path))
             return
+        except (ValueError, OSError):
+            corrupt = preserve_corrupt_file(Path(self.path))
+            self._data = {}
+            backup_used = ""
+            bak_dir = Path(self.path).resolve().parent / self.BAK_DIR_NAME
+            try:
+                backups = sorted(bak_dir.glob("favorites_*.bak.json"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)
+            except OSError:
+                backups = []
+            for backup in backups:
+                try:
+                    self._data = self._read_data(backup)
+                    backup_used = str(backup)
+                    break
+                except (ValueError, OSError):
+                    continue
+            self.load_warnings.append({"name": Path(self.path).name,
+                                       "corrupt": corrupt, "backup": backup_used})
+
+    @staticmethod
+    def _read_data(path: Path) -> Dict[str, Dict[str, str]]:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(raw, (dict, list)):
+            raise ValueError("favorites root must be an object or list")
 
         out: Dict[str, Dict[str, str]] = {}
         if isinstance(raw, dict):
@@ -50,18 +77,32 @@ class FavoritesStore:
                     added = str(a) if isinstance(a, (str, int, float)) else ""
                     last = str(l) if isinstance(l, (str, int, float)) else ""
                     title = str(t) if isinstance(t, str) else ""
-                out[url] = {"added": added or _now_str(), "last_check": last, "title": title}
+                FavoritesStore._merge_entry(out, url, added, last, title)
         elif isinstance(raw, list):
             for item in raw:
                 if isinstance(item, dict):
                     url = item.get("url") or item.get("href") or item.get("link")
                     if isinstance(url, str):
-                        out[url] = {
-                            "added": item.get("added") or _now_str(),
-                            "last_check": item.get("last_check") or "",
-                            "title": item.get("title", ""),
-                        }
-        self._data = out
+                        FavoritesStore._merge_entry(out, url, item.get("added"),
+                                                    item.get("last_check"), item.get("title"))
+        return out
+
+    @staticmethod
+    def _merge_entry(out: Dict[str, Dict[str, str]], url: str,
+                     added, last, title) -> None:
+        key = canonical_url(url)
+        if not key:
+            return
+        entry = {"added": added if isinstance(added, str) and added else _now_str(),
+                 "last_check": last if isinstance(last, str) else "",
+                 "title": title if isinstance(title, str) else ""}
+        previous = out.get(key)
+        if previous is None:
+            out[key] = entry
+        else:
+            previous["added"] = min(previous["added"], entry["added"])
+            previous["last_check"] = max(previous["last_check"], entry["last_check"])
+            previous["title"] = previous["title"] or entry["title"]
 
     def _ensure_parent(self) -> None:
         d = os.path.dirname(os.path.abspath(self.path))
@@ -120,7 +161,7 @@ class FavoritesStore:
                 pass
 
     def add(self, series_url: str) -> None:
-        u = (series_url or "").strip()
+        u = canonical_url(series_url)
         if not u:
             return
         if u not in self._data:
@@ -128,7 +169,7 @@ class FavoritesStore:
             self.save()
 
     def remove(self, series_url: str) -> None:
-        u = (series_url or "").strip()
+        u = canonical_url(series_url)
         if not u:
             return
         if u in self._data:
@@ -136,7 +177,7 @@ class FavoritesStore:
             self.save()
 
     def exists(self, series_url: str) -> bool:
-        return (series_url or "").strip() in self._data
+        return canonical_url(series_url) in self._data
 
     def list_series(self) -> List[str]:
         return list(self._data.keys())
@@ -157,7 +198,7 @@ class FavoritesStore:
         돌려주는 값은 '아직 유효한 요청인가'라는 뜻이다 - 부르는 쪽이 그 뒤의 일(신규 회차를
         대기열에 넣는 것)을 이어갈지 이 값으로 정한다.
         """
-        u = (series_url or "").strip()
+        u = canonical_url(series_url)
         if not u or u not in self._data:
             return False
 

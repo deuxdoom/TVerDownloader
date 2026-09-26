@@ -185,6 +185,8 @@ class InputSources:
                                      t("dialog.bad_url_skipped_lead"), rejected)
             normal_urls = [u for u in urls if "/series/" not in u]
             series_urls = [u for u in urls if "/series/" in u]
-            for url in normal_urls: window._request_add_task(url)
+            with window.download_manager.batch_queue_changes():
+                for url in normal_urls:
+                    window._request_add_task(url)
             if series_urls: window.series_parser.parse('bulk', series_urls)
         return True
