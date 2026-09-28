@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QDialogButtonBox
 )
 from src.i18n import t
+from src.qtparts import present
 from src.thumbnails import (cache_key_for, discard_thumbnail_requests, lookup_thumbnail,
                             remember_thumbnail, start_thumbnail_download)
 from src.utils import THUMB_LIST_SIZE, pick_thumbnail
@@ -46,9 +47,9 @@ class SeriesSelectionDialog(QDialog):
         self.deselect_all_btn = QPushButton(t("series.deselect_all"))
         button_layout.addWidget(self.select_all_btn); button_layout.addWidget(self.deselect_all_btn); button_layout.addStretch(1)
         self.dialog_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setText(t("series.add_selected"))
-        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName("PrimaryButton")
-        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(t("common.cancel"))
+        ok_button = present(self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok))
+        ok_button.setText(t("series.add_selected")); ok_button.setObjectName("PrimaryButton")
+        present(self.dialog_buttons.button(QDialogButtonBox.StandardButton.Cancel)).setText(t("common.cancel"))
         button_layout.addWidget(self.dialog_buttons); root.addLayout(button_layout)
 
         self.select_all_btn.clicked.connect(lambda: self._toggle_all_checkboxes(check=True))
@@ -92,21 +93,23 @@ class SeriesSelectionDialog(QDialog):
             item.setIcon(QIcon(remember_thumbnail(key, image, self.ICON_W, self.ICON_H,
                                                   self.devicePixelRatioF(), 0)))
 
-    def done(self, result: int):
+    def done(self, a0: int):
         """닫힐 때 아직 시작하지 않은 그림 요청을 거둔다. 남기면 닫힌 창의 몫이 자리를 차지한다."""
         discard_thumbnail_requests(self)
         self._pending_thumbs.clear()
-        super().done(result)
+        super().done(a0)
 
     def _toggle_all_checkboxes(self, check: bool = True):
         state = Qt.CheckState.Checked if check else Qt.CheckState.Unchecked
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setCheckState(state)
+            item = self.list_widget.item(i)
+            if item is not None:
+                item.setCheckState(state)
 
     def get_selected_urls(self) -> List[str]:
         selected_urls = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
                 selected_urls.append(item.data(Qt.ItemDataRole.UserRole))
         return selected_urls

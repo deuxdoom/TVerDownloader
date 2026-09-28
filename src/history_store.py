@@ -77,7 +77,7 @@ class HistoryStore:
                    and not isinstance(item["url"], str) for item in obj):
                 raise ValueError("history url must be a string")
             return self._merge_by_key({
-                item.get("url"): {
+                item["url"]: {
                     "title": item.get("title", ""), "date": item.get("date", ""),
                     "filepath": item.get("filepath", ""), "series_id": item.get("series_id"),
                     "thumbnail_url": item.get("thumbnail_url")

@@ -1,7 +1,7 @@
 """Fluent UI System Icons를 테마 색에 맞춰 QIcon으로 만들어 준다.
 
 원본 SVG가 fill="#212121"을 하드코딩하고 있어 런타임에 테마 색으로 치환한 뒤 렌더한다.
-SVG 원문은 src/icons_data.py에 임베드돼 있고, 갈아끼우려면 tools/gen_icons.py를 다시 돌린다.
+SVG 원문은 src/icons_data.py에 임베드돼 있고, 갈아끼우려면 tests/gen_icons.py를 다시 돌린다.
 """
 from __future__ import annotations
 
@@ -22,10 +22,9 @@ _hover_cache: Dict[Tuple[str, str, str, int, float], QIcon] = {}
 
 
 def _device_pixel_ratio() -> float:
-    app = QApplication.instance()
-    if app is None:
+    if QApplication.instance() is None:
         return 1.0
-    screen = app.primaryScreen()
+    screen = QApplication.primaryScreen()
     return screen.devicePixelRatio() if screen is not None else 1.0
 
 

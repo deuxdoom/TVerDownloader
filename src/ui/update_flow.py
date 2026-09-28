@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QProgressBar,
 from src.appicon import get_app_icon
 from src.i18n import t
 from src.qss import blend, palette
-from src.qtparts import ElidedLabel
+from src.qtparts import ElidedLabel, named, repolish
 from src.window_frame import center_dialog
 
 
@@ -204,16 +204,16 @@ class StepDot(QWidget):
         self.angle = (self.angle + 14) % 360
         self.update()
 
-    def hideEvent(self, event):
+    def hideEvent(self, a0):
         self.timer.stop()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
-    def showEvent(self, event):
+    def showEvent(self, a0):
         if self.mode == "active_ring":
             self.timer.start()
-        super().showEvent(event)
+        super().showEvent(a0)
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         colors = palette(self.theme)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -288,7 +288,7 @@ class TaskRow(QWidget):
         self.dot = StepDot(theme, 16)
         self.label = QLabel()
         self.label.setWordWrap(True)
-        self.detail = QLabel(objectName="UpdateFlowMono")
+        self.detail = named(QLabel(), "UpdateFlowMono")
         layout.addWidget(self.dot)
         layout.addWidget(self.label, 1)
         layout.addWidget(self.detail)
@@ -299,8 +299,7 @@ class TaskRow(QWidget):
         self.label.setText(t(f"update_flow.{task['key']}"))
         self.detail.setText(task.get("detail", ""))
         self.label.setProperty("tone", task["state"])
-        self.label.style().unpolish(self.label)
-        self.label.style().polish(self.label)
+        repolish(self.label)
 
 
 class UpdateFlowView(QWidget):
@@ -321,7 +320,7 @@ class UpdateFlowView(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        self.header = QWidget(objectName="UpdateFlowHeader")
+        self.header = named(QWidget(), "UpdateFlowHeader")
         header_layout = QHBoxLayout(self.header)
         header_layout.setContentsMargins(24, 22, 24, 18)
         header_layout.setSpacing(12)
@@ -330,34 +329,34 @@ class UpdateFlowView(QWidget):
         header_layout.addWidget(self.hero_icon)
         hero_text = QVBoxLayout()
         hero_text.setSpacing(3)
-        self.title = QLabel(objectName="UpdateFlowTitle")
+        self.title = named(QLabel(), "UpdateFlowTitle")
         self.title.setWordWrap(True)
-        self.subtitle = QLabel(objectName="UpdateFlowSubtitle")
+        self.subtitle = named(QLabel(), "UpdateFlowSubtitle")
         self.subtitle.setWordWrap(True)
         hero_text.addWidget(self.title)
         hero_text.addWidget(self.subtitle)
-        self.header_hint = QLabel(objectName="UpdateFlowDim")
+        self.header_hint = named(QLabel(), "UpdateFlowDim")
         self.header_hint.setWordWrap(True)
         hero_text.addWidget(self.header_hint)
         header_layout.addLayout(hero_text, 1)
         outer.addWidget(self.header)
-        self.done_hero = QWidget(objectName="UpdateFlowHeader")
+        self.done_hero = named(QWidget(), "UpdateFlowHeader")
         done_layout = QVBoxLayout(self.done_hero)
         done_layout.setContentsMargins(24, 22, 24, 18)
         done_layout.setSpacing(6)
         self.done_dot = StepDot(theme, 52)
         self.done_dot.set_status("done_large")
-        self.done_title = QLabel(objectName="UpdateFlowTitle")
+        self.done_title = named(QLabel(), "UpdateFlowTitle")
         self.done_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.done_title.setWordWrap(True)
-        self.done_versions = QLabel(objectName="UpdateFlowSubtitle")
+        self.done_versions = named(QLabel(), "UpdateFlowSubtitle")
         self.done_versions.setAlignment(Qt.AlignmentFlag.AlignCenter)
         done_layout.addWidget(self.done_dot, alignment=Qt.AlignmentFlag.AlignHCenter)
         done_layout.addWidget(self.done_title)
         done_layout.addWidget(self.done_versions)
         outer.addWidget(self.done_hero)
 
-        self.steps_box = QWidget(objectName="UpdateFlowSteps")
+        self.steps_box = named(QWidget(), "UpdateFlowSteps")
         steps_layout = QHBoxLayout(self.steps_box)
         steps_layout.setContentsMargins(24, 11, 24, 11)
         steps_layout.setSpacing(5)
@@ -366,13 +365,13 @@ class UpdateFlowView(QWidget):
         self.step_lines = []
         for index, key in enumerate(STEP_KEYS):
             dot = StepDot(theme)
-            label = QLabel(t(f"update_flow.{key}"), objectName="UpdateFlowStepText")
+            label = named(QLabel(t(f"update_flow.{key}")), "UpdateFlowStepText")
             steps_layout.addWidget(dot)
             steps_layout.addWidget(label)
             self.step_dots.append(dot)
             self.step_labels.append(label)
             if index < 3:
-                line = QWidget(objectName="UpdateFlowStepLine")
+                line = named(QWidget(), "UpdateFlowStepLine")
                 line.setFixedHeight(1)
                 steps_layout.addWidget(line, 1)
                 self.step_lines.append(line)
@@ -387,11 +386,11 @@ class UpdateFlowView(QWidget):
         info.setContentsMargins(0, 0, 0, 0)
         info.setHorizontalSpacing(10)
         info.setVerticalSpacing(6)
-        self.size_value = QLabel(objectName="UpdateFlowMono")
-        self.date_value = QLabel(objectName="UpdateFlowMono")
+        self.size_value = named(QLabel(), "UpdateFlowMono")
+        self.date_value = named(QLabel(), "UpdateFlowMono")
         for row, (key, value) in enumerate((("label_size", self.size_value),
                                              ("label_released", self.date_value))):
-            label = QLabel(t(f"update_flow.{key}"), objectName="UpdateFlowDim")
+            label = named(QLabel(t(f"update_flow.{key}")), "UpdateFlowDim")
             label.setFixedWidth(72)
             info.addWidget(label, row, 0)
             info.addWidget(value, row, 1)
@@ -400,8 +399,8 @@ class UpdateFlowView(QWidget):
         highlights = QVBoxLayout(self.highlights_box)
         highlights.setContentsMargins(0, 0, 0, 0)
         highlights.setSpacing(5)
-        highlights.addWidget(QLabel(t("update_flow.label_highlights"),
-                                    objectName="UpdateFlowSmallTitle"))
+        highlights.addWidget(named(QLabel(t("update_flow.label_highlights")),
+                                   "UpdateFlowSmallTitle"))
         self.highlight_labels = []
         for _ in range(3):
             label = ElidedLabel(tooltip_when_elided=True)
@@ -425,19 +424,19 @@ class UpdateFlowView(QWidget):
         progress_layout.setContentsMargins(0, 0, 0, 0)
         progress_layout.setSpacing(7)
         metrics = QHBoxLayout()
-        self.percent_label = QLabel(objectName="UpdateFlowPercent")
-        self.eta_label = QLabel(objectName="UpdateFlowDim")
+        self.percent_label = named(QLabel(), "UpdateFlowPercent")
+        self.eta_label = named(QLabel(), "UpdateFlowDim")
         metrics.addWidget(self.percent_label)
         metrics.addStretch(1)
         metrics.addWidget(self.eta_label)
         progress_layout.addLayout(metrics)
-        self.bar = QProgressBar(objectName="UpdateFlowProgress")
+        self.bar = named(QProgressBar(), "UpdateFlowProgress")
         self.bar.setRange(0, 100)
         self.bar.setTextVisible(False)
         progress_layout.addWidget(self.bar)
         transfer = QHBoxLayout()
-        self.amount_label = QLabel(objectName="UpdateFlowMono")
-        self.speed_label = QLabel(objectName="UpdateFlowMono")
+        self.amount_label = named(QLabel(), "UpdateFlowMono")
+        self.speed_label = named(QLabel(), "UpdateFlowMono")
         transfer.addWidget(self.amount_label)
         transfer.addStretch(1)
         transfer.addWidget(self.speed_label)
@@ -451,11 +450,10 @@ class UpdateFlowView(QWidget):
         for row in self.task_rows:
             task_layout.addWidget(row)
         body.addWidget(self.tasks_box)
-        self.lock_box = QLabel(t("update_flow.lock_notice"),
-                               objectName="UpdateFlowNotice")
+        self.lock_box = named(QLabel(t("update_flow.lock_notice")), "UpdateFlowNotice")
         self.lock_box.setWordWrap(True)
         body.addWidget(self.lock_box)
-        self.summary_box = QWidget(objectName="UpdateFlowSummary")
+        self.summary_box = named(QWidget(), "UpdateFlowSummary")
         summary = QVBoxLayout(self.summary_box)
         summary.setContentsMargins(12, 12, 12, 12)
         summary.setSpacing(6)
@@ -464,28 +462,28 @@ class UpdateFlowView(QWidget):
             label.setWordWrap(True)
             summary.addWidget(label)
         body.addWidget(self.summary_box)
-        self.hint = QLabel(objectName="UpdateFlowDim")
+        self.hint = named(QLabel(), "UpdateFlowDim")
         self.hint.setWordWrap(True)
         body.addWidget(self.hint)
-        self.cause_box = QWidget(objectName="UpdateFlowCause")
+        self.cause_box = named(QWidget(), "UpdateFlowCause")
         cause_layout = QVBoxLayout(self.cause_box)
         cause_layout.setContentsMargins(12, 10, 12, 10)
         cause_layout.setSpacing(4)
-        cause_layout.addWidget(QLabel(t("update_flow.cause_title"),
-                                      objectName="UpdateFlowCauseTitle"))
+        cause_layout.addWidget(named(QLabel(t("update_flow.cause_title")),
+                                     "UpdateFlowCauseTitle"))
         self.cause_label = QLabel()
         self.cause_label.setWordWrap(True)
         cause_layout.addWidget(self.cause_label)
         body.addWidget(self.cause_box)
         outer.addWidget(self.content)
 
-        self.footer = QWidget(objectName="UpdateFlowFooter")
+        self.footer = named(QWidget(), "UpdateFlowFooter")
         buttons = QHBoxLayout(self.footer)
         buttons.setContentsMargins(24, 11, 24, 18)
         buttons.setSpacing(8)
-        self.link_button = QPushButton(objectName="LinkButton")
-        self.secondary_button = QPushButton(objectName="UpdateFlowSecondary")
-        self.primary_button = QPushButton(objectName="PrimaryButton")
+        self.link_button = named(QPushButton(), "LinkButton")
+        self.secondary_button = named(QPushButton(), "UpdateFlowSecondary")
+        self.primary_button = named(QPushButton(), "PrimaryButton")
         for button in (self.link_button, self.secondary_button, self.primary_button):
             button.setFixedHeight(38)
             button.clicked.connect(lambda checked=False, widget=button:
@@ -525,15 +523,15 @@ class UpdateFlowView(QWidget):
         self.header_hint.setVisible(bool(self.header_hint.text()))
         self.subtitle.setProperty("tone", "done" if stage == "done" else
                                   "failed" if stage == "apply_failed" else "active")
-        self._repolish(self.subtitle)
+        repolish(self.subtitle)
         for index, mode in enumerate(model["steps"]):
             self.step_dots[index].set_status(mode, index + 1)
             self.step_labels[index].setProperty("tone", mode)
-            self._repolish(self.step_labels[index])
+            repolish(self.step_labels[index])
             if index < 3:
                 self.step_lines[index].setProperty("tone", "done" if mode == "done"
                                                    else "pending")
-                self._repolish(self.step_lines[index])
+                repolish(self.step_lines[index])
         sections = model["sections"]
         self.info_box.setVisible(sections["info"])
         self.highlights_box.setVisible(sections["highlights"])
@@ -564,7 +562,7 @@ class UpdateFlowView(QWidget):
         self.bar.setValue(100 if stage == "done" else percent)
         self.bar.setProperty("state", "done" if stage == "done" else
                              "error" if stage.endswith("failed") else "active")
-        self._repolish(self.bar)
+        repolish(self.bar)
         self.amount_label.setText(f"{format_size_mb(data.get('received'))} / "
                                   f"{format_size_mb(data.get('total'))}")
         self.speed_label.setText(f"{(data.get('speed_bps') or 0) / (1024 * 1024):.1f} MB/s"
@@ -613,7 +611,3 @@ class UpdateFlowView(QWidget):
         button.setProperty("flow_action", key)
         button.setEnabled(not key.endswith("_disabled"))
 
-    @staticmethod
-    def _repolish(widget):
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)

@@ -35,7 +35,7 @@ def _norm(tag: str) -> tuple[int, int, int]:
     t = t.split('-', 1)[0].split('+', 1)[0]
     nums = re.findall(r'\d+', t)[:3]
     parts = [int(x) for x in nums] + [0] * (3 - len(nums))
-    return tuple(parts[:3])
+    return (parts[0], parts[1], parts[2])
 
 
 def _newer(cur: str, latest: str) -> bool:
@@ -76,20 +76,6 @@ def has_newer(release: dict, current_version: str) -> bool:
     """이 릴리스가 지금 쓰는 것보다 새것인지."""
     tag = release_tag(release)
     return bool(tag) and _newer(current_version, tag)
-
-
-def maybe_show_update(parent, current_version: str, log=print, *,
-                      pending_downloads: int = 0) -> None:
-    """새 버전이 있으면 안내하고, 원하면 그 자리에서 갈아 끼운다.
-
-    시작할 때 도는 확인이라 **새 버전이 없으면 조용히 지나간다** - 눌러서 하는 확인은
-    그러면 안 되므로 정보 창 쪽은 prompt_and_update를 직접 쓴다. pending_downloads가
-    있으면 앱을 껐다 켜는 일이라 먼저 물어본다.
-    """
-    release = fetch_latest(log)
-    if not release or not has_newer(release, current_version):
-        return
-    prompt_and_update(parent, release, log, pending_downloads=pending_downloads)
 
 
 def prompt_and_update(parent, release: dict, log=print, *,
@@ -168,7 +154,7 @@ def start_update(parent, asset: dict, latest_tag: str, log=print,
         return
 
     log(t("log.update_ready"))
-    if not self_update.staged_payload_ok(work):
+    if work is None or not self_update.staged_payload_ok(work):
         self_update.cleanup_workspace()
         notify(parent, t("update.failed_title"), t("update.err_incomplete"),
                icon_name="info", color_key="warn", theme=theme)

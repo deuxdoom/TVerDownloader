@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.i18n import t
+from src.qtparts import named
 from src.window_frame import apply_dialog_frame
 
 
@@ -30,7 +31,7 @@ class BulkAddDialog(QDialog):
         btns = QHBoxLayout()
         btns.setSpacing(8)
         btns.addStretch(1)
-        self.ok_btn = QPushButton(t("bulk.add"), objectName="PrimaryButton")
+        self.ok_btn = named(QPushButton(t("bulk.add")), "PrimaryButton")
         self.cancel_btn = QPushButton(t("common.cancel"))
         self.ok_btn.clicked.connect(self.accept)
         self.cancel_btn.clicked.connect(self.reject)

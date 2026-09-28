@@ -4,19 +4,17 @@ from PyQt6.QtWidgets import (
     QComboBox, QAbstractItemView, QBoxLayout, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QSize, QObject, QEvent, QTimer
-from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QTextCharFormat
+from PyQt6.QtGui import QColor, QTextCursor, QTextCharFormat
 
-import webbrowser
-
-from src import autostart, shortcuts
-from src.appicon import get_app_icon, app_icon_with_progress
+from src import shortcuts
+from src.appicon import get_app_icon
 from src.titlelogo import LOGO_HEIGHT, build_logo, left_padding
 from src.utils import localized_app_name
 from src.i18n import t
 from src.icons import get_icon, get_hover_icon
 from src.qss import palette, SIDE_MARGIN, SIDE_MARGIN_WIDE, COMFORTABLE_WIDTH, SECTION_SPACING
-from src.qtparts import (GridListWidget, RoundedMenu, NoFocusDelegate,
-                         HoverTabBar, apply_smooth_wheel, FlowLayout)
+from src.qtparts import (GridListWidget, NoFocusDelegate,
+                         HoverTabBar, apply_smooth_wheel, FlowLayout, named, present, repolish)
 from src.window_frame import DragBar, ShadowShell, WindowFrame, extra_size
 from src.widgets import FavoriteItemWidget, EmptyStateOverlay
 
@@ -76,7 +74,7 @@ class MainWindowUI(QObject):
 
     def _tab_page(self, object_name: str):
         """탭 한 장과 그 세로 레이아웃을 같은 여백으로 만들어 돌려준다."""
-        tab = QWidget(objectName=object_name)
+        tab = named(QWidget(), object_name)
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(self.TAB_MARGIN, self.TAB_MARGIN,
                                   self.TAB_MARGIN, self.TAB_MARGIN)
@@ -85,13 +83,13 @@ class MainWindowUI(QObject):
         return tab, layout
 
     def _toolbar(self, parent_layout):
-        bar = QWidget(objectName="PaneToolbar")
+        bar = named(QWidget(), "PaneToolbar")
         row = FlowLayout(bar, self.TAB_SPACING)
         parent_layout.addWidget(bar)
         return bar, row
 
     def _button_group(self, *widgets):
-        group = QWidget(objectName="ToolbarGroup")
+        group = named(QWidget(), "ToolbarGroup")
         row = QHBoxLayout(group)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
@@ -113,7 +111,7 @@ class MainWindowUI(QObject):
 
     def _text_button(self, key: str, tooltip_key: str = "", object_name: str = "") -> QPushButton:
         """번역 문구를 단 글자 단추. 툴팁도 같은 목록에 적어 언어를 따라가게 한다."""
-        button = QPushButton(objectName=object_name) if object_name else QPushButton()
+        button = named(QPushButton(), object_name) if object_name else QPushButton()
         self._tr(button.setText, key)
         if tooltip_key:
             self._tr(button.setToolTip, tooltip_key)
@@ -127,7 +125,7 @@ class MainWindowUI(QObject):
         """언어를 바꾼 뒤 화면 문구를 다시 넣는다. 로그처럼 이미 적힌 기록은 그대로 둔다.
 
         목록 카드와 트레이 메뉴는 여기서 다루지 않는다 - 카드는 목록을 새로 그리고,
-        메뉴는 retranslate_tray가 새로 짠다.
+        메뉴는 TrayController.retranslate가 새로 짠다.
         """
         alive = []
         for apply in self._retranslators:
@@ -148,7 +146,7 @@ class MainWindowUI(QObject):
 
     def _make_pane_title(self, key: str) -> QLabel:
         """탭 제목 라벨. 높이를 고정해 제목 줄 전체 높이를 붙든다."""
-        label = QLabel(objectName="PaneTitle")
+        label = named(QLabel(), "PaneTitle")
         self._tr(label.setText, key)
         label.setMinimumHeight(self.HEADER_ROW_HEIGHT)
         return label
@@ -209,11 +207,8 @@ class MainWindowUI(QObject):
         self._notice = ("", "notice")
         self._notice_warned = False
         """경고를 한 번이라도 보여 줬는가. 좋은 소식을 보일지 가르는 기준이다."""
-        self._tray_icon_percent = None
-        """트레이에 마지막으로 그린 진행률. 개수만 바뀌었을 때 아이콘 여덟 장을 다시 그리지 않는다."""
         self._retranslators = []
         """언어를 바꿀 때 다시 부를 문구 넣기들. `_tr`이 넣을 때마다 함께 적는다."""
-        self._tray_version = ""
         self._maximized = False
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
@@ -246,7 +241,7 @@ class MainWindowUI(QObject):
 
     def _make_icon_button(self, icon_name, tooltip_key="", checkable=False):
         """아이콘 단추. 툴팁이 상태를 따라 바뀌는 단추는 키를 비우고 제 함수가 넣는다."""
-        btn = QToolButton(objectName="IconButton")
+        btn = named(QToolButton(), "IconButton")
         if tooltip_key:
             self._tr(btn.setToolTip, tooltip_key)
         btn.setFixedSize(self.ICON_BUTTON_SIZE, self.ICON_BUTTON_SIZE)
@@ -277,7 +272,7 @@ class MainWindowUI(QObject):
             return
         mapping = {previous_colors[key].lower(): self._icon_colors[key]
                    for key in ("notice", "log_success", "danger", "warn")}
-        document = self.log_output.document()
+        document = present(self.log_output.document())
         block = document.begin()
         spans = []
         while block.isValid():
@@ -391,11 +386,11 @@ class MainWindowUI(QObject):
         self.app_header = header
         layout = QHBoxLayout(header)
         layout.setContentsMargins(SIDE_MARGIN, 8, SIDE_MARGIN, 8); layout.setSpacing(4)
-        self.app_symbol = QLabel(objectName="AppSymbol")
+        self.app_symbol = named(QLabel(), "AppSymbol")
         self.app_symbol.setFixedSize(LOGO_HEIGHT, LOGO_HEIGHT)
         self.logo_gap = QWidget()
         self.logo_gap.setFixedHeight(1)
-        self.app_title = QLabel(objectName="AppTitle")
+        self.app_title = named(QLabel(), "AppTitle")
         self.app_title.setFixedHeight(LOGO_HEIGHT)
         self._apply_title_logo()
         self.settings_button = self._make_icon_button("settings")
@@ -438,8 +433,7 @@ class MainWindowUI(QObject):
         flag = "true" if maximized else "false"
         for widget in (self.window_shell.surface, self.app_header):
             widget.setProperty("window_maximized", flag)
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
+            repolish(widget)
         self.max_button.setProperty("icon_name",
                                     "window_restore" if maximized else "window_maximize")
         self._maximized = maximized
@@ -456,11 +450,11 @@ class MainWindowUI(QObject):
         self.window_frame.toggle()
 
     def _create_input_bar(self, root_layout):
-        input_bar = QFrame(objectName="InputBar")
+        input_bar = named(QFrame(), "InputBar")
         self.input_bar = input_bar
         layout = QHBoxLayout(input_bar)
         layout.setContentsMargins(SIDE_MARGIN, 12, SIDE_MARGIN, 12); layout.setSpacing(10)
-        self.url_input = QLineEdit(objectName="UrlInput")
+        self.url_input = named(QLineEdit(), "UrlInput")
         self._tr(self.url_input.setPlaceholderText, "main_window.url_placeholder")
         self._tr(self.url_input.setToolTip, "main_window.url_tooltip")
         self.bulk_button = self._text_button("main_window.bulk_add_button")
@@ -475,11 +469,11 @@ class MainWindowUI(QObject):
         root_layout.addWidget(input_bar)
 
     def _create_tabs(self, root_layout):
-        self.tabs = QTabWidget(objectName="MainTabs")
+        self.tabs = named(QTabWidget(), "MainTabs")
         self.tabs.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
         self.tabs.setTabBar(HoverTabBar())
         self.tabs.setDocumentMode(True)
-        tab_bar = self.tabs.tabBar()
+        tab_bar = present(self.tabs.tabBar())
         tab_bar.setDrawBase(False)
         tab_bar.setExpanding(False)
         self._create_download_tab()
@@ -519,7 +513,7 @@ class MainWindowUI(QObject):
         self.download_panes = panes
         panes.setSpacing(self.TAB_SPACING)
 
-        left_pane = QFrame(objectName="LeftPane"); left_layout = QVBoxLayout(left_pane)
+        left_pane = named(QFrame(), "LeftPane"); left_layout = QVBoxLayout(left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(self.TAB_SPACING)
         self.download_toolbar, row = self._toolbar(left_layout)
@@ -533,7 +527,7 @@ class MainWindowUI(QObject):
         self.cancel_selected_button.setEnabled(False)
         self.clear_completed_button = self._text_button("download_tab.clear_completed_button",
                                                         object_name="CautionButton")
-        self.queue_count_label = QLabel(t("download_tab.queue_count", queued=0, active=0), objectName="PaneSubtitle")
+        self.queue_count_label = named(QLabel(t("download_tab.queue_count", queued=0, active=0)), "PaneSubtitle")
         self.log_toggle_btn = self._make_icon_button("log")
         self.log_toggle_btn.setToolTip(t("download_tab.log_hide_tooltip"))
         summary = self._button_group(self._make_pane_title("download_tab.pane_title"), self.queue_count_label)
@@ -541,13 +535,13 @@ class MainWindowUI(QObject):
         row.addStretch()
         row.addWidget(self._button_group(self.queue_start_button, self.cancel_selected_button,
                                         self.clear_completed_button, self.log_toggle_btn))
-        self.notice_bar = QPushButton(objectName="NoticeBar")
+        self.notice_bar = named(QPushButton(), "NoticeBar")
         self.notice_bar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.notice_bar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.notice_bar.clicked.connect(self._open_notice_log)
         self.notice_bar.hide()
         left_layout.addWidget(self.notice_bar)
-        self.download_list = QListWidget(objectName="DownloadList")
+        self.download_list = named(QListWidget(), "DownloadList")
         self.download_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.download_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.download_list.setSpacing(6)
@@ -558,10 +552,10 @@ class MainWindowUI(QObject):
             "download_tab.empty_description")
         left_layout.addWidget(self.download_list, 1)
 
-        right_pane = QFrame(objectName="RightPane"); right_layout = QVBoxLayout(right_pane)
+        right_pane = named(QFrame(), "RightPane"); right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(self.TAB_SPACING)
-        self.log_header = QWidget(objectName="PaneToolbar")
+        self.log_header = named(QWidget(), "PaneToolbar")
         row_log = QHBoxLayout(self.log_header)
         row_log.setContentsMargins(0, 0, 0, 0)
         row_log.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -572,7 +566,8 @@ class MainWindowUI(QObject):
         row_log.addWidget(self._make_pane_title("download_tab.log_pane_title")); row_log.addStretch(1)
         row_log.addWidget(self.tools_update_button)
         row_log.addWidget(self.clear_log_button)
-        self.log_output = QTextEdit(objectName="LogOutput", readOnly=True)
+        self.log_output = named(QTextEdit(), "LogOutput")
+        self.log_output.setReadOnly(True)
         right_layout.addWidget(self.log_header); right_layout.addWidget(self.log_output, 1)
         right_pane.setFixedWidth(self.LOG_PANE_WIDTH)
 
@@ -584,7 +579,7 @@ class MainWindowUI(QObject):
     def set_queue_start_visible(self, visible: bool):
         """되살린 항목이 있을 때만 시작 단추를 보여 주고 도구 행 높이를 다시 맞춘다."""
         self.queue_start_button.setVisible(visible)
-        self.download_toolbar.layout().invalidate()
+        present(self.download_toolbar.layout()).invalidate()
         self._layout_timer.start(0)
 
     def set_log_visible(self, visible: bool):
@@ -597,8 +592,8 @@ class MainWindowUI(QObject):
         self._paint_notice()
         self._layout_timer.start(0)
 
-    def eventFilter(self, obj, event):
-        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+    def eventFilter(self, a0, a1):
+        if a1 is not None and a1.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
             self._layout_timer.start(0)
         return False
 
@@ -611,18 +606,17 @@ class MainWindowUI(QObject):
             if layout.contentsMargins().left() != margin:
                 layout.setContentsMargins(margin, margin, margin, margin)
         for widget in (self.app_header, self.input_bar):
-            layout = widget.layout()
+            layout = present(widget.layout())
             current = layout.contentsMargins()
             if current.left() != margin:
                 layout.setContentsMargins(margin, current.top(), margin, current.bottom())
         flag = "true" if comfortable else "false"
         if self.tabs.property("comfortable") != flag:
             self.tabs.setProperty("comfortable", flag)
-            self.tabs.style().unpolish(self.tabs)
-            self.tabs.style().polish(self.tabs)
+            repolish(self.tabs)
         for toolbar in (self.download_toolbar, self.history_toolbar, self.favorites_toolbar):
             if toolbar.isVisible():
-                height = toolbar.layout().heightForWidth(toolbar.width())
+                height = present(toolbar.layout()).heightForWidth(toolbar.width())
                 if toolbar.height() != height or toolbar.minimumHeight() != height:
                     toolbar.setFixedHeight(height)
         available = surface.width() - 2 * margin - self.TAB_SPACING
@@ -673,8 +667,7 @@ class MainWindowUI(QObject):
         self.notice_bar.setToolTip(text + "\n" + t("download_tab.log_show_tooltip"))
         if self.notice_bar.property("tone") != color_key:
             self.notice_bar.setProperty("tone", color_key)
-            self.notice_bar.style().unpolish(self.notice_bar)
-            self.notice_bar.style().polish(self.notice_bar)
+            repolish(self.notice_bar)
         self.notice_bar.setIcon(get_icon("info", self._icon_colors[color_key], self.ICON_SIZE))
         tell = bool(text) and (color_key != "log_success" or self._notice_warned)
         self.notice_bar.setVisible(tell and not self._log_visible)
@@ -707,7 +700,7 @@ class MainWindowUI(QObject):
         top_controls.addWidget(self.history_del_btn)
         top_controls.addWidget(self.history_sort_combo)
         top_controls.addWidget(self.history_search_input)
-        self.history_list = QListWidget(objectName="HistoryList")
+        self.history_list = named(QListWidget(), "HistoryList")
         self.history_list.setSpacing(6)
         self._hide_focus_rect(self.history_list)
         apply_smooth_wheel(self.history_list)
@@ -725,7 +718,8 @@ class MainWindowUI(QObject):
         self.favorites_toolbar, row = self._toolbar(layout)
         row.addWidget(self._make_pane_title("favorites_tab.pane_title"))
         row.addStretch()
-        self.fav_input = QLineEdit(placeholderText="https://tver.jp/series/...")
+        self.fav_input = QLineEdit()
+        self.fav_input.setPlaceholderText("https://tver.jp/series/...")
         self.fav_input.setFixedWidth(self.FAV_INPUT_WIDTH)
         self.fav_add_btn = self._text_button("favorites_tab.add_button", object_name="AddButton")
         self.fav_del_btn = self._text_button("favorites_tab.delete_button", object_name="DangerButton")
@@ -749,81 +743,3 @@ class MainWindowUI(QObject):
             "favorites_tab.empty_description",
             "favorites_tab.empty_filtered_title", "favorites_tab.empty_filtered_description")
         layout.addWidget(self.fav_list, 1); self._add_tab(tab, "favorites_tab.tab_title")
-
-    TRAY_GITHUB_URL = "https://github.com/deuxdoom/TVerDownloader"
-
-    def setup_tray(self, app_version):
-        """트레이 아이콘과 우클릭 메뉴를 만든다.
-
-        첫 항목은 '<앱 이름> 열기'다 - 이름만 적으면 제목처럼 읽혀 눌러도 되는 줄인지
-        알기 어렵다. 구분선은 여는 일 / 설정 / 끝내는 일 세 덩이만 가른다. 시작 프로그램
-        체크는 열 때마다 레지스트리를 다시 읽는다 - 밖에서 꺼 놓았을 수 있다.
-        """
-        tray_icon = self.main_window.tray_icon; tray_icon.setIcon(get_app_icon())
-        self._tray_version = app_version
-        self._tray_name = f"{localized_app_name()} {app_version}"
-        self.update_tray_status(0, 0, None)
-        tray_icon.setContextMenu(self._build_tray_menu()); tray_icon.show()
-
-    def retranslate_tray(self):
-        """언어를 바꾼 뒤 트레이 메뉴를 새로 짠다. 옛 메뉴는 헐어 낸다 - 트레이가 쥐고 있지 않다."""
-        tray_icon = self.main_window.tray_icon
-        self._tray_name = f"{localized_app_name()} {self._tray_version}"
-        old_menu = tray_icon.contextMenu()
-        tray_icon.setContextMenu(self._build_tray_menu())
-        if old_menu is not None:
-            old_menu.deleteLater()
-
-    def _build_tray_menu(self) -> RoundedMenu:
-        """트레이 메뉴 한 벌. 항목의 부모를 메뉴로 두어 메뉴를 헐면 함께 사라지게 한다."""
-        tray_menu = RoundedMenu()
-
-        restore_action = QAction(t("tray.open", app_name=localized_app_name()), tray_menu,
-                                 triggered=self.main_window.bring_to_front)
-        bold = QFont(restore_action.font()); bold.setBold(True)
-        restore_action.setFont(bold)
-        tray_menu.addAction(restore_action)
-        tray_menu.addSeparator()
-
-        self.autostart_action = QAction(t("tray.autostart"), tray_menu, checkable=True)
-        self.autostart_action.toggled.connect(self.main_window.set_autostart)
-        if not autostart.supported():
-            self.autostart_action.setEnabled(False)
-            self.autostart_action.setToolTip(t("tray.autostart_disabled_tooltip"))
-        tray_menu.addAction(self.autostart_action)
-
-        tray_menu.addAction(QAction(t("tray.github"), tray_menu,
-                                    triggered=lambda: webbrowser.open(self.TRAY_GITHUB_URL)))
-
-        tray_menu.addAction(QAction(t("tray.settings"), tray_menu,
-                                    triggered=self.main_window.open_settings))
-        tray_menu.addSeparator()
-
-        tray_menu.addAction(QAction(t("tray.quit"), tray_menu,
-                                    triggered=self.main_window.quit_application))
-
-        tray_menu.aboutToShow.connect(self.sync_autostart_check)
-        self.sync_autostart_check()
-        return tray_menu
-
-    def update_tray_status(self, queued: int, active: int, percent=None):
-        """트레이 툴팁을 지금 상태로 바꾼다.
-
-        커서를 올려야 보이는 자리라 평소에는 앱 이름만 두고, 받는 중일 때만 줄을 늘린다.
-        진행률은 실제로 도는 것이 있을 때만 붙는다(percent가 None이면 뺀다). 늘 보이는
-        고리도 같은 값으로 바꾼다 - 둘이 다른 숫자를 말하면 어느 쪽을 믿을지 알 수 없다.
-        """
-        lines = [self._tray_name]
-        if queued or active:
-            head = t("tray.status", queued=queued, active=active)
-            lines.append(f"{head} · {percent}%" if percent is not None else head)
-        self.main_window.tray_icon.setToolTip("\n".join(lines))
-        if percent != self._tray_icon_percent:
-            self._tray_icon_percent = percent
-            self.main_window.tray_icon.setIcon(app_icon_with_progress(percent))
-
-    def sync_autostart_check(self):
-        """레지스트리의 실제 상태로 체크를 맞춘다. toggled가 되돌아 또 쓰지 않게 잠시 끊는다."""
-        self.autostart_action.blockSignals(True)
-        self.autostart_action.setChecked(autostart.is_enabled())
-        self.autostart_action.blockSignals(False)

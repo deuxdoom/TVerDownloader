@@ -19,7 +19,7 @@ from src.utils import (save_config, PARALLEL_MAX, FRAGMENTS_MIN, FRAGMENTS_MAX,
                        canonicalize_config_codec, canonicalize_config_encoder)
 from src.thumbnails import THUMBNAIL_CACHE_DIR, forget_memory_cache
 from src.window_frame import apply_dialog_frame
-from src.qtparts import WrappingCheckBox
+from src.qtparts import WrappingCheckBox, named, present
 
 ROLE_KEY = Qt.ItemDataRole.UserRole
 
@@ -68,6 +68,8 @@ class PartColorDelegate(QStyledItemDelegate):
 
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
+        if option is None:
+            return
         color = QColor(part_color(
             self._theme, index.data(ROLE_KEY),
             option.checkState == Qt.CheckState.Checked,
@@ -100,7 +102,7 @@ class SettingsDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self.nav = QListWidget(objectName="SettingsNav")
+        self.nav = named(QListWidget(), "SettingsNav")
         self.nav.setFixedWidth(172)
         self.nav.setIconSize(QSize(18, 18))
         self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -109,7 +111,7 @@ class SettingsDialog(QDialog):
         right = QVBoxLayout()
         right.setContentsMargins(20, 16, 20, 16)
         right.setSpacing(12)
-        self.section_title = QLabel(objectName="SectionTitle")
+        self.section_title = named(QLabel(), "SectionTitle")
         right.addWidget(self.section_title)
         self.pages = QStackedWidget()
         right.addWidget(self.pages, 1)
@@ -123,9 +125,9 @@ class SettingsDialog(QDialog):
         self._create_cache_tab()
 
         self.buttons = QDialogButtonBox()
-        save_btn = self.buttons.addButton(t("settings.save"), QDialogButtonBox.ButtonRole.AcceptRole)
+        save_btn = present(self.buttons.addButton(t("settings.save"), QDialogButtonBox.ButtonRole.AcceptRole))
         save_btn.setObjectName("PrimaryButton")
-        exit_btn = self.buttons.addButton(t("settings.exit"), QDialogButtonBox.ButtonRole.RejectRole)
+        exit_btn = present(self.buttons.addButton(t("settings.exit"), QDialogButtonBox.ButtonRole.RejectRole))
         right.addWidget(self.buttons)
         root.addLayout(right, 1)
 
@@ -153,8 +155,8 @@ class SettingsDialog(QDialog):
         widget.setObjectName("SettingsPage")
         for label in widget.findChildren(QLabel):
             label.setWordWrap(True)
-        scroll = QScrollArea(objectName="SettingsScroll")
-        scroll.viewport().setObjectName("SettingsViewport")
+        scroll = named(QScrollArea(), "SettingsScroll")
+        present(scroll.viewport()).setObjectName("SettingsViewport")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(widget)
@@ -167,10 +169,12 @@ class SettingsDialog(QDialog):
         if row < 0:
             return
         self.pages.setCurrentIndex(row)
-        self.section_title.setText(self.nav.item(row).text())
+        item = self.nav.item(row)
+        if item is not None:
+            self.section_title.setText(item.text())
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0):
+        super().showEvent(a0)
         screen = self.screen()
         if screen is not None:
             area = screen.availableGeometry()
@@ -236,7 +240,7 @@ class SettingsDialog(QDialog):
         dl_count_group = QWidget(); dl_count_layout = QHBoxLayout(dl_count_group); dl_count_layout.setContentsMargins(0,0,0,0)
         parallel_label = QLabel(t("settings.parallel_label"))
         dl_count_layout.addWidget(parallel_label)
-        self.concurrent_spinbox = QSpinBox(objectName="StepperSpinBox")
+        self.concurrent_spinbox = named(QSpinBox(), "StepperSpinBox")
         self.concurrent_spinbox.setRange(1, PARALLEL_MAX)
         self.concurrent_spinbox.setValue(self.config.get("max_concurrent_downloads", 5))
         self.concurrent_spinbox.setMinimumSize(96, 36)
@@ -245,7 +249,7 @@ class SettingsDialog(QDialog):
         frag_group = QWidget(); frag_layout = QHBoxLayout(frag_group); frag_layout.setContentsMargins(0, 0, 0, 0)
         fragments_label = QLabel(t("settings.fragments_label"))
         frag_layout.addWidget(fragments_label)
-        self.fragments_spinbox = QSpinBox(objectName="StepperSpinBox")
+        self.fragments_spinbox = named(QSpinBox(), "StepperSpinBox")
         self.fragments_spinbox.setRange(FRAGMENTS_MIN, FRAGMENTS_MAX)
         self.fragments_spinbox.setValue(canonicalize_config_fragments(self.config))
         self.fragments_spinbox.setMinimumSize(96, 36)
@@ -320,7 +324,7 @@ class SettingsDialog(QDialog):
             editor.setFixedWidth(self.SHORTCUT_EDIT_WIDTH)
             editor.setToolTip(definition.hint())
             editor.keySequenceChanged.connect(self._sync_shortcut_warning)
-            hint = QLabel(definition.hint(), objectName="PaneSubtitle")
+            hint = named(QLabel(definition.hint()), "PaneSubtitle")
             hint.setWordWrap(True)
             grid.addWidget(QLabel(definition.label()), row, 0)
             grid.addWidget(editor, row, 1)
@@ -328,11 +332,11 @@ class SettingsDialog(QDialog):
             self.shortcut_edits[definition.key] = editor
         layout.addLayout(grid)
 
-        self.shortcut_warning = QLabel(objectName="ShortcutWarning")
+        self.shortcut_warning = named(QLabel(), "ShortcutWarning")
         self.shortcut_warning.setWordWrap(True)
         layout.addWidget(self.shortcut_warning)
 
-        note = QLabel(t("settings.shortcut_note"), objectName="PaneSubtitle")
+        note = named(QLabel(t("settings.shortcut_note")), "PaneSubtitle")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -373,7 +377,7 @@ class SettingsDialog(QDialog):
         tab = QWidget(); layout = QVBoxLayout(tab); layout.setSpacing(8)
         layout.addWidget(QLabel(t("settings.filename_guide")))
 
-        self.order_list = QListWidget(objectName="FilenameOrderList")
+        self.order_list = named(QListWidget(), "FilenameOrderList")
         self.order_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.order_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.order_list.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -405,7 +409,7 @@ class SettingsDialog(QDialog):
 
         pv = QVBoxLayout(); pv.setSpacing(4)
         pv.addWidget(QLabel(t("settings.filename_preview_label")))
-        self.preview_label = QLabel(objectName="FilenamePreview")
+        self.preview_label = named(QLabel(), "FilenamePreview")
         self.preview_label.setWordWrap(True)
         self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         pv.addWidget(self.preview_label)
@@ -413,8 +417,9 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
 
         self.order_list.itemChanged.connect(self._update_preview)
-        self.order_list.model().rowsMoved.connect(self._update_preview)
-        self.order_list.model().rowsInserted.connect(self._update_preview)
+        model = present(self.order_list.model())
+        model.rowsMoved.connect(self._update_preview)
+        model.rowsInserted.connect(self._update_preview)
         self._update_preview()
         self._filename_page_row = self.nav.count()
         self._add_page(tab, t("settings.nav_filename"), "nav_filename")
@@ -428,7 +433,7 @@ class SettingsDialog(QDialog):
         spans = []
         for i in range(self.order_list.count()):
             item = self.order_list.item(i)
-            if item.checkState() != Qt.CheckState.Checked:
+            if item is None or item.checkState() != Qt.CheckState.Checked:
                 continue
             key = item.data(ROLE_KEY)
             sample = html.escape(PREVIEW_SAMPLES.get(key, item.text()))
@@ -660,14 +665,17 @@ class SettingsDialog(QDialog):
         pending["download_folder"] = self.folder_path_edit.text()
         pending["max_concurrent_downloads"] = self.concurrent_spinbox.value()
         pending["concurrent_fragments"] = self.fragments_spinbox.value()
-        if self.close_action_group.checkedButton():
-            pending["close_action"] = self.close_action_group.checkedButton().property("config_value")
+        if (button := self.close_action_group.checkedButton()) is not None:
+            pending["close_action"] = button.property("config_value")
         pending["clipboard_watch"] = self.clipboard_watch_checkbox.isChecked()
         pending["auto_check_favorites_on_start"] = self.fav_autocheck_checkbox.isChecked()
         pending["auto_update_check"] = self.auto_update_checkbox.isChecked()
         filename_parts: dict[str, bool] = {}; filename_order: list[str] = []
         for i in range(self.order_list.count()):
-            it = self.order_list.item(i); key = it.data(ROLE_KEY)
+            it = self.order_list.item(i)
+            if it is None:
+                continue
+            key = it.data(ROLE_KEY)
             filename_order.append(key); filename_parts[key] = (it.checkState() == Qt.CheckState.Checked)
         if not any(filename_parts.values()):
             self.nav.setCurrentRow(self._filename_page_row)
@@ -676,14 +684,15 @@ class SettingsDialog(QDialog):
             return
         pending["filename_parts"] = filename_parts; pending["filename_order"] = filename_order
 
-        if self.quality_button_group.checkedButton(): pending["quality"] = self.quality_button_group.checkedButton().property("config_value")
+        if (button := self.quality_button_group.checkedButton()) is not None:
+            pending["quality"] = button.property("config_value")
         pending["preferred_codec"] = self.codec_combo.currentData()
         pending["hardware_encoder"] = self.hw_encoder_combo.currentData()
 
         pending["download_subtitles"] = self.download_subs_checkbox.isChecked()
         pending["embed_subtitles"] = self.embed_subs_checkbox.isChecked()
-        if self.subtitle_format_button_group.checkedButton():
-            pending["subtitle_format"] = self.subtitle_format_button_group.checkedButton().property("config_value")
+        if (button := self.subtitle_format_button_group.checkedButton()) is not None:
+            pending["subtitle_format"] = button.property("config_value")
 
         pending["embed_thumbnail"] = self.embed_thumbnail_checkbox.isChecked()
         pending["ignore_ssl_errors"] = self.ignore_ssl_checkbox.isChecked()

@@ -6,13 +6,44 @@
 """
 from __future__ import annotations
 
+from typing import TypeVar, cast
+
 from PyQt6.QtCore import Qt, QSize, QRect, QEvent, QObject
-from PyQt6.QtGui import QPainter, QPalette
+from PyQt6.QtGui import QHoverEvent, QPainter, QPalette, QWheelEvent
 from PyQt6.QtWidgets import (
     QWidget, QMenu, QListWidget, QListView, QTabBar,
     QAbstractItemView, QStyledItemDelegate, QStyle, QLayout, QSpacerItem, QSizePolicy,
-    QCheckBox, QStyleOptionButton, QLabel,
+    QCheckBox, QStyleOptionButton, QLabel, QApplication,
 )
+
+T = TypeVar("T")
+O = TypeVar("O", bound=QObject)
+
+
+def qt_app() -> QApplication:
+    """떠 있는 QApplication. PyQt6 타입 정보가 instance()를 `QCoreApplication|None`으로 적어 두었다.
+
+    그대로 쓰면 편집기(Pylance standard)가 부르는 자리마다 오류로 긋는다. 앱을 세운 뒤에만 부른다.
+    """
+    return cast(QApplication, QApplication.instance())
+
+
+def present(value: T | None) -> T:
+    """Qt가 늘 돌려주는데 PyQt6 타입 정보가 None을 섞어 적어 둔 값(style·viewport·스크롤바)을 받는다."""
+    return cast(T, value)
+
+
+def named(obj: O, name: str) -> O:
+    """objectName을 달아 돌려준다. 생성자의 objectName= 키워드는 PyQt6가 받지만 타입 정보에 없다."""
+    obj.setObjectName(name)
+    return obj
+
+
+def repolish(widget: QWidget) -> None:
+    """동적 속성을 바꾼 뒤 QSS를 다시 입힌다. 속성 선택자는 polish할 때만 다시 읽힌다."""
+    style = present(widget.style())
+    style.unpolish(widget)
+    style.polish(widget)
 
 
 class ElidedLabel(QLabel):
@@ -33,8 +64,8 @@ class ElidedLabel(QLabel):
         self.setMinimumWidth(0)
         self._apply_elide()
 
-    def setText(self, text: str):
-        self._full_text = text
+    def setText(self, a0: str | None):
+        self._full_text = a0 or ""
         self._apply_elide()
 
     def full_text(self) -> str:
@@ -48,8 +79,8 @@ class ElidedLabel(QLabel):
         if self._tooltip_when_elided:
             self.setToolTip(self._full_text if shown != self._full_text else "")
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
         self._apply_elide()
 
 
@@ -73,7 +104,7 @@ class WrappingCheckBox(QCheckBox):
         option = QStyleOptionButton()
         self.initStyleOption(option)
         option.rect = QRect(0, 0, width, self.height())
-        return self.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, self)
+        return present(self.style()).subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, self)
 
     def minimumSizeHint(self):
         hint = super().minimumSizeHint()
@@ -82,20 +113,20 @@ class WrappingCheckBox(QCheckBox):
     def hasHeightForWidth(self):
         return True
 
-    def heightForWidth(self, width):
-        rect = self._content_rect(width)
+    def heightForWidth(self, a0):
+        rect = self._content_rect(a0)
         height = self.fontMetrics().boundingRect(
             QRect(0, 0, max(1, rect.width()), self.TEXT_LAYOUT_HEIGHT),
             Qt.TextFlag.TextWordWrap, self.text()).height()
         return max(super().sizeHint().height(), height)
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         option = QStyleOptionButton()
         self.initStyleOption(option)
         content = self._content_rect(self.width())
         option.text = ""
         painter = QPainter(self)
-        self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter, self)
+        present(self.style()).drawControl(QStyle.ControlElement.CE_CheckBox, option, painter, self)
         group = QPalette.ColorGroup.Active if self.isEnabled() else QPalette.ColorGroup.Disabled
         painter.setPen(self.palette().color(group, QPalette.ColorRole.WindowText))
         painter.drawText(content, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -114,8 +145,8 @@ class FlowLayout(QLayout):
         self.setContentsMargins(0, 0, 0, 0)
         self.setSpacing(spacing)
 
-    def addItem(self, item):
-        self._items.append(item)
+    def addItem(self, a0):
+        self._items.append(a0)
         self.invalidate()
 
     def addStretch(self):
@@ -136,8 +167,8 @@ class FlowLayout(QLayout):
     def hasHeightForWidth(self):
         return True
 
-    def heightForWidth(self, width):
-        return self._arrange(QRect(0, 0, width, 0), False)
+    def heightForWidth(self, a0):
+        return self._arrange(QRect(0, 0, a0, 0), False)
 
     def minimumSize(self):
         result = QSize()
@@ -149,9 +180,9 @@ class FlowLayout(QLayout):
     def sizeHint(self):
         return self.minimumSize()
 
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._arrange(rect, True)
+    def setGeometry(self, a0):
+        super().setGeometry(a0)
+        self._arrange(a0, True)
 
     def _arrange(self, rect, apply):
         rows, row, used = [], [], 0
@@ -265,8 +296,7 @@ class RoundedMenu(QMenu):
         if self.property("checkmarks") == checkmarks:
             return
         self.setProperty("checkmarks", checkmarks)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        repolish(self)
 
 
 class NoFocusDelegate(QStyledItemDelegate):
@@ -298,15 +328,15 @@ class _SmoothWheelFilter(QObject):
         self._view = view
         self._ratio = ratio
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, a0, a1):
         """터치패드와 수식키 조합은 건드리지 않는다 - 이미 픽셀 단위로 오거나 확대를 뜻한다."""
-        if event.type() != QEvent.Type.Wheel: return False
-        if not event.pixelDelta().isNull(): return False
-        if event.modifiers() != Qt.KeyboardModifier.NoModifier: return False
-        steps = event.angleDelta().y() / 120.0
+        if not isinstance(a1, QWheelEvent): return False
+        if not a1.pixelDelta().isNull(): return False
+        if a1.modifiers() != Qt.KeyboardModifier.NoModifier: return False
+        steps = a1.angleDelta().y() / 120.0
         if not steps: return False
-        bar = self._view.verticalScrollBar()
-        bar.setValue(bar.value() - round(steps * self._view.viewport().height() * self._ratio))
+        bar = present(self._view.verticalScrollBar())
+        bar.setValue(bar.value() - round(steps * present(self._view.viewport()).height() * self._ratio))
         return True
 
 
@@ -317,7 +347,7 @@ def apply_smooth_wheel(view: QAbstractItemView, ratio: float = WHEEL_VIEWPORT_RA
     높이로 다시 잡아서, 한 칸이 몇 픽셀인지까지 우리가 정해야 값이 달라진다.
     """
     view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-    view.viewport().installEventFilter(_SmoothWheelFilter(view, ratio))
+    present(view.viewport()).installEventFilter(_SmoothWheelFilter(view, ratio))
 
 
 class HoverTabBar(QTabBar):
@@ -332,13 +362,14 @@ class HoverTabBar(QTabBar):
         super().__init__(parent)
         self._pointing = False
 
-    def event(self, e):
-        kind = e.type()
-        if kind in (QEvent.Type.HoverMove, QEvent.Type.HoverEnter):
-            self._sync_cursor(self.tabAt(e.position().toPoint()) >= 0)
-        elif kind == QEvent.Type.HoverLeave:
-            self._sync_cursor(False)
-        return super().event(e)
+    def event(self, a0):
+        if isinstance(a0, QHoverEvent):
+            kind = a0.type()
+            if kind in (QEvent.Type.HoverMove, QEvent.Type.HoverEnter):
+                self._sync_cursor(self.tabAt(a0.position().toPoint()) >= 0)
+            elif kind == QEvent.Type.HoverLeave:
+                self._sync_cursor(False)
+        return super().event(a0)
 
     def _sync_cursor(self, on_tab: bool):
         """달라질 때만 손댄다. HoverMove는 마우스를 움직이는 내내 들어온다."""
@@ -373,7 +404,7 @@ class GridListWidget(QListWidget):
 
     def column_width(self) -> int:
         """한 칸의 폭. 세로 스크롤바를 늘 띄워 두어 뷰포트 폭이 항목 수에 따라 변하지 않는다."""
-        width = self.viewport().width() - self.LAYOUT_SLACK
+        width = present(self.viewport()).width() - self.LAYOUT_SLACK
         gap = 2 * self.spacing()
         columns = self._columns
         while columns > 1 and width // columns - gap < self._min_item_width:
@@ -384,10 +415,12 @@ class GridListWidget(QListWidget):
         width = self.column_width()
         for index in range(self.count()):
             item = self.item(index)
+            if item is None:
+                continue
             height = self._item_height or item.sizeHint().height()
             if item.sizeHint().width() != width or item.sizeHint().height() != height:
                 item.setSizeHint(QSize(width, height))
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
         self.relayout()

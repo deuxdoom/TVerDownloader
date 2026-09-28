@@ -47,7 +47,7 @@ def blend(fg: str, bg: str, ratio: float) -> str:
     return "#{:02X}{:02X}{:02X}".format(*parts)
 
 
-def palette(theme: str = "dark") -> dict:
+def palette(theme: str = "dark") -> dict[str, str]:
     """테마별 컬러 토큰. QSS와 아이콘 채색이 같은 값을 쓰도록 여기서만 정의한다."""
     if theme == "light":
         colors = {

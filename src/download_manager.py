@@ -31,7 +31,7 @@ class DownloadManager(QObject):
         self.config = config; self.history_store = history_store
         self._queue_store = queue_store
         self._held: List[str] = []; self._queue_meta: Dict[str, Dict[str, str]] = {}
-        self.ytdlp_path: Optional[str] = None; self.ffmpeg_path: Optional[str] = None
+        self.ytdlp_path = ""; self.ffmpeg_path = ""
         self._task_queue: List[str] = []; self._active_threads: Dict[str, DownloadThread] = {}
         self._active_conversions: Dict[str, ConversionThread] = {}
         self._conversion_queue: List[Dict[str, str]] = []

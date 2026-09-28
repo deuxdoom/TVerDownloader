@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayo
                              QWidget)
 
 from src.qss import WINDOW_RADIUS
+from src.qtparts import named, present
 
 SHADOW_BLUR = 10
 SHADOW_OFFSET = 3
@@ -162,11 +163,13 @@ class _EdgeGrip(QWidget):
         self._edges = edges
         self.setCursor(cursor)
 
-    def mousePressEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton:
-            event.ignore()
+    def mousePressEvent(self, a0):
+        if a0 is None:
             return
-        handle = self.window().windowHandle()
+        if a0.button() != Qt.MouseButton.LeftButton:
+            a0.ignore()
+            return
+        handle = present(self.window()).windowHandle()
         if handle is not None:
             handle.startSystemResize(self._edges)
 
@@ -188,21 +191,23 @@ class DragBar(QFrame):
         self._press_global = None
         self._press_local = QPoint()
 
-    def mousePressEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton:
-            event.ignore()
+    def mousePressEvent(self, a0):
+        if a0 is None:
             return
-        self._press_global = event.globalPosition().toPoint()
-        self._press_local = event.position().toPoint()
+        if a0.button() != Qt.MouseButton.LeftButton:
+            a0.ignore()
+            return
+        self._press_global = a0.globalPosition().toPoint()
+        self._press_local = a0.position().toPoint()
 
-    def mouseMoveEvent(self, event):
-        if self._press_global is None:
+    def mouseMoveEvent(self, a0):
+        if self._press_global is None or a0 is None:
             return
-        now = event.globalPosition().toPoint()
+        now = a0.globalPosition().toPoint()
         if (now - self._press_global).manhattanLength() < self.DRAG_THRESHOLD:
             return
         self._press_global = None
-        window = self.window()
+        window = present(self.window())
         if self.frame is not None and self.frame.is_maximized():
             self.frame.restore_under_cursor(
                 now, self._press_local.y() + self.mapTo(window, QPoint(0, 0)).y())
@@ -210,11 +215,11 @@ class DragBar(QFrame):
         if handle is not None:
             handle.startSystemMove()
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, a0):
         self._press_global = None
 
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseDoubleClickEvent(self, a0):
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             self._press_global = None
             if self.frame is not None:
                 self.frame.toggle()
@@ -230,7 +235,7 @@ class ShadowShell(QWidget):
         self.setObjectName("WindowShell")
         self._shadow = QPixmap()
         self._maximized = False
-        self.surface = QFrame(objectName="WindowSurface")
+        self.surface = named(QFrame(), "WindowSurface")
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
         layout.addWidget(self.surface)
@@ -255,7 +260,7 @@ class ShadowShell(QWidget):
 
     def _apply_margins(self):
         left, top, right, bottom = (0, 0, 0, 0) if self._maximized else SHADOW_MARGINS
-        self.layout().setContentsMargins(left, top, right, bottom)
+        present(self.layout()).setContentsMargins(left, top, right, bottom)
 
     def set_maximized(self, maximized: bool):
         """최대화되면 그림자와 여백을 걷는다. 화면에 꽉 찬 창 둘레에 그림자가 남을 자리가 없다."""
@@ -268,8 +273,8 @@ class ShadowShell(QWidget):
             grip.setVisible(not maximized)
         self.update()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0):
+        super().resizeEvent(a0)
         self._shadow = QPixmap()
         self._place_grips()
 
@@ -295,7 +300,7 @@ class ShadowShell(QWidget):
             grip.setGeometry(place)
             grip.raise_()
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         """그림자를 **덮어쓰기로** 그린다(CompositionMode_Source).
 
         기본값(SourceOver)으로 그리면 다시 그릴 때마다 알파가 그 위에 쌓인다 - 창을 몇 번
@@ -357,18 +362,19 @@ class _DialogTitleBar(DragBar):
         layout.setContentsMargins(SIDE_MARGIN, 0, 6, 0)
         layout.setSpacing(8)
 
-        self.icon_label = QLabel(objectName="DialogTitleIcon")
+        self.icon_label = named(QLabel(), "DialogTitleIcon")
         if icon_name:
             icon = get_icon(icon_name, colors.get(color_key, colors["accent"]),
                             DIALOG_ICON_SIZE)
             self.icon_label.setPixmap(icon.pixmap(QSize(DIALOG_ICON_SIZE, DIALOG_ICON_SIZE)))
             layout.addWidget(self.icon_label)
 
-        self.title_label = QLabel(title, objectName="DialogTitle")
+        self.title_label = named(QLabel(title), "DialogTitle")
         layout.addWidget(self.title_label)
         layout.addStretch(1)
 
-        self.close_button = QToolButton(objectName="IconButton", toolTip=t("common.close"))
+        self.close_button = named(QToolButton(), "IconButton")
+        self.close_button.setToolTip(t("common.close"))
         self.close_button.setFixedSize(DIALOG_BUTTON_SIZE, DIALOG_BUTTON_SIZE)
         self.close_button.setIconSize(QSize(DIALOG_ICON_SIZE, DIALOG_ICON_SIZE))
         self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -422,9 +428,9 @@ class _DialogPlacer(QObject):
     `move()`를 부르면 WA_Moved가 서서 그 계산을 건너뛴다.
     """
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Show:
-            center_dialog(obj)
+    def eventFilter(self, a0, a1):
+        if a1 is not None and a1.type() == QEvent.Type.Show:
+            center_dialog(a0)
         return False
 
 
@@ -471,7 +477,7 @@ def apply_dialog_frame(dialog, theme: str = "light", *, title: str = "",
     _grow_for_chrome(dialog)
 
     shell = ShadowShell(resizable=resizable)
-    body = QWidget(objectName="DialogBody")
+    body = named(QWidget(), "DialogBody")
     if inner is not None:
         body.setLayout(inner)
 

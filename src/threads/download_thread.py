@@ -31,9 +31,13 @@ DRIVE_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:)+")
 """
 
 UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*]')
+"""윈도우가 파일 이름에 허용하지 않는 글자. 벗어난 이름을 한 덩이로 접을 때 `_`로 바꾼다."""
 YTDLP_FORBIDDEN_RE = re.compile(r'[<>:"|?*]')
 YTDLP_TRAILING_RE = re.compile(r'[\s.]$')
-"""윈도우가 파일 이름에 허용하지 않는 글자. 벗어난 이름을 한 덩이로 접을 때 지운다."""
+"""윈도우의 yt-dlp가 경로 조각마다 `#`으로 바꾸는 글자와 폴더 이름 끝의 공백·점(`sanitize_path`, 실측).
+
+같게 다듬어야 짐작해 둔 최종 경로가 yt-dlp가 실제로 쓰는 경로와 맞는다. 지우거나 그대로 두면 어긋난다.
+"""
 
 VIDEO_CODEC_KEY = "_video_codec"
 """끝난 신호의 메타데이터에 영상 코덱을 실어 보내는 키.

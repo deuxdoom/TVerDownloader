@@ -9,6 +9,7 @@ from src.i18n import t
 from src.message import notify
 from src.qss import palette
 from src.utils import open_developer_link, open_site_link, localized_app_name
+from src.qtparts import named, present
 from src.window_frame import apply_dialog_frame
 
 
@@ -115,16 +116,16 @@ class AboutDialog(QDialog):
         """
         row = QHBoxLayout()
         row.setSpacing(6)
-        youtube_btn = QPushButton(t("about.youtube"), objectName="AboutYouTube")
+        youtube_btn = named(QPushButton(t("about.youtube")), "AboutYouTube")
         youtube_btn.clicked.connect(open_developer_link)
-        site_btn = QPushButton(t("about.site"), objectName="AboutSite")
+        site_btn = named(QPushButton(t("about.site")), "AboutSite")
         site_btn.clicked.connect(open_site_link)
 
-        self.check_btn = QPushButton(t(self.CHECK_LABEL_KEY), objectName="AboutUpdate")
+        self.check_btn = named(QPushButton(t(self.CHECK_LABEL_KEY)), "AboutUpdate")
         self.check_btn.clicked.connect(self._check_update)
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close_box.button(QDialogButtonBox.StandardButton.Close).setText(t("common.close"))
+        present(close_box.button(QDialogButtonBox.StandardButton.Close)).setText(t("common.close"))
         close_box.rejected.connect(self.reject)
 
         row.addWidget(youtube_btn)

@@ -199,7 +199,7 @@ class ThumbnailDownloader(QThread):
             image = decode_small(data)
             if image is None:
                 data = None
-            elif self.want_original:
+            elif self.want_original and data is not None:
                 write_thumbnail_cache(original, data)
         if image is not None and self.cache_key:
             _save_small(self.cache_key, image)

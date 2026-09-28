@@ -15,6 +15,7 @@ from src.i18n import t
 from src.utils import is_media_url, match_tver_url, normalize_input_url
 from src.message import notify
 from src.bulk_dialog import BulkAddDialog
+from src.qtparts import present
 from src.window_frame import run_dialog
 
 
@@ -42,7 +43,7 @@ class InputSources:
         끄면 시그널 연결 자체를 끊는다 - 콜백에서 돌아 나오게 두면 꺼 놓고도 복사할
         때마다 클립보드를 읽게 된다.
         """
-        clipboard = QGuiApplication.clipboard()
+        clipboard = present(QGuiApplication.clipboard())
         if enabled and not self._clipboard_connected:
             clipboard.dataChanged.connect(self.on_clipboard_changed)
             self._clipboard_connected = True
@@ -61,7 +62,7 @@ class InputSources:
         않는다 - 직접 적던 내용을 치우고 자리를 가져갈 이유가 없다.
         """
         window = self.window
-        url = match_tver_url(QGuiApplication.clipboard().text())
+        url = match_tver_url(present(QGuiApplication.clipboard()).text())
         if not url or url == self._last_clipboard_url:
             return
         if self._bulk_dialog is not None:

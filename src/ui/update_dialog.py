@@ -40,7 +40,7 @@ class UpdateProgressDialog(QDialog):
         self._work_done = False
         self._cancel_requested = False
         self.started_download = False
-        self.thread = None
+        self.worker = None
         self.work_dir = Path(work_dir) if work_dir is not None else None
         self.asset_url = asset_url
         self.expected_digest = expected_digest
@@ -71,8 +71,8 @@ class UpdateProgressDialog(QDialog):
         else:
             self._begin_download()
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0):
+        super().showEvent(a0)
         refit_after_show(self, recenter=True)
 
     def _set_stage(self, stage: str):
@@ -100,12 +100,12 @@ class UpdateProgressDialog(QDialog):
                 return
         self._set_stage("downloading")
         self.log(t("log.update_start", tag=self._data["to_version"]))
-        self.thread = UpdateDownloadThread(self.asset_url, self.work_dir, self,
+        self.worker = UpdateDownloadThread(self.asset_url, self.work_dir, self,
                                            expected_digest=self.expected_digest)
-        self.thread.progress.connect(self._on_progress)
-        self.thread.detail.connect(self._on_detail)
-        self.thread.finished.connect(self._on_finished)
-        self.thread.start()
+        self.worker.progress.connect(self._on_progress)
+        self.worker.detail.connect(self._on_detail)
+        self.worker.finished.connect(self._on_finished)
+        self.worker.start()
 
     def _action(self, action: str):
         if action == "btn_changelog":
@@ -117,8 +117,8 @@ class UpdateProgressDialog(QDialog):
         elif action == "btn_update_now" and self.view.state == "check":
             self._begin_download()
         elif action == "btn_retry" and self.view.state == "download_failed":
-            if self.thread is not None:
-                self.thread.wait()
+            if self.worker is not None:
+                self.worker.wait()
             self_update.cleanup_workspace()
             self.work_dir = None
             self._begin_download()
@@ -151,16 +151,16 @@ class UpdateProgressDialog(QDialog):
 
     def _cancel(self):
         """스레드가 끝나기 전에 창을 없애면 작업 폴더 정리와 압축 풀이 겹친다."""
-        if self.thread is None or self._cancel_requested:
+        if self.worker is None or self._cancel_requested:
             return
         self._cancel_requested = True
         self.view.secondary_button.setEnabled(False)
-        self.thread.stop()
+        self.worker.stop()
 
     def reject(self):
         if self.view.state != "downloading" or self._work_done:
-            if self.thread is not None:
-                self.thread.wait()
+            if self.worker is not None:
+                self.worker.wait()
             super().reject()
             return
         self._cancel()

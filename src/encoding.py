@@ -224,7 +224,7 @@ def color_filter(primaries: Optional[str], transfer: Optional[str],
     values = []
     for name, value in (("color_primaries", primaries), ("color_trc", transfer),
                         ("colorspace", space)):
-        resolved = DEFAULT_COLOR if _is_unspecified(value) else value.strip()
+        resolved = DEFAULT_COLOR if value is None or _is_unspecified(value) else value.strip()
         values.append(f"{name}={resolved}")
     return "setparams=" + ":".join(values)
 

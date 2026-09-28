@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QGridLayout, QLabel, QMessageBox, QWidget
 
 from src.i18n import t
+from src.qtparts import present
 from src.window_frame import apply_dialog_frame, center_dialog, run_dialog
 
 
@@ -36,17 +37,17 @@ class _ConfirmBox(QMessageBox):
     짧으면 이 폭에서 멈춘다 - 일곱 언어를 재어 320~372px 안에 들었다.
     """
 
-    def showEvent(self, event):
+    def showEvent(self, a0):
         """격자를 다시 짜는 일이 다 끝난 뒤에 자리를 옮기고 크기를 맞춘다.
 
         QMessageBox는 문구·아이콘·버튼이 바뀔 때마다 격자를 새로 짜서, 구성 도중에
         옮겨 두면 그 다음 setter 한 번에 되돌아간다.
         """
-        super().showEvent(event)
+        super().showEvent(a0)
         self._center_content()
         self._apply_common_size()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, a0):
         """크기가 정해진 뒤에 다시 부모 가운데로 놓는다.
 
         **QMessageBox는 창이 보이고 나서야 제 내용에 맞춰 크기를 굳힌다**(실측: 종료 확인
@@ -54,7 +55,7 @@ class _ConfirmBox(QMessageBox):
         커진 만큼 절반이 그대로 어긋남이 된다 - 문구가 길고 짧은 데 따라 창마다 다른
         자리에 뜨던 것이 이 때문이다(실측: 같은 부모에서 +53 · +64 · +8px).
         """
-        super().resizeEvent(event)
+        super().resizeEvent(a0)
         center_dialog(self)
 
     def _apply_common_size(self):
@@ -96,13 +97,14 @@ class _ConfirmBox(QMessageBox):
             return
         for index in reversed(range(grid.count())):
             item = grid.itemAt(index)
-            if item.widget() is None and item.layout() is None:
+            if item is not None and item.widget() is None and item.layout() is None:
                 grid.takeAt(index)
 
         columns = max(1, grid.columnCount())
         moves = []
         for index in range(grid.count()):
-            widget = grid.itemAt(index).widget()
+            item = grid.itemAt(index)
+            widget = item.widget() if item is not None else None
             if widget is None:
                 continue
             row, column, row_span, column_span = grid.getItemPosition(index)
@@ -144,7 +146,7 @@ def notify(parent: QWidget | None, title: str, text: str, *,
     처음 정의하는 모듈 로드 시점(아직 i18n.setup() 전)에 언어가 굳어 버리기 때문이다.
     """
     box = _build_box(parent, title, text, theme)
-    ok_button = box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole)
+    ok_button = present(box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole))
     ok_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(ok_button)
     _frame(box, theme, icon_name, color_key)
@@ -158,7 +160,7 @@ def confirm(parent: QWidget | None, title: str, text: str, *,
     """예/아니오 확인 창을 띄우고 '예'를 눌렀는지 돌려준다."""
     box = _build_box(parent, title, text, theme)
 
-    yes_button = box.addButton(yes_text or t("common.yes"), QMessageBox.ButtonRole.YesRole)
+    yes_button = present(box.addButton(yes_text or t("common.yes"), QMessageBox.ButtonRole.YesRole))
     no_button = box.addButton(no_text or t("common.no"), QMessageBox.ButtonRole.NoRole)
     yes_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(yes_button if default_yes else no_button)
@@ -171,65 +173,32 @@ def confirm(parent: QWidget | None, title: str, text: str, *,
 class _ClosableBox(_ConfirmBox):
     """Esc와 X를 단추 누름이 아니라 **창 닫기**로 처리하는 확인 창.
 
-    Qt는 Esc 단추를 정해 두지 않으면 Reject·No 역할을 가진 단추를 그 자리에 앉혀, X로
-    닫기만 해도 누른 것이 된다. 그렇다고 그 역할을 아무 데도 주지 않으면 **Qt가 X를 잠가
+    Qt는 Esc 단추를 정해 두지 않으면 Reject·No 역할의 단추나 하나뿐인 단추를 그 자리에 앉혀,
+    X로 닫기만 해도 누른 것이 된다. 그렇다고 그 역할을 아무 데도 주지 않으면 **Qt가 X를 잠가
     버린다.** 답은 Esc와 X를 곧장 reject()로 보내 clickedButton을 None으로 남기는 것이다.
     """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._closing = False
 
     def arm_escape(self):
         """Qt에게 '닫는 길이 있다'고 알려 준다. 단추를 다 붙인 뒤에 부른다.
 
         **재정의만으로는 X가 켜지지 않는다** - Qt는 Esc 단추를 찾지 못하면 제목 표시줄의
         X를 아예 잠근다(실측: SC_CLOSE가 GRAYED). 그래서 보이지 않는 RejectRole 단추를
-        하나 두고 그것을 지정한다. 보이는 단추를 쓰면 놓쳤을 때 '지금 업데이트'가 눌린다.
+        하나 두고 그것을 지정한다. 보이는 단추를 쓰면 재정의가 놓쳤을 때 그 단추가 눌린다.
         """
-        button = self.addButton(t("common.close"), QMessageBox.ButtonRole.RejectRole)
+        button = present(self.addButton(t("common.close"), QMessageBox.ButtonRole.RejectRole))
         button.hide()
         self.setEscapeButton(button)
 
-    def reject(self):
-        self._closing = True
-        super().reject()
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
+    def keyPressEvent(self, a0):
+        if a0 is not None and a0.key() == Qt.Key.Key_Escape:
             self.reject()
             return
-        super().keyPressEvent(event)
+        super().keyPressEvent(a0)
 
-    def closeEvent(self, event):
-        event.accept()
+    def closeEvent(self, a0):
+        if a0 is not None:
+            a0.accept()
         self.reject()
-
-
-class _LinkBox(_ClosableBox):
-    """링크 단추가 창을 닫지 않는 확인 창.
-
-    '내역 확인'은 결정이 아니라 읽어 보는 단추라, 닫히면 보고 나서 받을 방법이 사라진다.
-    **닫기와 반드시 갈라야 한다** - clickedButton은 한 번 눌리면 남아 있어서, 링크를 누른
-    뒤 Esc를 치면 done()이 또 '링크를 눌렀다'로 읽어 브라우저가 열리고 창이 갇힌다.
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._link_button = None
-        self._on_link = None
-
-    def set_link(self, button, handler):
-        self._link_button = button
-        self._on_link = handler
-
-    def done(self, result):
-        if not self._closing and self._link_button is not None \
-                and self.clickedButton() is self._link_button:
-            if self._on_link is not None:
-                self._on_link()
-            return
-        super().done(result)
 
 
 def confirm_single(parent: QWidget | None, title: str, text: str, *, ok_text: str,
@@ -243,7 +212,7 @@ def confirm_single(parent: QWidget | None, title: str, text: str, *, ok_text: st
     box.setWindowTitle(title)
     box.setText(text)
 
-    ok_button = box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole)
+    ok_button = present(box.addButton(ok_text or t("common.ok"), QMessageBox.ButtonRole.AcceptRole))
     ok_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
     box.setDefaultButton(ok_button)
     box.arm_escape()
@@ -251,29 +220,3 @@ def confirm_single(parent: QWidget | None, title: str, text: str, *, ok_text: st
     _frame(box, theme, icon_name, color_key)
     run_dialog(box)
     return box.clickedButton() is ok_button
-
-
-def confirm_with_link(parent: QWidget | None, title: str, text: str, *,
-                      yes_text: str, link_text: str, on_link,
-                      icon_name: str = "info", color_key: str = "accent",
-                      theme: str = "light") -> bool:
-    """'실행'과 '링크 열기' 두 단추를 둔 확인 창. 실행을 눌렀는지 돌려준다.
-
-    **링크 단추는 창을 닫지 않는다**(_LinkBox). **confirm()을 쓰지 않는 것은 창을 닫은 것과
-    링크를 누른 것을 갈라야 하기 때문이다** - '아니오'가 NoRole이면 Qt가 그것을 Esc 단추로
-    앉혀, X로 닫기만 해도 브라우저가 열린다(Accept/Action 조합이면 None으로 남는다).
-    """
-    box = _LinkBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-
-    yes_button = box.addButton(yes_text, QMessageBox.ButtonRole.AcceptRole)
-    link_button = box.addButton(link_text, QMessageBox.ButtonRole.ActionRole)
-    yes_button.setObjectName("DangerButton" if color_key == "danger" else "PrimaryButton")
-    box.setDefaultButton(yes_button)
-    box.set_link(link_button, on_link)
-    box.arm_escape()
-
-    _frame(box, theme, icon_name, color_key)
-    run_dialog(box)
-    return box.clickedButton() is yes_button

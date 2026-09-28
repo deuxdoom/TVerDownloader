@@ -102,8 +102,8 @@ class ApplyUpdateWindow(QDialog):
             self.move(*pos)
             self._anchored = True
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0):
+        super().showEvent(a0)
         refit_after_show(self, recenter=not self._anchored)
 
     def _show_stage(self, percent: int, stage: str, detail: dict):
@@ -184,10 +184,12 @@ class ApplyUpdateWindow(QDialog):
             self.worker.wait()
         super().reject()
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
+        if a0 is None:
+            return
         if not button_state(self.stage)[1]:
-            event.ignore()
+            a0.ignore()
             return
         if self.worker is not None:
             self.worker.wait()
-        event.accept()
+        a0.accept()

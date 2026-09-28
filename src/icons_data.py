@@ -1,6 +1,6 @@
 """src/icons_data.py — 자동 생성 파일. 직접 수정하지 마세요.
 
-생성: python tools/gen_icons.py
+생성: python tests/gen_icons.py
 원본: assets/icons/*.svg
 
 Fluent UI System Icons (c) Microsoft Corporation, MIT License

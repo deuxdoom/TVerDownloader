@@ -255,7 +255,7 @@ def pick_thumbnail(page_url: Any, source: Any = "", size: str = THUMB_ORIGINAL_S
     """
     matched = TVER_ID_RE.match(page_url.strip()) if isinstance(page_url, str) else None
     kind = TVER_THUMBNAIL_KINDS.get(matched.group(1).lower()) if matched else None
-    if kind and matched.group(2).startswith(kind[1]):
+    if matched and kind and matched.group(2).startswith(kind[1]):
         return TVER_THUMBNAIL_URL.format(kind=kind[0], size=size, id=matched.group(2))
     if isinstance(source, dict):
         source = source.get("thumbnail")
@@ -472,6 +472,8 @@ def _canonicalize_choice(raw: Any, allowed: tuple, retired: Dict[str, str],
                          default: str) -> str:
     """설정 파일에서 온 선택지 하나를 다듬는다. 목록에 없으면 정해 둔 대체값으로 간다."""
     value = _choice_value(raw)
+    if value is None:
+        return default
     if value in allowed:
         return value
     return retired.get(value, default)
@@ -516,8 +518,9 @@ def retired_option_notes(config: Dict[str, Any]) -> List[str]:
         value = _choice_value(raw)
         if value in allowed:
             continue
-        replacement = retired.get(value)
-        was = RETIRED_OPTION_LABELS.get(value, str(raw))
+        key = value or ""
+        replacement = retired.get(key)
+        was = RETIRED_OPTION_LABELS.get(key, str(raw))
         if replacement is None:
             notes.append(t("log.retired_unknown", kind=kind, was=was))
         else:

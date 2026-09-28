@@ -177,6 +177,8 @@ class ConversionThread(QThread):
 
     @staticmethod
     def _as_int(text: Optional[str]) -> Optional[int]:
+        if text is None:
+            return None
         try:
             return int(text)
         except (TypeError, ValueError):

@@ -64,7 +64,7 @@ def is_writable(directory: Path) -> bool:
         return False
 
 
-def pick_asset(assets: Iterable[dict]) -> Optional[dict]:
+def pick_asset(assets: Optional[Iterable[dict]]) -> Optional[dict]:
     """릴리스에 붙은 파일 중 내려받을 zip을 고른다. 여럿이면 첫 번째 - 지금은 하나뿐이다."""
     for asset in assets or []:
         name = (asset.get("name") or "").lower()

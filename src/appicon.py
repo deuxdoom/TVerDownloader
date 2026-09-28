@@ -78,7 +78,7 @@ def _frame(size: int):
             if top is None:
                 top = y
             bottom = y
-    if top is None:
+    if top is None or bottom is None:
         return None
 
     track = _recolor(base, PROGRESS_TRACK_COLOR)

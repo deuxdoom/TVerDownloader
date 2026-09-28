@@ -2,25 +2,25 @@ import sys, os
 import threading
 from collections import deque
 from html import escape
-from typing import List, Dict
+from typing import List, Dict, cast
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QFileDialog, QWidget,
-                             QAbstractSpinBox, QLineEdit, QMenu, QTextEdit, QComboBox)
-from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, QTranslator, QLibraryInfo, pyqtSignal
-from PyQt6.QtGui import QCursor, QGuiApplication, QFontDatabase, QFont, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QSystemTrayIcon, QFileDialog,
+                             QAbstractSpinBox, QLineEdit, QTextEdit)
+from PyQt6.QtCore import Qt, QEvent, QObject, QTimer, pyqtSignal
+from PyQt6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtNetwork import QLocalServer
+from PyQt6.sip import voidptr
 
 from src import autostart, self_update, shortcuts, i18n
+from src.app_setup import prepare_app, set_menu_icon_color, setup_translations
 from src.single_instance import (SOCKET_NAME, SHOW_REQUEST, TRAY_REQUEST, REQUEST_WAIT_MS,
                                  acquire_instance_lock, notify_running_instance)
 from src.i18n import t
 from src.utils import (load_config, save_config, handle_exception,
-                       retired_option_notes,
-                       localized_app_name, get_resource_path,
+                       retired_option_notes, localized_app_name,
                        canonicalize_config_fragments, take_load_warnings, pick_thumbnail)
-from src.qss import build_qss, palette, UI_FONT_FALLBACKS
-from src.icons import is_monochrome_white, tint_icon
+from src.qss import build_qss, palette
 from src.message import confirm, notify
 from src.about_dialog import AboutDialog
 from src.dialogs import SettingsDialog
@@ -28,21 +28,19 @@ from src.series_dialog import SeriesSelectionDialog
 from src.history_store import HistoryStore
 from src.favorites_store import FavoritesStore
 from src.queue_store import QueueStore
-from src.qtparts import (apply_popup_shape, apply_combo_popup_shape,
-                         flatten_combo_popup_margins, COMBO_POPUP_OBJECT)
 from src.widgets import DownloadItemWidget
 from src.thumbnails import start_cache_maintenance
+from src.indicators import start_legacy_cleanup
 from src.updater import fetch_latest, has_newer, prompt_and_update
 from src.threads.setup_thread import SetupThread
-from src.threads.region_thread import (RegionCheckThread, JAPAN_CODE, country_name,
-                                       STOP_WAIT_MS as REGION_STOP_WAIT_MS)
-from src.net_watch import NetworkChangeWatcher
 from src.ui.main_window_ui import MainWindowUI
 from src.window_frame import center_on_screen, handle_system_command, make_frameless, run_dialog
+from src.qtparts import present, qt_app
 from src.series_parser import SeriesParser
 from src.download_manager import DownloadManager
 from src.controllers.download_list import DownloadListController
 from src.controllers.library import LibraryController
+from src.controllers.region_notice import RegionNotice
 from src.tray_controller import TrayController
 from src.input_sources import InputSources
 from versioninfo import APP_VERSION
@@ -63,23 +61,24 @@ class MainWindow(QMainWindow):
         """
         make_frameless(self)
         self.force_quit = False; self.env_ready = False; self.config = load_config()
-        self._local_server = None
+        self._local_server: QLocalServer | None = None
         self._update_result = None
         self._update_worker = None
         self._selection_queue: deque = deque(); self._selection_open = False
         update_result = self_update.read_result()
         self._shortcuts: List[QShortcut] = []; self._guarded_shortcuts: List[QShortcut] = []
         self.setAcceptDrops(True)
-        start_cache_maintenance()
+        start_cache_maintenance(); start_legacy_cleanup()
         self.history_store = HistoryStore(); self.history_store.load(); self.fav_store = FavoritesStore("favorites.json"); self.fav_store.load()
         self.queue_store = QueueStore(); self._queue_file_ok = self.queue_store.load()
-        self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self); self.ui.setup_tray(APP_VERSION)
+        self.ui = MainWindowUI(self); self.ui.setup_ui(); self.tray_icon = QSystemTrayIcon(self)
         self.series_parser = SeriesParser(ytdlp_path="", config=self.config)
         self.download_manager = DownloadManager(self.config, self.history_store, self.queue_store)
         self.download_list = DownloadListController(self)
         self.library = LibraryController(self)
-        self.tray = TrayController(self)
+        self.tray = TrayController(self); self.tray.setup(APP_VERSION)
         self.input_sources = InputSources(self)
+        self.region = RegionNotice(self)
         self._connect_signals(); self._set_input_enabled(False)
         self.apply_theme(self.config.get("theme", "light"), persist=False)
         self.set_always_on_top(self.config.get("always_on_top", False), init=True)
@@ -88,7 +87,7 @@ class MainWindow(QMainWindow):
         self.input_sources.apply_clipboard_watch(self.config.get("clipboard_watch", True))
         self.library.refresh_history_list(); self.library.refresh_fav_list()
         self.apply_shortcuts()
-        QApplication.instance().focusChanged.connect(self._sync_shortcut_guard)
+        qt_app().focusChanged.connect(self._sync_shortcut_guard)
         self.append_log(t("log.app_start"))
         if update_result is not None:
             if update_result.get("stage") == "done":
@@ -105,7 +104,7 @@ class MainWindow(QMainWindow):
         for note in retired_option_notes(self.config):
             self.append_log(note)
         self._restore_queue()
-        self._start_region_check()
+        self.region.start()
         self._tools_updating = False
         self.setup_thread = SetupThread(self); self.setup_thread.log.connect(self.append_log)
         self.setup_thread.finished.connect(self._on_setup_finished)
@@ -141,20 +140,19 @@ class MainWindow(QMainWindow):
         다시 받았고, 다시 띄우는 동안 창이 사라졌다. 이미 적힌 로그는 그 언어로 남는다 -
         지난 기록이라 바꿔 적을 이유가 없다. 목록 카드는 호출부가 새로 그린다.
         """
-        app = QApplication.instance()
+        app = qt_app()
         i18n.setup(self.config)
         setup_translations(app)
         app_name = localized_app_name()
         self.setWindowTitle(app_name)
         app.setApplicationName(app_name)
         self.ui.retranslate()
-        self.ui.retranslate_tray()
         self.tray.retranslate()
         for row in range(self.ui.download_list.count()):
             widget = self.ui.download_list.itemWidget(self.ui.download_list.item(row))
             if isinstance(widget, DownloadItemWidget):
                 widget.retranslate()
-        self._retranslate_region_notice()
+        self.region.retranslate()
         code = i18n.current_code()
         name = next((info.display_name for info in i18n.available_languages()
                      if info.code == code), code)
@@ -165,17 +163,15 @@ class MainWindow(QMainWindow):
         self.config["theme"] = theme
         if persist:
             save_config(self.config)
-        app = QApplication.instance()
+        app = qt_app()
         app.setStyleSheet(build_qss(theme))
-        tinter = getattr(app, "_menu_icon_tinter", None)
-        if tinter is not None:
-            tinter.set_color(palette(theme)["text"])
+        set_menu_icon_color(palette(theme)["text"])
         self.ui.apply_theme(theme)
         for list_widget in (self.ui.download_list, self.ui.history_list, self.ui.fav_list):
             for i in range(list_widget.count()):
-                widget = list_widget.itemWidget(list_widget.item(i))
-                if hasattr(widget, "apply_theme"):
-                    widget.apply_theme(theme)
+                apply = getattr(list_widget.itemWidget(list_widget.item(i)), "apply_theme", None)
+                if apply is not None:
+                    apply(theme)
 
     def toggle_log_panel(self):
         """로그 패널을 접거나 펴고 그 선택을 설정에 남긴다."""
@@ -193,6 +189,9 @@ class MainWindow(QMainWindow):
 
     LOG_RULE_MAX = 12
     """구분선 한쪽에 넣을 괘선의 최대 개수. 끝까지 채우면 짧은 제목이 괘선에 묻힌다."""
+
+    NATIVE_RESULT = cast(voidptr, 0)
+    """nativeEvent가 돌려주는 결과값. Qt가 받는 것은 정수 0인데 PyQt6 타입 정보는 voidptr로 적어 두었다."""
 
     def apply_shortcuts(self):
         """설정에 저장된 조합으로 단축키를 처음부터 다시 만든다.
@@ -250,25 +249,31 @@ class MainWindow(QMainWindow):
         for shortcut in self._guarded_shortcuts:
             shortcut.setEnabled(not typing)
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, a0):
         """Qt가 창에만 보내는 이벤트라 여기서 받아 input_sources로 넘긴다."""
-        if self.input_sources.urls_from_mime(event.mimeData()):
-            event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+        if a0 is None:
+            return
+        if self.input_sources.urls_from_mime(a0.mimeData()):
+            a0.setDropAction(Qt.DropAction.CopyAction); a0.accept()
         else:
-            event.ignore()
+            a0.ignore()
 
-    def dragMoveEvent(self, event):
+    def dragMoveEvent(self, a0):
         """dragEnter에서 받아 놓고도 이걸 빼면 커서가 금지 표시로 바뀐다."""
-        if self.input_sources.urls_from_mime(event.mimeData()):
-            event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+        if a0 is None:
+            return
+        if self.input_sources.urls_from_mime(a0.mimeData()):
+            a0.setDropAction(Qt.DropAction.CopyAction); a0.accept()
         else:
-            event.ignore()
+            a0.ignore()
 
-    def dropEvent(self, event):
-        urls = self.input_sources.urls_from_mime(event.mimeData())
+    def dropEvent(self, a0):
+        if a0 is None:
+            return
+        urls = self.input_sources.urls_from_mime(a0.mimeData())
         if not urls:
-            event.ignore(); return
-        event.setDropAction(Qt.DropAction.CopyAction); event.accept()
+            a0.ignore(); return
+        a0.setDropAction(Qt.DropAction.CopyAction); a0.accept()
         self.input_sources.accept_dropped_urls(urls)
 
     def _connect_signals(self):
@@ -296,7 +301,8 @@ class MainWindow(QMainWindow):
         self.ui.history_search_input.textChanged.connect(self.library.request_history_refresh)
         self.ui.fav_search_input.textChanged.connect(self.library.refresh_fav_list)
         self.ui.history_sort_combo.currentIndexChanged.connect(self.library.reset_history_view)
-        self.ui.history_list.verticalScrollBar().valueChanged.connect(self.library.on_history_scrolled)
+        present(self.ui.history_list.verticalScrollBar()).valueChanged.connect(
+            self.library.on_history_scrolled)
         self.ui.fav_add_btn.clicked.connect(self.library.add_favorite); self.ui.fav_del_btn.clicked.connect(self.library.remove_selected_favorite)
         self.ui.fav_chk_btn.clicked.connect(self.library.check_all_favorites); self.ui.fav_list.customContextMenuRequested.connect(self.library.show_fav_menu)
         self.download_manager.log.connect(self.append_log); self.download_manager.item_added.connect(self.download_list.add_item_widget)
@@ -334,7 +340,7 @@ class MainWindow(QMainWindow):
         connection = server.nextPendingConnection()
         if connection is None:
             return
-        said = (bytes(connection.readAll())
+        said = (connection.readAll().data()
                 if connection.waitForReadyRead(REQUEST_WAIT_MS) else b"")
         connection.close()
         if said != TRAY_REQUEST:
@@ -468,7 +474,7 @@ class MainWindow(QMainWindow):
             self.append_log(t("log.tools_update_done"))
             self.download_manager.check_queue_and_start()
             return
-        self._show_region_notice()
+        self.region.show()
         self.append_log(t("log.setup_done"))
         if self.config.get("auto_update_check", True) and not self.setup_thread._unreachable:
             QTimer.singleShot(1000, self._check_for_update)
@@ -604,157 +610,6 @@ class MainWindow(QMainWindow):
             self.history_store.add(url, title, final_filepath, series_id=series_id, thumbnail_url=thumbnail_url)
             self.history_store.save(); self.library.refresh_history_list()
 
-    def _start_region_check(self):
-        """지금 IP가 일본인지 물어보러 보낸다. 준비를 기다리지 않는 것은 yt-dlp와 무관해서다.
-
-        **끄는 설정을 두지 않는다** - VPN을 켰는지는 TVer에서 무엇을 하든 먼저 알아야 할
-        것이라 고를 일이 아니다. 스레드에 부모를 주지 않으므로 이 참조를 놓으면 도는 채로
-        파괴된다. 끝까지 들고 있는다.
-        """
-        self._region_code = ""
-        self._region_failed = False
-        self._region_notified = None
-        """마지막으로 알린 상태 - 국가 코드이거나, 확인 실패 안내를 냈다는 뜻의 빈 문자열.
-
-        VPN을 켜고 끄면 같은 답이 여러 번 오므로 **무엇이 달라졌는지 여기서 가른다.**
-        아무것도 알리지 않은 상태를 빈 문자열과 구별해야 해서 None으로 시작한다.
-        """
-        self.region_thread = RegionCheckThread()
-        self.region_thread.resolved.connect(self._on_region_resolved)
-        self.region_thread.failed.connect(self._on_region_failed)
-        self.region_thread.start()
-        self._start_network_watch()
-
-    REGION_PROBE_DELAYS_MS = (3_000, 12_000, 30_000)
-    """네트워크가 바뀐 뒤 다시 물어보는 시점들(마지막 알림으로부터).
-
-    **한 번만 물으면 아직 옛 나라가 온다.** VPN은 어댑터에 주소가 붙는 것과 통신이 실제로
-    그쪽으로 도는 것 사이에 시차가 있어, 첫 알림이 오는 순간에는 아직 옮겨 가지 않았다.
-    세 번이면 대개 잡히고 통신은 다 합쳐 750바이트다.
-
-    **주기 확인이 아니다.** 네트워크가 바뀌지 않는 동안에는 이 타이머가 아예 돌지 않는다.
-    """
-
-    def _start_network_watch(self):
-        """네트워크가 바뀌는 것을 지켜보다가 그때만 다시 묻게 한다.
-
-        **주기적으로 다시 묻지 않는 근거가 여기 있다**(사용자 지시, 2026-09-10). IP가
-        달라지는 것은 네트워크가 바뀔 때뿐이라, 그 순간을 윈도우에게 얻어 오면 평소에
-        치를 값이 없다. 걸지 못했으면 켤 때 한 번 물은 답이 그대로 남는다 - 오늘 이전과
-        같은 상태이고, 그렇다고 앱이 못 돌 이유는 아니다.
-        """
-        self._region_probe_index = 0
-        self._region_probe_timer = QTimer(self)
-        self._region_probe_timer.setSingleShot(True)
-        self._region_probe_timer.timeout.connect(self._fire_region_probe)
-        self.net_watch = NetworkChangeWatcher(self)
-        self.net_watch.changed.connect(self._on_network_changed)
-        self.net_watch.start()
-
-    def _on_network_changed(self):
-        """네트워크가 바뀌었다. 자리잡을 틈을 두고 몇 번 물어본다.
-
-        타이머를 다시 걸어 두는 것이 곧 디바운스다 - VPN이 붙는 동안 알림이 잇달아 오는데,
-        그때마다 묻지 않고 **마지막 알림을 기준으로** 세 번만 묻는다.
-        """
-        self._region_probe_index = 0
-        self._region_probe_timer.start(self.REGION_PROBE_DELAYS_MS[0])
-
-    def _fire_region_probe(self):
-        """지금 한 번 묻고, 남은 시점이 있으면 그 간격만큼 다시 건다."""
-        self.region_thread.request_recheck()
-        self._region_probe_index += 1
-        delays = self.REGION_PROBE_DELAYS_MS
-        if self._region_probe_index < len(delays):
-            self._region_probe_timer.start(
-                delays[self._region_probe_index] - delays[self._region_probe_index - 1])
-
-    def _on_region_resolved(self, country_code: str):
-        """알아낸 국가를 적어 둔다. 알릴지는 준비가 끝났는지와 달라졌는지에 달렸다."""
-        self._region_code = country_code
-        self._show_region_notice()
-
-    def _on_region_failed(self):
-        """못 물어봤다. **이미 무언가 알렸으면 아무 말도 하지 않는다.**
-
-        VPN을 켜고 끄는 그 순간에는 통신이 잠깐 끊겨 확인이 실패하는데, 그때마다 '확인에
-        실패했다'를 내보내면 정작 나라가 바뀐 안내가 그 줄들에 묻힌다. 모르는 동안에는
-        마지막으로 알아낸 나라가 그대로 서 있는 것이 맞다.
-        """
-        if self._region_notified is not None:
-            return
-        self._region_failed = True
-        self._show_region_notice()
-
-    REGION_FALLBACK_KEYS = ("log.region_check_failed",
-                            "log.region_fallback_restricted",
-                            "log.region_fallback_vpn")
-    """확인하지 못했을 때 내보내는 안내. 나라를 모르니 무엇을 하라고만 말한다.
-
-    **여기서 조용히 넘어가면 안 된다** - 확인이 실패하는 상황은 대개 통신이 이상할 때라,
-    VPN이 꺼져 있을 법한 자리이기도 하다. 모른다는 사실을 밝히고 예전 안내를 그대로 준다.
-    문구가 아니라 번역 키를 담는 것은 클래스 상수라 값이 모듈 로드 시점에 굳기 때문이다.
-    """
-
-    def _show_region_notice(self):
-        """지역 안내를 로그 맨 아래에 붙인다. 알리기만 하고 아무것도 막지 않는다.
-
-        준비가 끝난 뒤로 미루는 것은 yt-dlp·FFmpeg 확인 줄 사이에 끼면 읽는 차례가 끊기기
-        때문이다. 답이 온 것과 준비가 끝난 것 중 늦게 오는 쪽이 이 함수를 부른다.
-        **IP는 어디에도 적지 않는다** - 로그를 그대로 붙여 도움을 청하는 자리가 있다.
-
-        **나라가 달라졌을 때만 다시 붙인다.** 30초마다 오는 같은 답을 그대로 찍으면 로그가
-        그 줄로 차고, 위에서 아래로 읽는 흐름도 끊긴다. 문구를 새로 만들지 않은 것은 지금
-        어디인지를 말하는 글이 언제 붙어도 그대로 통하기 때문이다.
-        """
-        if not self.env_ready:
-            return
-        state = self._region_code or ("" if self._region_failed else None)
-        if state is None or state == self._region_notified:
-            return
-        lines, color_key = self._region_message(state)
-        self._region_notified = state
-        self.append_notice(t("log.heading_notice"), lines, color_key=color_key)
-
-    def _region_message(self, state: str):
-        """알릴 상태(국가 코드, 실패면 빈 문자열)를 지금 언어의 안내 줄과 색으로 바꾼다."""
-        if state == JAPAN_CODE:
-            return [t("log.region_ok")], "log_success"
-        if state:
-            return [t("log.region_not_japan"),
-                    t("log.region_use_vpn", country=country_name(state)),
-                    t("log.region_restricted")], "notice"
-        return [t(key) for key in self.REGION_FALLBACK_KEYS], "notice"
-
-    def _retranslate_region_notice(self):
-        """목록 위 안내 줄만 새 언어로 다시 쓴다. 로그에 같은 안내를 또 붙이지 않는다."""
-        state = getattr(self, "_region_notified", None)
-        if state is None:
-            return
-        lines, color_key = self._region_message(state)
-        self.ui.set_notice(lines[0], color_key)
-
-    def stop_region_check(self):
-        """지역 확인을 거둔다. 아직 답을 기다리는 중이면 그 답을 버리고 그냥 끝낸다.
-
-        오래 기다리지 않는 것은 DNS가 막힌 회선에서 십수 초가 걸리기 때문이다 - 부모 없는
-        스레드라 도는 채로 두어도 프로세스가 그대로 끝난다.
-
-        **네트워크 감시를 먼저 거둔다.** 그쪽 등록을 남긴 채 프로세스가 끝나면 윈도우가
-        이미 사라진 콜백을 부르러 온다.
-        """
-        watcher = getattr(self, "net_watch", None)
-        if watcher is not None:
-            watcher.stop()
-        timer = getattr(self, "_region_probe_timer", None)
-        if timer is not None:
-            timer.stop()
-        thread = self.region_thread
-        if thread is None:
-            return
-        thread.stop()
-        thread.wait(REGION_STOP_WAIT_MS)
-
     def append_log(self, text: str):
         """로그 한 줄을 기본 글자색으로 붙인다.
 
@@ -792,9 +647,10 @@ class MainWindow(QMainWindow):
         """접힌 로그의 초기 위젯 폭은 믿지 않고, 펼친 로그는 실제 배치와 QSS 안쪽 여백을 따른다."""
         log = self.ui.log_output
         width = log.width() if log.isVisible() else self.ui.LOG_PANE_WIDTH
-        return max(1, int(width - 2 * log.frameWidth()
-                   - 2 * log.document().documentMargin()
-                   - log.verticalScrollBar().sizeHint().width()))
+        document = log.document()
+        margin = document.documentMargin() if document is not None else 0
+        return max(1, int(width - 2 * log.frameWidth() - 2 * margin
+                   - present(log.verticalScrollBar()).sizeHint().width()))
 
     def _log_heading(self, title: str) -> str:
         """제목 양옆을 괘선으로 채운 구분선. 로그 폭 안에서 한 줄로 떨어진다.
@@ -822,7 +678,7 @@ class MainWindow(QMainWindow):
         return escape(text).replace("\n", "<br>")
 
     def _scroll_log_to_end(self):
-        scrollbar = self.ui.log_output.verticalScrollBar()
+        scrollbar = present(self.ui.log_output.verticalScrollBar())
         scrollbar.setValue(scrollbar.maximum())
 
     def clear_log(self): self.ui.log_output.clear()
@@ -831,13 +687,13 @@ class MainWindow(QMainWindow):
         try: os.startfile(filepath)
         except Exception as e: self.append_log(t("log.play_failed", error=e))
 
-    def changeEvent(self, event):
+    def changeEvent(self, a0):
         """상태 전환 도중 숨기면 Qt가 다시 보이게 하므로 전환이 끝난 뒤 트레이로 보낸다."""
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.WindowStateChange and self.isMinimized():
             self.tray.schedule_minimized()
 
-    def nativeEvent(self, event_type, message):
+    def nativeEvent(self, eventType, message):
         """윈도우가 보낸 최대화·복원 지시를 우리 쪽 최대화로 바꿔 받는다.
 
         화면 위쪽에 끌어다 붙이는 스냅과 Win+↑가 그대로 Qt에 닿으면, 프레임 없는 창이라
@@ -852,11 +708,11 @@ class MainWindow(QMainWindow):
         기본 구현은 '처리하지 않았다'를 돌려줄 뿐이라 우리가 그 값을 직접 내면 된다.
         """
         frame = getattr(getattr(self, "ui", None), "window_frame", None)
-        return (True, 0) if handle_system_command(frame, message) else (False, 0)
+        return bool(handle_system_command(frame, message)), self.NATIVE_RESULT
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         """Qt가 창에만 보내는 이벤트라 여기서 받아 트레이 쪽으로 넘긴다."""
-        self.tray.handle_close(event)
+        self.tray.handle_close(a0)
 
     def quit_application(self):
         """트레이 메뉴가 부르는 이름. 실제로 멈추는 일은 tray가 맡는다."""
@@ -873,180 +729,7 @@ class MainWindow(QMainWindow):
                               state=t("log.autostart_on" if enabled else "log.autostart_off")))
         else:
             self.append_log(t("log.autostart_failed"))
-        self.ui.sync_autostart_check()
-
-FONT_DIR = Path("assets") / "fonts"
-UI_FONT_FILES = [
-    FONT_DIR / "PretendardVariable.ttf",
-    FONT_DIR / "PretendardJP-Regular.ttf",
-]
-MONO_FONT_FILES = [FONT_DIR / "JetBrainsMono-Regular.ttf"]
-
-UI_FONT_HINTING = QFont.HintingPreference.PreferNoHinting
-UI_FONT_STYLE_STRATEGY = QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality
-
-
-class FontRenderingGuard(QObject):
-    """스타일시트가 새로 만든 폰트에 글자 렌더링 설정을 다시 입힌다.
-
-    QSS에 font 속성이 있으면 Qt가 QFont를 새로 만들고 setFont()의 힌팅·안티앨리어싱이
-    따라오지 않는다. 덮이는 시점은 Polish가 아니라 그 뒤의 FontChange라 셋을 모두 본다.
-    """
-
-    WATCHED = (QEvent.Type.Polish, QEvent.Type.FontChange, QEvent.Type.StyleChange)
-
-    def eventFilter(self, obj, event):
-        if event.type() in self.WATCHED and isinstance(obj, QWidget):
-            font = obj.font()
-            if (font.hintingPreference() != UI_FONT_HINTING
-                    or font.styleStrategy() != UI_FONT_STYLE_STRATEGY):
-                font.setHintingPreference(UI_FONT_HINTING)
-                font.setStyleStrategy(UI_FONT_STYLE_STRATEGY)
-                obj.setFont(font)
-        return super().eventFilter(obj, event)
-
-
-def register_font(path: Path) -> List[str]:
-    """서체 파일 하나를 등록하고 패밀리명 목록을 돌려준다. 실패해도 빈 목록으로 돌아간다."""
-    try:
-        full_path = get_resource_path(path)
-        if not full_path.is_file():
-            print(f"INFO: 번들 서체를 찾지 못했습니다: {full_path}")
-            return []
-        font_id = QFontDatabase.addApplicationFont(str(full_path))
-        if font_id == -1:
-            print(f"WARNING: 서체를 불러오지 못했습니다: {full_path}")
-            return []
-        return QFontDatabase.applicationFontFamilies(font_id)
-    except Exception as e:
-        print(f"WARNING: 서체 등록 중 오류가 발생했습니다: {path} - {e}")
-        return []
-
-
-class MenuIconTinter(QObject):
-    """메뉴가 열릴 때 흰색 아이콘을 테마 글자색으로 바꿔 놓는다.
-
-    입력칸 우클릭 메뉴는 Qt가 만들고 아이콘도 Qt 것(:/icons)이라 일곱 개가 전부 흰색이고
-    라이트 테마에서 묻힌다. 새로 만들지 않는 것은 항목이 켜지고 꺼지는 조건을 그대로 두려는 것.
-    """
-
-    def __init__(self, color: str, parent=None):
-        super().__init__(parent)
-        self._color = color
-
-    def set_color(self, color: str):
-        self._color = color
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Show and isinstance(obj, QMenu):
-            self._tint(obj)
-        return super().eventFilter(obj, event)
-
-    def _tint(self, menu):
-        """메뉴 항목들의 아이콘을 지금 색으로 맞춘다.
-
-        칠하기 전 원본을 들고 있는다. 한 번 칠하면 더는 흰색이 아니라서, 원본 없이는 테마가
-        바뀌었을 때 다시 칠할 대상으로 알아보지 못한다.
-        """
-        for action in menu.actions():
-            icon = action.icon()
-            if icon.isNull() or action.property("tinted_for") == self._color:
-                continue
-            source = action.property("untinted_icon")
-            if source is None:
-                if not is_monochrome_white(icon):
-                    continue
-                source = icon
-                action.setProperty("untinted_icon", source)
-            action.setIcon(tint_icon(source, self._color))
-            action.setProperty("tinted_for", self._color)
-
-
-class PopupShapeGuard(QObject):
-    """제 창을 가진 팝업(메뉴·콤보 펼침 목록)을 모두 같은 모양으로 맞춘다.
-
-    한 곳에서 거는 것은 콤보박스가 여러 파일에 흩어져 있고, 입력칸 우클릭 메뉴처럼 클래스를
-    고를 수 없는 팝업도 있어서다. Show에서 걸면 Qt가 창을 숨겨 메뉴가 뜨지 않아 Polish에서 건다.
-    """
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Polish:
-            if isinstance(obj, QMenu):
-                apply_popup_shape(obj)
-            elif isinstance(obj, QComboBox):
-                apply_combo_popup_shape(obj)
-        elif (event.type() == QEvent.Type.Show
-              and obj.objectName() == COMBO_POPUP_OBJECT):
-            flatten_combo_popup_margins(obj)
-        return super().eventFilter(obj, event)
-
-
-def setup_menu_icons(app: QApplication, theme: str) -> MenuIconTinter:
-    """팝업 아이콘 색과 모양을 우리 것에 맞추는 감시자를 앱에 건다."""
-    tinter = MenuIconTinter(palette(theme)["text"], app)
-    app.installEventFilter(tinter)
-    app._menu_icon_tinter = tinter
-    shape = PopupShapeGuard(app)
-    app.installEventFilter(shape)
-    app._menu_shape_guard = shape
-    return tinter
-
-
-def setup_translations(app: QApplication) -> None:
-    """Qt 기본 위젯의 문구를 **앱이 쓰는 언어**로 맞춘다.
-
-    입력칸 우클릭 메뉴와 QMessageBox 기본 단추가 여기서 나온다. OS 언어가 아니라 i18n이
-    정한 언어를 보는 것은, 설정에서 영어를 골랐는데 그 메뉴만 한국어로 남는 것이 이
-    프로젝트의 다국어 작업을 시작하게 만든 불일치와 같은 종류이기 때문이다. 싣는 언어는
-    spec의 TRANSLATION_LANGS가 정하고, 거기 없는 언어는 아무것도 설치하지 않아 Qt
-    기본값인 영어로 나온다. 언어를 바꿀 때 다시 불러도 되도록 앞서 건 번역은 떼어 낸다.
-    """
-    try:
-        previous = getattr(app, "_qt_translator", None)
-        if previous is not None:
-            app.removeTranslator(previous)
-            previous.deleteLater()
-            app._qt_translator = None
-        locale = i18n.qt_locale()
-        translator = QTranslator(app)
-        candidates = [
-            str(get_resource_path(Path("translations"))),
-            QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath),
-        ]
-        for directory in candidates:
-            if translator.load(locale, "qtbase", "_", directory):
-                app.installTranslator(translator)
-                app._qt_translator = translator
-                return
-        print(f"INFO: {locale.name()} 용 Qt 번역을 찾지 못했습니다. 영어로 표시됩니다.")
-    except Exception as e:
-        print(f"WARNING: Qt 번역을 불러오지 못했습니다: {e}")
-
-
-def setup_app_font(app: QApplication) -> None:
-    """번들 서체를 등록하고 앱 기본 서체를 지정한다. 실패한 것은 시스템 서체로 폴백한다."""
-    families: List[str] = []
-    for font_file in UI_FONT_FILES:
-        registered = register_font(font_file)
-        if registered:
-            families.append(registered[0])
-    for font_file in MONO_FONT_FILES:
-        register_font(font_file)
-
-    if not families:
-        print("INFO: 번들 서체를 하나도 등록하지 못했습니다. 시스템 서체를 사용합니다.")
-
-    try:
-        font = QFont()
-        font.setFamilies(families + list(UI_FONT_FALLBACKS))
-        font.setHintingPreference(UI_FONT_HINTING)
-        if UI_FONT_STYLE_STRATEGY is not None:
-            font.setStyleStrategy(UI_FONT_STYLE_STRATEGY)
-        app.setFont(font)
-        app._font_guard = FontRenderingGuard(app)
-        app.installEventFilter(app._font_guard)
-    except Exception as e:
-        print(f"WARNING: 기본 서체 지정에 실패했습니다: {e}. Qt 기본값을 사용합니다.")
+        self.tray.sync_autostart_check()
 
 
 def run_apply_mode(app: QApplication):
@@ -1059,15 +742,7 @@ def run_apply_mode(app: QApplication):
             os.chdir(options.app_dir)
         except OSError:
             pass
-    config = load_config() if options is not None else {}
-    i18n.setup(config)
-    theme = config.get("theme", "light")
-    setup_menu_icons(app, theme)
-    setup_translations(app)
-    setup_app_font(app)
-    app.setStyleSheet(build_qss(theme))
-    app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
-    app.setStyle("Fusion")
+    theme = prepare_app(app, load_config() if options is not None else {})
     window = ApplyUpdateWindow(options, theme)
     window.show()
     return window
@@ -1090,15 +765,7 @@ if __name__ == "__main__":
     QLocalServer.removeServer(SOCKET_NAME)
     server = QLocalServer()
     server.listen(SOCKET_NAME)
-    config = load_config()
-    i18n.setup(config)
-    theme = config.get("theme", "light")
-    setup_menu_icons(app, theme)
-    setup_translations(app)
-    setup_app_font(app)
-    app.setStyleSheet(build_qss(theme))
-    app.setApplicationName(localized_app_name()); app.setApplicationVersion(APP_VERSION)
-    app.setStyle("Fusion")
+    prepare_app(app, load_config())
     window = MainWindow()
     window._local_server = server
     server.newConnection.connect(window._handle_new_instance)
