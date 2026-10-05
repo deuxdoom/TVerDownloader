@@ -32,6 +32,20 @@ try {
   const savedTheme = localStorage.getItem('tver-page-theme');
   if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
 } catch {}
+(() => {
+  const supported = ['ko', 'ja', 'en', 'zh-Hans', 'zh-Hant', 'es', 'th'];
+  let code = null;
+  try { code = localStorage.getItem('tver-page-lang'); } catch {}
+  if (!supported.includes(code)) {
+    code = 'en';
+    for (const tag of navigator.languages || [navigator.language || '']) {
+      const name = String(tag).toLowerCase();
+      if (name.startsWith('zh')) { code = /hant|-tw|-hk|-mo/.test(name) ? 'zh-Hant' : 'zh-Hans'; break; }
+      if (supported.includes(name.split('-')[0])) { code = name.split('-')[0]; break; }
+    }
+  }
+  document.documentElement.lang = code;
+})();
 </script>
 <style>
 @layer reset, tokens, base, layout, components, motion;
@@ -83,6 +97,12 @@ try {
     word-break: keep-all; overflow-wrap: break-word; overflow-x: clip;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
+  :root:lang(ja) body { font-family: Pretendard, 'Hiragino Sans', 'Yu Gothic UI', 'Yu Gothic', Meiryo, sans-serif; }
+  :root:lang(zh-Hans) body { font-family: Pretendard, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif; }
+  :root:lang(zh-Hant) body { font-family: Pretendard, 'PingFang TC', 'Microsoft JhengHei UI', 'Microsoft JhengHei', sans-serif; }
+  :root:lang(th) body { font-family: Pretendard, 'Leelawadee UI', 'Noto Sans Thai', Tahoma, sans-serif; }
+  :root:is(:lang(ja), :lang(zh)) body { word-break: normal; line-break: strict; }
+  :root:is(:lang(en), :lang(es)) :is(h1, h2, h3) { letter-spacing: -.03em; }
   h1, h2, h3 { font-weight: 700; line-height: 1.22; letter-spacing: -.045em; text-wrap: balance; }
   p { text-wrap: pretty; }
   ::selection { background: #238dff40; color: var(--ink); }
@@ -131,6 +151,13 @@ try {
   }
   .nav-download { font-size: 12px; font-weight: 650; padding: 8px 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); transition: border-color .2s; white-space: nowrap; }
   .nav-download:hover { border-color: var(--accent); }
+  .lang-picker { position: relative; display: inline-flex; align-items: center; height: 36px; border-radius: 9px; color: var(--muted); transition: background .2s, color .2s; }
+  .lang-picker:hover, .lang-picker:focus-within { background: var(--surface-soft); color: var(--ink); }
+  .lang-picker .icon { position: absolute; left: 9px; width: 17px; height: 17px; pointer-events: none; }
+  .lang-picker .chevron { left: auto; right: 8px; width: 11px; height: 11px; rotate: 90deg; }
+  .lang-picker select { appearance: none; height: 100%; padding: 0 25px 0 33px; border: 0; border-radius: 9px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+  .lang-picker select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lang-picker option { color: var(--ink); background: var(--surface); }
 
   .hero-wrap { position: relative; isolation: isolate; overflow: clip; }
   .hero-atmosphere { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; }
@@ -201,6 +228,7 @@ try {
   .overview-points .icon { width: 16px; height: 16px; }
   .overview-points b { display: block; font-size: 12px; font-weight: 650; line-height: 1.4; letter-spacing: -.02em; }
   .overview-points small { display: block; font-size: 10px; line-height: 1.5; color: var(--muted); }
+  .overview-points b, .overview-points small { text-wrap: balance; }
   .overview-points li:nth-child(-n+4) { --side: -48px; }
   .overview-points li:nth-child(1) { top: 15%; left: var(--side); }
   .overview-points li:nth-child(2) { top: 15%; right: var(--side); }
@@ -344,6 +372,10 @@ try {
     .overview { width: 100%; max-width: 720px; margin-inline: auto; }
     .overview-points li:nth-child(-n+4) { --side: -14px; }
   }
+  @media (max-width: 920px) {
+    .topbar nav { display: none; }
+    .nav-actions { margin-left: auto; }
+  }
   @media (max-width: 760px) {
     .overview-points { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
     .overview-points li { position: static; width: auto; max-width: none; }
@@ -415,7 +447,7 @@ try {
     .card-series h3, .card-favorites h3 { font-size: 25px; }
     .card-series .card-icon { margin-bottom: 19px; }
     .queue-visual { padding-block: 27px 5px; max-width: 245px; }
-    .card-favorites { min-height: 350px; }
+    .card-favorites { min-height: 0; padding-bottom: 160px; }
     .favorites-visual { bottom: -29px; right: -3px; }
     .card-small { min-height: 285px; }
     .card-filename { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
@@ -441,6 +473,10 @@ try {
     .dialog-toolbar { padding: 10px 12px; }
     .dialog-toolbar p { font-size: 11px; }
     .dialog-toolbar a { font-size: 10px; }
+  }
+  @media (max-width: 400px) {
+    .lang-picker select { width: 36px; padding: 0; color: transparent; }
+    .lang-picker .chevron { display: none; }
   }
   @media (max-width: 360px) {
     #fact-size { display: none; }
@@ -479,7 +515,7 @@ try {
 </style>
 </head>
 <body>
-<a class="skip" href="#main">본문으로 건너뛰기</a>
+<a class="skip" href="#main" data-i18n="skip">본문으로 건너뛰기</a>
 <svg xmlns="http://www.w3.org/2000/svg" class="sr-only" aria-hidden="true" focusable="false">
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
@@ -504,12 +540,13 @@ try {
 
 <header class="topbar">
   <div class="shell topbar-inner">
-    <a class="mark" href="#top" aria-label="TVer Downloader 처음으로"><img src="img/logo.png" width="31" height="31" alt=""><span>TVer Downloader</span></a>
-    <nav aria-label="주 메뉴"><a href="#top">개요</a><a href="#start">시작하기</a><a href="#showcase">프로그램 화면</a><a href="#features">주요 기능</a></nav>
+    <a class="mark" href="#top" aria-label="TVer Downloader 처음으로" data-i18n-attr="aria-label:nav.home"><img src="img/logo.png" width="31" height="31" alt=""><span>TVer Downloader</span></a>
+    <nav aria-label="주 메뉴" data-i18n-attr="aria-label:nav.label"><a href="#top" data-i18n="nav.overview">개요</a><a href="#start" data-i18n="nav.start">시작하기</a><a href="#showcase" data-i18n="nav.screens">프로그램 화면</a><a href="#features" data-i18n="nav.features">주요 기능</a></nav>
     <div class="nav-actions">
-      <a class="icon-button github-top" href="https://github.com/deuxdoom/TVerDownloader" aria-label="GitHub 저장소"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg></a>
+      <label class="lang-picker" hidden><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span class="sr-only" data-i18n="nav.language">언어</span><select id="lang-select"><option value="ko" lang="ko">한국어</option><option value="ja" lang="ja">日本語</option><option value="en" lang="en">English</option><option value="zh-Hans" lang="zh-Hans">简体中文</option><option value="zh-Hant" lang="zh-Hant">繁體中文</option><option value="es" lang="es">Español</option><option value="th" lang="th">ภาษาไทย</option></select><svg class="icon chevron" aria-hidden="true"><use href="#i-chevron"/></svg></label>
+      <a class="icon-button github-top" href="https://github.com/deuxdoom/TVerDownloader" aria-label="GitHub 저장소" data-i18n-attr="aria-label:nav.github"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg></a>
       <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-label="화면 테마 바꾸기" hidden><svg class="icon sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
-      <a class="nav-download" href="#download">다운로드</a>
+      <a class="nav-download" href="#download" data-i18n="nav.download">다운로드</a>
     </div>
   </div>
 </header>
@@ -519,73 +556,819 @@ try {
     <div class="hero-atmosphere" aria-hidden="true"><i class="beam one"></i><i class="beam two"></i></div>
     <section class="hero shell" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <a class="pill" id="release-pill" href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><span class="dot" aria-hidden="true"></span><span id="release-label">최신 릴리스 살펴보기</span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></a>
-        <h1 id="hero-title">일본 TVer 영상을<br><span class="grad">받아 두는 가장 쉬운 방법</span></h1>
-        <p class="lead">좋아하는 프로그램의 주소만 가져오세요.<br>시리즈 전체 받기부터 자막, 파일 정리까지. <span>한 창이면 충분합니다.</span></p>
-        <ul class="facts"><li>Windows 10 · 11 / x64</li><li>무료</li><li>설치 없이 실행</li><li id="fact-size">포터블 앱</li></ul>
-        <p class="notice"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span><strong>일본 VPN이 필요합니다.</strong>TVer는 일본 IP에서 이용할 수 있습니다. 프로그램이 시작할 때 현재 접속 국가를 알려 드립니다.</span></p>
+        <a class="pill" id="release-pill" href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><span class="dot" aria-hidden="true"></span><span id="release-label" data-i18n="release.browse">최신 릴리스 살펴보기</span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></a>
+        <h1 id="hero-title" data-i18n="hero.title">일본 TVer 영상을<br><span class="grad">받아 두는 가장 쉬운 방법</span></h1>
+        <p class="lead" data-i18n="hero.lead">좋아하는 프로그램의 주소만 가져오세요.<br>시리즈 전체 받기부터 자막, 파일 정리까지. <span>한 창이면 충분합니다.</span></p>
+        <ul class="facts"><li>Windows 10 · 11 / x64</li><li data-i18n="facts.free">무료</li><li data-i18n="facts.noinstall">설치 없이 실행</li><li id="fact-size" data-i18n="facts.portable">포터블 앱</li></ul>
+        <p class="notice"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span data-i18n="hero.notice"><strong>일본 VPN이 필요합니다.</strong>TVer는 일본 IP에서 이용할 수 있습니다.<br>프로그램이 시작할 때 현재 접속 국가를 알려 드립니다.</span></p>
       </div>
       <div class="overview">
-        <div class="overview-frame"><img src="img/app-light.png" width="1680" height="1080" alt="TVer Downloader 메인 화면. 받는 중인 영상마다 표지 그림과 진행률, 속도, 남은 시간이 카드로 표시됩니다." fetchpriority="high" decoding="async"></div>
-        <ul class="overview-points" aria-label="핵심 기능">
-          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-series"/></svg></span><span><b>시리즈 일괄 다운로드</b><small>원하는 회차만 골라 한 번에</small></span></li>
-          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-subtitle"/></svg></span><span><b>일본어 자막</b><small>영상에 넣거나 SRT · VTT로 저장</small></span></li>
-          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-chip"/></svg></span><span><b>원본 화질 · 코덱 변환</b><small>AVC · HEVC, NVIDIA 가속</small></span></li>
-          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-sun"/></svg></span><span><b>라이트 · 다크 테마</b><small>낮에도, 늦은 밤에도</small></span></li>
-          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span><span><b>다국어 지원</b><small>7개 언어, 고르는 즉시 바뀝니다</small></span></li>
+        <div class="overview-frame"><img src="img/app-light.png" width="1680" height="1080" alt="TVer Downloader 메인 화면. 받는 중인 영상마다 표지 그림과 진행률, 속도, 남은 시간이 카드로 표시됩니다." data-i18n-attr="alt:hero.shotAlt" fetchpriority="high" decoding="async"></div>
+        <ul class="overview-points" aria-label="핵심 기능" data-i18n-attr="aria-label:points.label">
+          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-series"/></svg></span><span><b data-i18n="points.series">시리즈 일괄 다운로드</b><small data-i18n="points.seriesSub">원하는 회차만 골라 한 번에</small></span></li>
+          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-subtitle"/></svg></span><span><b data-i18n="points.subs">일본어 자막</b><small data-i18n="points.subsSub">영상에 넣거나 SRT · VTT로 저장</small></span></li>
+          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-chip"/></svg></span><span><b data-i18n="points.codec">원본 화질 · 코덱 변환</b><small data-i18n="points.codecSub">AVC · HEVC, NVIDIA 가속</small></span></li>
+          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-sun"/></svg></span><span><b data-i18n="points.theme">라이트 · 다크 테마</b><small data-i18n="points.themeSub">낮에도, 늦은 밤에도</small></span></li>
+          <li><span class="ico" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span><span><b data-i18n="points.lang">다국어 지원</b><small data-i18n="points.langSub">7개 언어, 고르는 즉시 바뀝니다</small></span></li>
         </ul>
       </div>
     </section>
   </div>
 
   <section class="section shell start-section" id="start" aria-labelledby="start-title">
-    <div class="section-heading center reveal"><p class="eyebrow">Ready in three steps</p><h2 id="start-title">시작은, 세 걸음이면 충분합니다.</h2><p>설치 과정 없이. 필요한 도구는 앱이 알아서 준비합니다.</p></div>
-    <ol class="steps"><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>내려받고 실행하기</h3><p>원하는 폴더에 압축을 풀고 <code>TVerDownloader.exe</code>를 실행하세요. yt-dlp와 FFmpeg는 자동으로 준비됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>일본 VPN 연결하기</h3><p>일본 서버에 연결해 주세요. 앱에서 현재 접속 국가를 확인한 뒤 다운로드를 시작하면 됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3>TVer 주소 가져오기</h3><p>주소를 복사하면 입력칸이 채워집니다. <strong>다운로드</strong>를 누르세요. 시리즈라면 원하는 회차를 골라 받을 수 있습니다.</p></li></ol>
+    <div class="section-heading center reveal"><p class="eyebrow">Ready in three steps</p><h2 id="start-title" data-i18n="start.title">시작은, 세 걸음이면 충분합니다.</h2><p data-i18n="start.lead">설치 과정 없이. 필요한 도구는 앱이 알아서 준비합니다.</p></div>
+    <ol class="steps"><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3 data-i18n="step1.title">내려받고 실행하기</h3><p data-i18n="step1.text">원하는 폴더에 압축을 풀고 <code>TVerDownloader.exe</code>를 실행하세요. yt-dlp와 FFmpeg는 자동으로 준비됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3 data-i18n="step2.title">일본 VPN 연결하기</h3><p data-i18n="step2.text">일본 서버에 연결해 주세요. 앱에서 현재 접속 국가를 확인한 뒤 다운로드를 시작하면 됩니다.</p></li><li class="step reveal"><span class="step-line" aria-hidden="true"></span><h3 data-i18n="step3.title">TVer 주소 가져오기</h3><p data-i18n="step3.text">주소를 복사하면 입력칸이 채워집니다. <strong>다운로드</strong>를 누르세요. 시리즈라면 원하는 회차를 골라 받을 수 있습니다.</p></li></ol>
   </section>
 
   <section class="section shell showcase" id="showcase" aria-labelledby="showcase-title">
-    <div class="section-heading center reveal"><p class="eyebrow">Take a closer look</p><h2 id="showcase-title">실제 화면으로 둘러보세요.</h2><p>다운로드부터 기록, 즐겨찾기, 설정까지. 프로그램 화면 그대로입니다.</p></div>
-    <div class="showcase-header"><p><span aria-hidden="true"></span>Your personal TVer library</p><button class="zoom-button" id="zoom-button" type="button" hidden>확대해서 보기<svg class="icon" aria-hidden="true"><use href="#i-zoom"/></svg></button></div>
+    <div class="section-heading center reveal"><p class="eyebrow">Take a closer look</p><h2 id="showcase-title" data-i18n="screens.title">실제 화면으로 둘러보세요.</h2><p data-i18n="screens.lead">다운로드부터 기록, 즐겨찾기, 설정까지. 프로그램 화면 그대로입니다.</p></div>
+    <div class="showcase-header"><p><span aria-hidden="true"></span>Your personal TVer library</p><button class="zoom-button" id="zoom-button" type="button" hidden><span data-i18n="screens.zoom">확대해서 보기</span><svg class="icon" aria-hidden="true"><use href="#i-zoom"/></svg></button></div>
     <div class="gallery">
-      <button class="arrow prev" type="button" id="prev" aria-label="이전 화면" hidden><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
-      <div class="rail" role="group" id="rail" tabindex="0" aria-roledescription="캐러셀" aria-label="프로그램 화면">
-        <figure data-title="다운로드" data-caption="받는 중인 영상의 진행률과 남은 시간을 한눈에 확인하세요."><img src="img/app-light.png" width="1680" height="1080" alt="밝은 테마의 다운로드 목록. 표지 그림과 진행률 막대, 속도와 남은 시간이 카드마다 표시됩니다." loading="lazy" decoding="async"></figure>
-        <figure data-title="기록" data-caption="이미 받은 영상은 기록에서 다시 찾을 수 있습니다."><img src="img/history.png" width="1680" height="1080" alt="기록 탭에 받은 영상의 표지와 정보가 표시된 모습." loading="lazy" decoding="async"></figure>
-        <figure data-title="즐겨찾기" data-caption="좋아하는 시리즈를 모으고, 새 회차를 확인하세요."><img src="img/favorite.png" width="1680" height="1080" alt="즐겨찾기 탭에 시리즈 표지와 마지막 확인 시각이 표시된 모습." loading="lazy" decoding="async"></figure>
-        <figure data-title="설정" data-caption="언어, 화질, 자막, 파일명을 내 방식으로 설정하세요."><img src="img/setting.png" width="1680" height="1080" alt="언어와 저장 폴더, 동시 다운로드 개수를 정하는 설정 창." loading="lazy" decoding="async"></figure>
-        <figure data-title="다크 테마" data-caption="같은 기능, 다른 분위기. 어두운 테마도 지원합니다."><img src="img/app-dark.png" width="1680" height="1080" alt="어두운 테마의 TVer Downloader 메인 화면." loading="lazy" decoding="async"></figure>
-        <figure data-title="프로그램 정보" data-caption="프로그램 안에서 새 버전을 확인하고 업데이트하세요."><img src="img/about.png" width="1680" height="1080" alt="새 버전을 확인할 수 있는 프로그램 정보 창." loading="lazy" decoding="async"></figure>
+      <button class="arrow prev" type="button" id="prev" aria-label="이전 화면" data-i18n-attr="aria-label:screens.prev" hidden><svg class="icon" aria-hidden="true"><use href="#i-left"/></svg></button>
+      <div class="rail" role="group" id="rail" tabindex="0" aria-roledescription="캐러셀" aria-label="프로그램 화면" data-i18n-attr="aria-roledescription:screens.carousel;aria-label:screens.label">
+        <figure data-i18n-attr="data-title:slide1.title;data-caption:slide1.caption" data-title="다운로드" data-caption="받는 중인 영상의 진행률과 남은 시간을 한눈에 확인하세요."><img src="img/app-light.png" width="1680" height="1080" alt="밝은 테마의 다운로드 목록. 표지 그림과 진행률 막대, 속도와 남은 시간이 카드마다 표시됩니다." data-i18n-attr="alt:slide1.alt" loading="lazy" decoding="async"></figure>
+        <figure data-i18n-attr="data-title:slide2.title;data-caption:slide2.caption" data-title="기록" data-caption="이미 받은 영상은 기록에서 다시 찾을 수 있습니다."><img src="img/history.png" width="1680" height="1080" alt="기록 탭에 받은 영상의 표지와 정보가 표시된 모습." data-i18n-attr="alt:slide2.alt" loading="lazy" decoding="async"></figure>
+        <figure data-i18n-attr="data-title:slide3.title;data-caption:slide3.caption" data-title="즐겨찾기" data-caption="좋아하는 시리즈를 모으고, 새 회차를 확인하세요."><img src="img/favorite.png" width="1680" height="1080" alt="즐겨찾기 탭에 시리즈 표지와 마지막 확인 시각이 표시된 모습." data-i18n-attr="alt:slide3.alt" loading="lazy" decoding="async"></figure>
+        <figure data-i18n-attr="data-title:slide4.title;data-caption:slide4.caption" data-title="설정" data-caption="언어, 화질, 자막, 파일명을 내 방식으로 설정하세요."><img src="img/setting.png" width="1680" height="1080" alt="언어와 저장 폴더, 동시 다운로드 개수를 정하는 설정 창." data-i18n-attr="alt:slide4.alt" loading="lazy" decoding="async"></figure>
+        <figure data-i18n-attr="data-title:slide5.title;data-caption:slide5.caption" data-title="다크 테마" data-caption="같은 기능, 다른 분위기. 어두운 테마도 지원합니다."><img src="img/app-dark.png" width="1680" height="1080" alt="어두운 테마의 TVer Downloader 메인 화면." data-i18n-attr="alt:slide5.alt" loading="lazy" decoding="async"></figure>
+        <figure data-i18n-attr="data-title:slide6.title;data-caption:slide6.caption" data-title="프로그램 정보" data-caption="프로그램 안에서 새 버전을 확인하고 업데이트하세요."><img src="img/about.png" width="1680" height="1080" alt="새 버전을 확인할 수 있는 프로그램 정보 창." data-i18n-attr="alt:slide6.alt" loading="lazy" decoding="async"></figure>
       </div>
-      <button class="arrow next" type="button" id="next" aria-label="다음 화면" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+      <button class="arrow next" type="button" id="next" aria-label="다음 화면" data-i18n-attr="aria-label:screens.next" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button>
     </div>
-    <div class="gallery-footer"><div class="dots" id="dots" role="group" aria-label="화면 선택"></div><div class="gallery-meta"><span class="gallery-count" id="gallery-count" aria-hidden="true">01 / 06</span><p class="caption" id="caption" aria-live="polite" aria-atomic="true">다운로드 목록과 진행 로그를 한눈에 확인하세요.</p></div></div>
+    <div class="gallery-footer"><div class="dots" id="dots" role="group" aria-label="화면 선택" data-i18n-attr="aria-label:screens.pick"></div><div class="gallery-meta"><span class="gallery-count" id="gallery-count" aria-hidden="true">01 / 06</span><p class="caption" id="caption" aria-live="polite" aria-atomic="true">다운로드 목록과 진행 로그를 한눈에 확인하세요.</p></div></div>
   </section>
 
   <section class="section shell" id="features" aria-labelledby="features-title">
-    <div class="section-heading reveal"><div><p class="eyebrow">Thoughtfully simple</p><h2 id="features-title">필요한 기능은 모두.<br>복잡한 과정은 가볍게.</h2></div><p>주소를 가져오는 순간부터 파일이 정리될 때까지.<br>영상에 집중할 수 있도록, 나머지는 앱이 챙깁니다.</p></div>
+    <div class="section-heading reveal"><div><p class="eyebrow">Thoughtfully simple</p><h2 id="features-title" data-i18n="features.title">필요한 기능은 모두.<br>복잡한 과정은 가볍게.</h2></div><p data-i18n="features.lead">주소를 가져오는 순간부터 파일이 정리될 때까지.<br>영상에 집중할 수 있도록, 나머지는 앱이 챙깁니다.</p></div>
     <div class="bento">
       <article class="card card-series reveal">
-        <div><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-series"/></svg></span><h3>한 회부터,<br>시리즈 전체까지.</h3><p>주소를 복사하거나 끌어다 놓으세요. 시리즈에서 원하는 회차를 골라 한 번에 받고, 여러 조각을 동시에 내려받습니다.</p><span class="card-kicker">COPY. SELECT. DOWNLOAD.</span></div>
+        <div><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-series"/></svg></span><h3 data-i18n="series.title">한 회부터,<br>시리즈 전체까지.</h3><p data-i18n="series.text">주소를 복사하거나 끌어다 놓으세요. 시리즈에서 원하는 회차를 골라 한 번에 받고, 여러 조각을 동시에 내려받습니다.</p><span class="card-kicker">COPY. SELECT. DOWNLOAD.</span></div>
         <div class="queue-visual" aria-hidden="true"><div class="queue-stack"><div class="queue-url"><svg class="icon"><use href="#i-link"/></svg>tver.jp/series/…</div><div class="queue-row"><span class="queue-number">01</span><div class="queue-file"><b>Episode 01</b><span class="progress-track"><i style="--progress:100%"></i></span></div><svg class="icon"><use href="#i-check"/></svg></div><div class="queue-row"><span class="queue-number">02</span><div class="queue-file"><b>Episode 02</b><span class="progress-track"><i style="--progress:64%"></i></span></div></div><div class="queue-row"><span class="queue-number">03</span><div class="queue-file"><b>Episode 03</b><span class="progress-track"><i style="--progress:28%"></i></span></div></div></div></div>
       </article>
       <article class="card card-favorites reveal">
-        <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span><h3>좋아하는 시리즈를<br>놓치지 않도록.</h3><p>즐겨찾기에 담아 두면 새 회차를 확인해 줍니다. 같은 시리즈의 공유 주소는 하나로 모으고, 기록과 즐겨찾기는 파일이 손상되면 백업에서 복원합니다.</p><span class="favorite-tag">즐겨찾기 · 다운로드 기록</span>
-        <div class="favorites-visual" aria-hidden="true"><div class="favorite-sheet"><svg class="icon"><use href="#i-series"/></svg><b>나의 시리즈</b><small>좋아하는 프로그램을 한곳에</small></div><div class="favorite-sheet"><svg class="icon"><use href="#i-star"/></svg><b>새 회차 확인</b><small>즐겨찾기가 챙겨 드립니다</small></div></div>
+        <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span><h3 data-i18n="fav.title">좋아하는 시리즈를<br>놓치지 않도록.</h3><p data-i18n="fav.text">즐겨찾기에 담아 두면 새 회차를 확인해 줍니다. 같은 시리즈의 공유 주소는 하나로 모으고, 기록과 즐겨찾기는 파일이 손상되면 백업에서 복원합니다.</p><span class="favorite-tag" data-i18n="fav.tag">즐겨찾기 · 다운로드 기록</span>
+        <div class="favorites-visual" aria-hidden="true"><div class="favorite-sheet"><svg class="icon"><use href="#i-series"/></svg><b data-i18n="fav.sheet1">나의 시리즈</b><small data-i18n="fav.sheet1Sub">좋아하는 프로그램을 한곳에</small></div><div class="favorite-sheet"><svg class="icon"><use href="#i-star"/></svg><b data-i18n="fav.sheet2">새 회차 확인</b><small data-i18n="fav.sheet2Sub">즐겨찾기가 챙겨 드립니다</small></div></div>
       </article>
-      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-subtitle"/></svg></span><h3>자막도 함께, 편하게.</h3><p>제공되는 일본어 자막을 영상에 넣거나<br>SRT · VTT 파일로 따로 저장하세요.</p></div><div class="mini-visual" aria-hidden="true"><div class="subtitle-demo"><div><b lang="ja">今日も、いい一日。</b><small>CC</small></div><span>JAPANESE SUBTITLES · SRT / VTT</span></div></div></article>
-      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg></span><h3>화질은 취향에 맞게.</h3><p>원본을 유지하거나 AVC · HEVC로 변환하세요. NVIDIA 하드웨어 가속도 지원합니다.</p></div><div class="mini-visual codec-flow" aria-hidden="true"><b class="original">원본 유지</b><svg class="icon"><use href="#i-arrow"/></svg><div class="codec-pair"><b>AVC</b><b>HEVC</b></div><svg class="icon"><use href="#i-chip"/></svg></div></article>
-      <article class="card card-small card-filename reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><h3>정리까지 내 방식대로.</h3><p>방송일, 시리즈, 회차의 순서를 바꾸세요. 저장될 파일 이름을 미리 볼 수 있습니다.</p></div><div class="mini-visual" aria-hidden="true"><div class="filename-parts"><span>방송일</span><span>시리즈</span><span>회차</span></div><div class="filename-preview">2026.09.09_시리즈_제01화.mp4</div></div></article>
-      <article class="card personalize reveal"><div><h3>당신의 언어와 취향으로.</h3><p>익숙한 언어, 편안한 테마로 시작하세요. 언어는 고르는 즉시 바뀝니다.</p></div><div class="languages" aria-label="지원 언어"><span>한국어</span><span lang="ja">日本語</span><span lang="en">English</span><span lang="zh-Hans">简体中文</span><span lang="zh-Hant">繁體中文</span><span lang="es">Español</span><span lang="th">ภาษาไทย</span></div><div class="theme-sample"><span class="theme-swatch" aria-hidden="true"></span><div><b>Light &amp; Dark</b><small>낮에도, 늦은 밤에도.</small></div></div></article>
+      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-subtitle"/></svg></span><h3 data-i18n="subs.title">자막도 함께, 편하게.</h3><p data-i18n="subs.text">제공되는 일본어 자막을 영상에 넣거나<br>SRT · VTT 파일로 따로 저장하세요.</p></div><div class="mini-visual" aria-hidden="true"><div class="subtitle-demo"><div><b lang="ja">今日も、いい一日。</b><small>CC</small></div><span>JAPANESE SUBTITLES · SRT / VTT</span></div></div></article>
+      <article class="card card-small reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-chip"/></svg></span><h3 data-i18n="codec.title">화질은 취향에 맞게.</h3><p data-i18n="codec.text">원본을 유지하거나 AVC · HEVC로 변환하세요. NVIDIA 하드웨어 가속도 지원합니다.</p></div><div class="mini-visual codec-flow" aria-hidden="true"><b class="original" data-i18n="codec.original">원본 유지</b><svg class="icon"><use href="#i-arrow"/></svg><div class="codec-pair"><b>AVC</b><b>HEVC</b></div><svg class="icon"><use href="#i-chip"/></svg></div></article>
+      <article class="card card-small card-filename reveal"><div class="card-copy"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><h3 data-i18n="name.title">정리까지 내 방식대로.</h3><p data-i18n="name.text">방송일, 시리즈, 회차의 순서를 바꾸세요. 저장될 파일 이름을 미리 볼 수 있습니다.</p></div><div class="mini-visual" aria-hidden="true"><div class="filename-parts"><span data-i18n="name.date">방송일</span><span data-i18n="name.series">시리즈</span><span data-i18n="name.episode">회차</span></div><div class="filename-preview" data-i18n="name.preview">2026.09.09_시리즈_제01화.mp4</div></div></article>
+      <article class="card personalize reveal"><div><h3 data-i18n="me.title">당신의 언어와 취향으로.</h3><p data-i18n="me.text">익숙한 언어, 편안한 테마로 시작하세요. 언어는 고르는 즉시 바뀝니다.</p></div><div class="languages" aria-label="지원 언어" data-i18n-attr="aria-label:me.langs"><span>한국어</span><span lang="ja">日本語</span><span lang="en">English</span><span lang="zh-Hans">简体中文</span><span lang="zh-Hant">繁體中文</span><span lang="es">Español</span><span lang="th">ภาษาไทย</span></div><div class="theme-sample"><span class="theme-swatch" aria-hidden="true"></span><div><b>Light &amp; Dark</b><small data-i18n="me.themeSub">낮에도, 늦은 밤에도.</small></div></div></article>
     </div>
   </section>
 
-  <section class="shell download-section" id="download" aria-labelledby="download-title"><div class="final reveal"><p class="eyebrow">Your next episode awaits</p><h2 id="download-title">보고 싶은 순간을,<br>가장 간단하게.</h2><p>TVer Downloader와 함께 나만의 라이브러리를 시작하세요.</p><div class="cta"><a class="btn primary" id="download-btn" href="https://github.com/deuxdoom/TVerDownloader/releases/latest" data-download><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Windows용 내려받기</a><a class="btn quiet" href="https://github.com/deuxdoom/TVerDownloader/releases">릴리스 노트<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div><div class="download-meta"><span>Windows 10 · 11 (x64)</span><span>무료 · 포터블</span></div><img class="final-mark" src="img/logo.png" width="200" height="200" alt="" loading="lazy" decoding="async"></div></section>
+  <section class="shell download-section" id="download" aria-labelledby="download-title"><div class="final reveal"><p class="eyebrow">Your next episode awaits</p><h2 id="download-title" data-i18n="final.title">보고 싶은 순간을,<br>가장 간단하게.</h2><p data-i18n="final.lead">TVer Downloader와 함께 나만의 라이브러리를 시작하세요.</p><div class="cta"><a class="btn primary" id="download-btn" href="https://github.com/deuxdoom/TVerDownloader/releases/latest" data-download><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-i18n="final.download">Windows용 내려받기</span></a><a class="btn quiet" href="https://github.com/deuxdoom/TVerDownloader/releases"><span data-i18n="final.notes">릴리스 노트</span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div><div class="download-meta"><span>Windows 10 · 11 (x64)</span><span data-i18n="final.meta">무료 · 포터블</span></div><img class="final-mark" src="img/logo.png" width="200" height="200" alt="" loading="lazy" decoding="async"></div></section>
 </main>
 
-<footer><div class="shell"><div class="footer-top"><a class="mark" href="#top"><img src="img/logo.png" width="25" height="25" alt=""><span>TVer Downloader</span></a><nav aria-label="관련 링크"><a href="https://github.com/deuxdoom/TVerDownloader">GitHub</a><a href="https://github.com/deuxdoom/TVerDownloader/blob/main/CHANGELOG.md">변경 내역</a><a href="https://github.com/deuxdoom/TVerDownloader/issues">버그 제보</a><a href="https://refer-nordvpn.com/RRXwGuSQXTe" rel="noopener">NordVPN 제휴</a><a href="https://toon.at/donate/deuxdoom" rel="noopener">후원</a></nav></div><div class="footer-bottom"><p class="fine">이 프로그램은 독점 라이선스로 배포됩니다. 개인적인 사용과 소스 열람은 자유롭지만 무단 수정 · 재배포 · 상업적 이용은 허용되지 않습니다. TVer는 주식회사 TVer의 서비스이며 이 프로젝트와 관련이 없습니다. 내려받은 영상은 개인 감상 범위에서만 이용해 주십시오.</p><p class="copyright">© deuxdoom. All Rights Reserved.</p></div></div></footer>
+<footer><div class="shell"><div class="footer-top"><a class="mark" href="#top"><img src="img/logo.png" width="25" height="25" alt=""><span>TVer Downloader</span></a><nav aria-label="관련 링크" data-i18n-attr="aria-label:footer.label"><a href="https://github.com/deuxdoom/TVerDownloader">GitHub</a><a href="https://github.com/deuxdoom/TVerDownloader/blob/main/CHANGELOG.md" data-i18n="footer.changelog">변경 내역</a><a href="https://github.com/deuxdoom/TVerDownloader/issues" data-i18n="footer.issues">버그 제보</a><a href="https://refer-nordvpn.com/RRXwGuSQXTe" rel="noopener" data-i18n="footer.vpn">NordVPN 제휴</a><a href="https://toon.at/donate/deuxdoom" rel="noopener" data-i18n="footer.donate">후원</a></nav></div><div class="footer-bottom"><p class="fine" data-i18n="footer.fine">이 프로그램은 독점 라이선스로 배포되며, 소스 코드는 공개하지 않습니다. 개인적인 사용은 자유롭지만 무단 수정 · 재배포 · 상업적 이용은 허용되지 않습니다. TVer는 주식회사 TVer의 서비스이며 이 프로젝트와 관련이 없습니다. 내려받은 영상은 개인 감상 범위에서만 이용해 주십시오.</p><p class="copyright">© deuxdoom. All Rights Reserved.</p></div></div></footer>
 
-<dialog class="image-dialog" id="image-dialog" aria-label="프로그램 화면 확대"><div class="dialog-toolbar"><p id="dialog-caption">프로그램 화면</p><a id="original-image" href="img/app-light.png" target="_blank" rel="noopener">원본 이미지 열기</a><form method="dialog"><button class="icon-button" aria-label="확대 화면 닫기"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></form></div><img id="dialog-image" src="img/app-light.png" width="1680" height="1080" alt=""></dialog>
+<dialog class="image-dialog" id="image-dialog" aria-label="프로그램 화면 확대" data-i18n-attr="aria-label:dialog.label"><div class="dialog-toolbar"><p id="dialog-caption" data-i18n="screens.label">프로그램 화면</p><a id="original-image" href="img/app-light.png" target="_blank" rel="noopener" data-i18n="dialog.original">원본 이미지 열기</a><form method="dialog"><button class="icon-button" aria-label="확대 화면 닫기" data-i18n-attr="aria-label:dialog.close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></form></div><img id="dialog-image" src="img/app-light.png" width="1680" height="1080" alt=""></dialog>
 <script>
+const STRINGS = {
+  ko: {
+    'theme.toLight': '밝은 테마로 바꾸기',
+    'theme.toDark': '어두운 테마로 바꾸기',
+    'release.latest': '{tag} · 최신 릴리스',
+    'release.open': '릴리스 페이지 열기',
+    'screens.slide': '슬라이드',
+    'screens.dot': '{title} 화면 보기',
+    'screens.zoomLabel': '{title} 화면 확대해서 보기',
+    'final.downloadTag': 'Windows용 {tag} 내려받기',
+  },
+  ja: {
+    'meta.title': 'TVer Downloader — 日本のTVer動画ダウンローダー',
+    'meta.description': '日本のTVer配信動画を保存するWindows用アプリです。シリーズ一括ダウンロード、字幕の保存、コーデック変換、7言語に対応しています。',
+    'skip': '本文へスキップ',
+    'nav.home': 'TVer Downloader トップへ',
+    'nav.label': 'メインメニュー',
+    'nav.overview': '概要',
+    'nav.start': 'はじめかた',
+    'nav.screens': 'アプリ画面',
+    'nav.features': '主な機能',
+    'nav.language': '言語',
+    'nav.github': 'GitHub リポジトリ',
+    'nav.download': 'ダウンロード',
+    'theme.toLight': 'ライトテーマに切り替え',
+    'theme.toDark': 'ダークテーマに切り替え',
+    'release.browse': '最新リリースを見る',
+    'release.latest': '{tag} · 最新リリース',
+    'release.open': 'リリースページを開く',
+    'hero.title': '日本のTVer動画を<br><span class="grad">いちばん手軽に保存</span>',
+    'hero.lead': '好きな番組のURLを持ってくるだけ。<br>シリーズまるごとから字幕、ファイル整理まで、<span>ひとつのウィンドウで。</span>',
+    'facts.free': '無料',
+    'facts.noinstall': 'インストール不要',
+    'facts.portable': 'ポータブルアプリ',
+    'hero.notice': '<strong>日本のVPNが必要です。</strong>TVerは日本のIPアドレスからのみ利用できます。<br>アプリの起動時に、現在の接続国をお知らせします。',
+    'hero.shotAlt': 'TVer Downloader のメイン画面。ダウンロード中の動画ごとに、サムネイル、進行状況、速度、残り時間がカードで表示されます。',
+    'points.label': '主な機能',
+    'points.series': 'シリーズ一括ダウンロード',
+    'points.seriesSub': '見たい話だけ選んでまとめて',
+    'points.subs': '日本語字幕',
+    'points.subsSub': '動画に埋め込むか SRT · VTT で保存',
+    'points.codec': '元の画質 · コーデック変換',
+    'points.codecSub': 'AVC · HEVC、NVIDIA で高速化',
+    'points.theme': 'ライト · ダークテーマ',
+    'points.themeSub': '昼も、夜ふかしにも',
+    'points.lang': '多言語対応',
+    'points.langSub': '7言語、選んですぐ切り替え',
+    'start.title': 'はじめるのは、3ステップだけ。',
+    'start.lead': 'インストールは不要。必要なツールはアプリが自動で用意します。',
+    'step1.title': 'ダウンロードして起動',
+    'step1.text': '好きなフォルダーに展開して <code>TVerDownloader.exe</code> を起動してください。yt-dlp と FFmpeg は自動で準備されます。',
+    'step2.title': '日本のVPNに接続',
+    'step2.text': '日本のサーバーに接続してください。アプリで現在の接続国を確認してから、ダウンロードを始めましょう。',
+    'step3.title': 'TVerのURLを持ってくる',
+    'step3.text': 'URLをコピーすると入力欄に自動で入ります。<strong>ダウンロード</strong>を押してください。シリーズなら見たい話を選んで保存できます。',
+    'screens.title': '実際の画面を見てみましょう。',
+    'screens.lead': 'ダウンロードから履歴、お気に入り、設定まで。アプリの画面そのままです。',
+    'screens.zoom': '拡大して見る',
+    'screens.prev': '前の画面',
+    'screens.next': '次の画面',
+    'screens.carousel': 'カルーセル',
+    'screens.label': 'アプリ画面',
+    'screens.pick': '画面を選ぶ',
+    'screens.slide': 'スライド',
+    'screens.dot': '{title}の画面を表示',
+    'screens.zoomLabel': '{title}の画面を拡大して見る',
+    'slide1.title': 'ダウンロード',
+    'slide1.caption': 'ダウンロード中の動画の進行状況と残り時間が、ひと目で分かります。',
+    'slide1.alt': 'ライトテーマのダウンロード一覧。サムネイル、進行バー、速度と残り時間がカードごとに表示されます。',
+    'slide2.title': '履歴',
+    'slide2.caption': '保存した動画は、履歴からいつでも探せます。',
+    'slide2.alt': '履歴タブに、保存した動画のサムネイルと情報が表示された様子。',
+    'slide3.title': 'お気に入り',
+    'slide3.caption': '好きなシリーズを集めて、新着エピソードを確認しましょう。',
+    'slide3.alt': 'お気に入りタブに、シリーズのサムネイルと最終確認日時が表示された様子。',
+    'slide4.title': '設定',
+    'slide4.caption': '言語、画質、字幕、ファイル名を自分好みに設定できます。',
+    'slide4.alt': '言語や保存フォルダー、同時ダウンロード数を決める設定ウィンドウ。',
+    'slide5.title': 'ダークテーマ',
+    'slide5.caption': '同じ機能、違う雰囲気。ダークテーマにも対応しています。',
+    'slide5.alt': 'ダークテーマの TVer Downloader メイン画面。',
+    'slide6.title': 'アプリ情報',
+    'slide6.caption': 'アプリの中で新しいバージョンを確認して、アップデートできます。',
+    'slide6.alt': '新しいバージョンを確認できるアプリ情報ウィンドウ。',
+    'features.title': '必要な機能は、すべて。<br>面倒な手順は、軽やかに。',
+    'features.lead': 'URLを持ってきた瞬間から、ファイルが整理されるまで。番組に集中できるよう、あとはアプリにおまかせ。',
+    'series.title': '1話から、<br>シリーズ全体まで。',
+    'series.text': 'URLをコピーするか、ドラッグ&ドロップしてください。シリーズから見たい話を選んでまとめて保存し、複数のフラグメントを同時にダウンロードします。',
+    'fav.title': '好きなシリーズを<br>見逃さないように。',
+    'fav.text': 'お気に入りのシリーズは新着エピソードを確認します。同じシリーズのURLはひとつにまとめ、壊れたファイルはバックアップから復元します。',
+    'fav.tag': 'お気に入り · 履歴',
+    'fav.sheet1': 'マイシリーズ',
+    'fav.sheet1Sub': '好きな番組をひとつの場所に',
+    'fav.sheet2': '新着エピソード確認',
+    'fav.sheet2Sub': 'お気に入りがチェックします',
+    'subs.title': '字幕も一緒に、手軽に。',
+    'subs.text': '配信されている日本語字幕を動画に埋め込むか、<br>SRT · VTT ファイルとして別に保存できます。',
+    'codec.title': '画質は、お好みで。',
+    'codec.text': '元のまま保存するか、AVC · HEVC に変換できます。NVIDIA のハードウェアアクセラレーションにも対応しています。',
+    'codec.original': '元のまま',
+    'name.title': '整理まで、自分流に。',
+    'name.text': '放送日、シリーズ、話数の順番を並べ替えられます。保存されるファイル名を事前に確認できます。',
+    'name.date': '放送日',
+    'name.series': 'シリーズ',
+    'name.episode': '話数',
+    'name.preview': '2026.09.09_シリーズ_第01話.mp4',
+    'me.title': 'あなたの言語と、好みで。',
+    'me.text': '慣れた言語、落ち着くテーマで始めましょう。言語は選んだ瞬間に切り替わります。',
+    'me.langs': '対応言語',
+    'me.themeSub': '昼も、夜ふかしにも。',
+    'final.title': '見たい瞬間を、<br>いちばんシンプルに。',
+    'final.lead': 'TVer Downloader で、自分だけのライブラリを始めましょう。',
+    'final.download': 'Windows版をダウンロード',
+    'final.downloadTag': 'Windows版 {tag} をダウンロード',
+    'final.notes': 'リリースノート',
+    'final.meta': '無料 · ポータブル',
+    'footer.label': '関連リンク',
+    'footer.changelog': '変更履歴',
+    'footer.issues': 'バグ報告',
+    'footer.vpn': 'NordVPN(提携)',
+    'footer.donate': '支援する',
+    'footer.fine': 'このプログラムは独自ライセンスで配布しており、ソースコードは公開していません。個人での利用は自由ですが、無断での改変・再配布・商用利用は認められません。TVerは株式会社TVerのサービスで、このプロジェクトとは関係ありません。ダウンロードした動画は、個人で視聴する範囲でご利用ください。',
+    'dialog.label': 'アプリ画面の拡大表示',
+    'dialog.original': '元の画像を開く',
+    'dialog.close': '拡大表示を閉じる',
+  },
+  en: {
+    'meta.title': 'TVer Downloader — Download shows from Japan’s TVer',
+    'meta.description': 'A Windows app for saving videos from TVer, Japan’s streaming service. Whole-series downloads, subtitles, codec conversion and 7 languages.',
+    'skip': 'Skip to content',
+    'nav.home': 'TVer Downloader home',
+    'nav.label': 'Main menu',
+    'nav.overview': 'Overview',
+    'nav.start': 'Get started',
+    'nav.screens': 'Screens',
+    'nav.features': 'Features',
+    'nav.language': 'Language',
+    'nav.github': 'GitHub repository',
+    'nav.download': 'Download',
+    'theme.toLight': 'Switch to light theme',
+    'theme.toDark': 'Switch to dark theme',
+    'release.browse': 'See the latest release',
+    'release.latest': '{tag} · Latest release',
+    'release.open': 'Open the releases page',
+    'hero.title': 'Save TVer shows,<br><span class="grad">the easiest way.</span>',
+    'hero.lead': 'Just bring the address of a show you love.<br>From whole series to subtitles and tidy file names, <span>one window is all it takes.</span>',
+    'facts.free': 'Free',
+    'facts.noinstall': 'No installation',
+    'facts.portable': 'Portable app',
+    'hero.notice': '<strong>A Japanese VPN is required.</strong>TVer is only available from Japanese IP addresses.<br>When the app starts, it tells you which country you are connecting from.',
+    'hero.shotAlt': 'TVer Downloader main window. Each download appears as a card with its thumbnail, progress, speed and time left.',
+    'points.label': 'Key features',
+    'points.series': 'Whole-series downloads',
+    'points.seriesSub': 'Pick episodes, get them in one go',
+    'points.subs': 'Japanese subtitles',
+    'points.subsSub': 'Embedded, or saved as SRT · VTT',
+    'points.codec': 'Original quality · re-encoding',
+    'points.codecSub': 'AVC · HEVC, NVIDIA acceleration',
+    'points.theme': 'Light · Dark themes',
+    'points.themeSub': 'By day or late at night',
+    'points.lang': 'Multi-language support',
+    'points.langSub': '7 languages, switch instantly',
+    'start.title': 'Getting started takes three steps.',
+    'start.lead': 'No installer. The app prepares the tools it needs by itself.',
+    'step1.title': 'Download and run',
+    'step1.text': 'Unzip it into any folder and run <code>TVerDownloader.exe</code>. yt-dlp and FFmpeg are set up automatically.',
+    'step2.title': 'Connect to a Japanese VPN',
+    'step2.text': 'Connect to a server in Japan. Check the current country in the app, then start downloading.',
+    'step3.title': 'Bring a TVer address',
+    'step3.text': 'Copy an address and the input box fills itself. Press <strong>Download</strong>. For a series, pick the episodes you want.',
+    'screens.title': 'Take a look at the real screens.',
+    'screens.lead': 'From downloads to history, favorites and settings, exactly as they appear in the app.',
+    'screens.zoom': 'View larger',
+    'screens.prev': 'Previous screen',
+    'screens.next': 'Next screen',
+    'screens.carousel': 'carousel',
+    'screens.label': 'App screens',
+    'screens.pick': 'Choose a screen',
+    'screens.slide': 'slide',
+    'screens.dot': 'Show the {title} screen',
+    'screens.zoomLabel': 'View the {title} screen larger',
+    'slide1.title': 'Download',
+    'slide1.caption': 'See the progress and time left of every download at a glance.',
+    'slide1.alt': 'Download list in the light theme. Each card shows the thumbnail, progress bar, speed and time left.',
+    'slide2.title': 'History',
+    'slide2.caption': 'Anything you have already downloaded can be found again in History.',
+    'slide2.alt': 'The History tab showing thumbnails and details of downloaded videos.',
+    'slide3.title': 'Favorites',
+    'slide3.caption': 'Collect the series you love and check for new episodes.',
+    'slide3.alt': 'The Favorites tab showing series thumbnails and when each was last checked.',
+    'slide4.title': 'Settings',
+    'slide4.caption': 'Set language, quality, subtitles and file names your way.',
+    'slide4.alt': 'The settings window for the language, save folder and number of simultaneous downloads.',
+    'slide5.title': 'Dark theme',
+    'slide5.caption': 'Same features, a different mood. A dark theme is included.',
+    'slide5.alt': 'TVer Downloader main window in the dark theme.',
+    'slide6.title': 'About',
+    'slide6.caption': 'Check for new versions and update right inside the app.',
+    'slide6.alt': 'The About window, where you can check for a new version.',
+    'features.title': 'Everything you need.<br>Nothing in your way.',
+    'features.lead': 'From the moment you bring an address until the file is in its place. Focus on the shows; the app takes care of the rest.',
+    'series.title': 'From one episode<br>to the whole series.',
+    'series.text': 'Copy or drag in an address. Pick the episodes you want from a series, get them in one go, and download several fragments at once.',
+    'fav.title': 'Never miss<br>the series you love.',
+    'fav.text': 'The app checks your favorite series for new episodes. Links to the same series are merged, and damaged files are restored from a backup.',
+    'fav.tag': 'Favorites · Download history',
+    'fav.sheet1': 'My series',
+    'fav.sheet1Sub': 'Your favorite shows in one place',
+    'fav.sheet2': 'New episodes',
+    'fav.sheet2Sub': 'Favorites keeps watch for you',
+    'subs.title': 'Subtitles too, with ease.',
+    'subs.text': 'Embed the provided Japanese subtitles in the video, or save them separately as SRT · VTT files.',
+    'codec.title': 'Quality, the way you like it.',
+    'codec.text': 'Keep the original or convert to AVC · HEVC. NVIDIA hardware acceleration is supported.',
+    'codec.original': 'Original',
+    'name.title': 'Organized your way.',
+    'name.text': 'Reorder the air date, series and episode. Preview the file name before it is saved.',
+    'name.date': 'Air date',
+    'name.series': 'Series',
+    'name.episode': 'Episode',
+    'name.preview': '2026.09.09_Series_Ep01.mp4',
+    'me.title': 'In your language, to your taste.',
+    'me.text': 'Start with a familiar language and a comfortable theme. The language changes the moment you pick one.',
+    'me.langs': 'Supported languages',
+    'me.themeSub': 'By day or late at night.',
+    'final.title': 'The moments you want to watch,<br>made simple.',
+    'final.lead': 'Start your own library with TVer Downloader.',
+    'final.download': 'Download for Windows',
+    'final.downloadTag': 'Download {tag} for Windows',
+    'final.notes': 'Release notes',
+    'final.meta': 'Free · Portable',
+    'footer.label': 'Related links',
+    'footer.changelog': 'Changelog',
+    'footer.issues': 'Report a bug',
+    'footer.vpn': 'NordVPN (affiliate)',
+    'footer.donate': 'Support',
+    'footer.fine': 'This program is distributed under a proprietary license, and its source code is not public. Personal use is free, but unauthorized modification, redistribution and commercial use are not permitted. TVer is a service of TVer Inc. and is not affiliated with this project. Please use downloaded videos for personal viewing only.',
+    'dialog.label': 'Enlarged app screen',
+    'dialog.original': 'Open original image',
+    'dialog.close': 'Close enlarged view',
+  },
+  'zh-Hans': {
+    'meta.title': 'TVer Downloader — 日本 TVer 视频下载工具',
+    'meta.description': '用于保存日本 TVer 流媒体视频的 Windows 程序。支持整部剧集批量下载、字幕保存、编码转换和 7 种语言。',
+    'skip': '跳到正文',
+    'nav.home': 'TVer Downloader 首页',
+    'nav.label': '主菜单',
+    'nav.overview': '概览',
+    'nav.start': '快速开始',
+    'nav.screens': '程序界面',
+    'nav.features': '主要功能',
+    'nav.language': '语言',
+    'nav.github': 'GitHub 仓库',
+    'nav.download': '下载',
+    'theme.toLight': '切换到浅色主题',
+    'theme.toDark': '切换到深色主题',
+    'release.browse': '查看最新版本',
+    'release.latest': '{tag} · 最新版本',
+    'release.open': '打开发布页面',
+    'hero.title': '保存日本 TVer 视频<br><span class="grad">最简单的方法</span>',
+    'hero.lead': '只需带来喜欢节目的网址。<br>从整部剧集到字幕、文件整理，<span>一个窗口全部搞定。</span>',
+    'facts.free': '免费',
+    'facts.noinstall': '无需安装',
+    'facts.portable': '便携版',
+    'hero.notice': '<strong>需要日本 VPN。</strong>TVer 只能通过日本 IP 使用。<br>程序启动时会告诉你当前连接的国家。',
+    'hero.shotAlt': 'TVer Downloader 主界面。每个正在下载的视频都以卡片显示封面、进度、速度和剩余时间。',
+    'points.label': '主要功能',
+    'points.series': '整部剧集批量下载',
+    'points.seriesSub': '选好集数，一次下载',
+    'points.subs': '日语字幕',
+    'points.subsSub': '嵌入视频，或保存为 SRT · VTT',
+    'points.codec': '原画质 · 编码转换',
+    'points.codecSub': 'AVC · HEVC，NVIDIA 加速',
+    'points.theme': '浅色 · 深色主题',
+    'points.themeSub': '白天深夜都舒适',
+    'points.lang': '多语言支持',
+    'points.langSub': '7 种语言，选择后立即切换',
+    'start.title': '开始使用，只需三步。',
+    'start.lead': '无需安装。所需工具由程序自动准备。',
+    'step1.title': '下载并运行',
+    'step1.text': '解压到任意文件夹，运行 <code>TVerDownloader.exe</code>。yt-dlp 和 FFmpeg 会自动准备好。',
+    'step2.title': '连接日本 VPN',
+    'step2.text': '请连接日本的服务器。在程序中确认当前连接的国家后，就可以开始下载了。',
+    'step3.title': '带来 TVer 网址',
+    'step3.text': '复制网址后，输入框会自动填好。点击<strong>下载</strong>即可。如果是剧集，可以选择想要的集数。',
+    'screens.title': '看看实际界面。',
+    'screens.lead': '从下载到记录、收藏夹、设置，都是程序的真实界面。',
+    'screens.zoom': '放大查看',
+    'screens.prev': '上一个界面',
+    'screens.next': '下一个界面',
+    'screens.carousel': '轮播',
+    'screens.label': '程序界面',
+    'screens.pick': '选择界面',
+    'screens.slide': '幻灯片',
+    'screens.dot': '查看“{title}”界面',
+    'screens.zoomLabel': '放大查看“{title}”界面',
+    'slide1.title': '下载',
+    'slide1.caption': '正在下载的视频进度和剩余时间，一目了然。',
+    'slide1.alt': '浅色主题的下载列表。每张卡片显示封面、进度条、速度和剩余时间。',
+    'slide2.title': '记录',
+    'slide2.caption': '已下载的视频，可以在记录中再次找到。',
+    'slide2.alt': '记录标签页中显示已下载视频的封面和信息。',
+    'slide3.title': '收藏夹',
+    'slide3.caption': '收藏喜欢的剧集，检查新的集数。',
+    'slide3.alt': '收藏夹标签页中显示剧集封面和最后检查时间。',
+    'slide4.title': '设置',
+    'slide4.caption': '按自己的方式设置语言、画质、字幕和文件名。',
+    'slide4.alt': '设置语言、保存文件夹和同时下载数的设置窗口。',
+    'slide5.title': '深色主题',
+    'slide5.caption': '同样的功能，不同的氛围。也支持深色主题。',
+    'slide5.alt': '深色主题的 TVer Downloader 主界面。',
+    'slide6.title': '关于',
+    'slide6.caption': '在程序内检查新版本并直接更新。',
+    'slide6.alt': '可以检查新版本的“关于”窗口。',
+    'features.title': '需要的功能一应俱全。<br>繁琐的步骤轻松带过。',
+    'features.lead': '从带来网址的那一刻，到文件整理完毕。<br>专注于节目，其余交给程序。',
+    'series.title': '从一集，<br>到整部剧集。',
+    'series.text': '复制或拖入网址。从剧集中选择想要的集数一次下载，并同时下载多个分片。',
+    'fav.title': '不错过<br>喜欢的剧集。',
+    'fav.text': '加入收藏夹后，程序会检查新的集数。同一剧集的分享网址会合并为一个；记录和收藏夹文件损坏时，会从备份中恢复。',
+    'fav.tag': '收藏夹 · 下载记录',
+    'fav.sheet1': '我的剧集',
+    'fav.sheet1Sub': '喜欢的节目集中在一处',
+    'fav.sheet2': '检查新集数',
+    'fav.sheet2Sub': '收藏夹帮你留意',
+    'subs.title': '字幕也一起，轻松搞定。',
+    'subs.text': '可以把提供的日语字幕嵌入视频，<br>或另存为 SRT · VTT 文件。',
+    'codec.title': '画质随你喜欢。',
+    'codec.text': '保留原始画质，或转换为 AVC · HEVC。支持 NVIDIA 硬件加速。',
+    'codec.original': '保留原始',
+    'name.title': '整理也按你的方式。',
+    'name.text': '可以调整播出日期、剧集名、集数的顺序，保存前还能预览文件名。',
+    'name.date': '播出日期',
+    'name.series': '剧集名',
+    'name.episode': '集数',
+    'name.preview': '2026.09.09_剧集名_第01集.mp4',
+    'me.title': '用你的语言和喜好。',
+    'me.text': '从熟悉的语言、舒适的主题开始。语言选择后立即切换。',
+    'me.langs': '支持的语言',
+    'me.themeSub': '白天深夜都舒适。',
+    'final.title': '想看的瞬间，<br>最简单地留住。',
+    'final.lead': '用 TVer Downloader 开始你自己的片库。',
+    'final.download': '下载 Windows 版',
+    'final.downloadTag': '下载 Windows 版 {tag}',
+    'final.notes': '发布说明',
+    'final.meta': '免费 · 便携',
+    'footer.label': '相关链接',
+    'footer.changelog': '更新日志',
+    'footer.issues': '报告问题',
+    'footer.vpn': 'NordVPN(合作)',
+    'footer.donate': '赞助',
+    'footer.fine': '本程序以专有许可证发布，不公开源代码。个人使用不受限制，但禁止擅自修改、再分发和商业使用。TVer 是 TVer 株式会社的服务，与本项目无关。下载的视频请仅用于个人观看。',
+    'dialog.label': '放大的程序界面',
+    'dialog.original': '打开原始图片',
+    'dialog.close': '关闭放大视图',
+  },
+  'zh-Hant': {
+    'meta.title': 'TVer Downloader — 日本 TVer 影片下載工具',
+    'meta.description': '用來保存日本 TVer 串流影片的 Windows 程式。支援整部劇集批次下載、字幕保存、編碼轉換與 7 種語言。',
+    'skip': '跳到主要內容',
+    'nav.home': 'TVer Downloader 首頁',
+    'nav.label': '主選單',
+    'nav.overview': '概覽',
+    'nav.start': '快速開始',
+    'nav.screens': '程式畫面',
+    'nav.features': '主要功能',
+    'nav.language': '語言',
+    'nav.github': 'GitHub 儲存庫',
+    'nav.download': '下載',
+    'theme.toLight': '切換到淺色主題',
+    'theme.toDark': '切換到深色主題',
+    'release.browse': '查看最新版本',
+    'release.latest': '{tag} · 最新版本',
+    'release.open': '開啟發行頁面',
+    'hero.title': '保存日本 TVer 影片<br><span class="grad">最簡單的方法</span>',
+    'hero.lead': '只要帶來喜歡節目的網址。<br>從整部劇集到字幕、檔案整理，<span>一個視窗全部搞定。</span>',
+    'facts.free': '免費',
+    'facts.noinstall': '免安裝',
+    'facts.portable': '可攜版',
+    'hero.notice': '<strong>需要日本 VPN。</strong>TVer 只能透過日本 IP 使用。<br>程式啟動時會告訴你目前連線的國家。',
+    'hero.shotAlt': 'TVer Downloader 主畫面。每部下載中的影片都以卡片顯示封面、進度、速度與剩餘時間。',
+    'points.label': '主要功能',
+    'points.series': '整部劇集批次下載',
+    'points.seriesSub': '選好集數，一次下載',
+    'points.subs': '日語字幕',
+    'points.subsSub': '嵌入影片，或存成 SRT · VTT',
+    'points.codec': '原始畫質 · 編碼轉換',
+    'points.codecSub': 'AVC · HEVC，NVIDIA 加速',
+    'points.theme': '淺色 · 深色主題',
+    'points.themeSub': '白天深夜都舒適',
+    'points.lang': '多語言支援',
+    'points.langSub': '7 種語言，選了立即切換',
+    'start.title': '開始使用，只要三步。',
+    'start.lead': '免安裝。需要的工具由程式自動準備。',
+    'step1.title': '下載並執行',
+    'step1.text': '解壓縮到任意資料夾，執行 <code>TVerDownloader.exe</code>。yt-dlp 與 FFmpeg 會自動準備好。',
+    'step2.title': '連線日本 VPN',
+    'step2.text': '請連線到日本的伺服器。在程式中確認目前連線的國家後，就可以開始下載。',
+    'step3.title': '帶來 TVer 網址',
+    'step3.text': '複製網址後，輸入欄會自動填好。按下<strong>下載</strong>即可。如果是劇集，可以選擇想要的集數。',
+    'screens.title': '看看實際畫面。',
+    'screens.lead': '從下載到紀錄、收藏、設定，都是程式的真實畫面。',
+    'screens.zoom': '放大檢視',
+    'screens.prev': '上一個畫面',
+    'screens.next': '下一個畫面',
+    'screens.carousel': '輪播',
+    'screens.label': '程式畫面',
+    'screens.pick': '選擇畫面',
+    'screens.slide': '投影片',
+    'screens.dot': '檢視「{title}」畫面',
+    'screens.zoomLabel': '放大檢視「{title}」畫面',
+    'slide1.title': '下載',
+    'slide1.caption': '下載中影片的進度與剩餘時間，一目了然。',
+    'slide1.alt': '淺色主題的下載清單。每張卡片顯示封面、進度列、速度與剩餘時間。',
+    'slide2.title': '紀錄',
+    'slide2.caption': '已下載的影片，可以在紀錄中再次找到。',
+    'slide2.alt': '紀錄分頁中顯示已下載影片的封面與資訊。',
+    'slide3.title': '收藏',
+    'slide3.caption': '收藏喜歡的劇集，檢查新的集數。',
+    'slide3.alt': '收藏分頁中顯示劇集封面與最後檢查時間。',
+    'slide4.title': '設定',
+    'slide4.caption': '依自己的方式設定語言、畫質、字幕與檔名。',
+    'slide4.alt': '設定語言、儲存資料夾與同時下載數的設定視窗。',
+    'slide5.title': '深色主題',
+    'slide5.caption': '同樣的功能，不同的氛圍。也支援深色主題。',
+    'slide5.alt': '深色主題的 TVer Downloader 主畫面。',
+    'slide6.title': '關於',
+    'slide6.caption': '在程式內檢查新版本並直接更新。',
+    'slide6.alt': '可以檢查新版本的「關於」視窗。',
+    'features.title': '需要的功能一應俱全。<br>繁瑣的步驟輕鬆帶過。',
+    'features.lead': '從帶來網址的那一刻，到檔案整理完成。<br>專心看節目，其餘交給程式。',
+    'series.title': '從一集，<br>到整部劇集。',
+    'series.text': '複製或拖入網址。從劇集中選擇想要的集數一次下載，並同時下載多個片段。',
+    'fav.title': '不錯過<br>喜歡的劇集。',
+    'fav.text': '加入收藏後，程式會檢查新的集數。同一劇集的分享網址會合併為一個；紀錄與收藏的檔案損毀時，會從備份還原。',
+    'fav.tag': '收藏 · 下載紀錄',
+    'fav.sheet1': '我的劇集',
+    'fav.sheet1Sub': '喜歡的節目集中在一處',
+    'fav.sheet2': '檢查新集數',
+    'fav.sheet2Sub': '收藏幫你留意',
+    'subs.title': '字幕也一起，輕鬆搞定。',
+    'subs.text': '可以把提供的日語字幕嵌入影片，<br>或另存成 SRT · VTT 檔案。',
+    'codec.title': '畫質隨你喜歡。',
+    'codec.text': '保留原始畫質，或轉換成 AVC · HEVC。支援 NVIDIA 硬體加速。',
+    'codec.original': '保留原始',
+    'name.title': '整理也照你的方式。',
+    'name.text': '可以調整播出日期、劇集名、集數的順序，儲存前還能預覽檔名。',
+    'name.date': '播出日期',
+    'name.series': '劇集名',
+    'name.episode': '集數',
+    'name.preview': '2026.09.09_劇集名_第01集.mp4',
+    'me.title': '用你的語言與喜好。',
+    'me.text': '從熟悉的語言、舒適的主題開始。語言選了就立即切換。',
+    'me.langs': '支援的語言',
+    'me.themeSub': '白天深夜都舒適。',
+    'final.title': '想看的瞬間，<br>最簡單地留住。',
+    'final.lead': '用 TVer Downloader 開始屬於你的片庫。',
+    'final.download': '下載 Windows 版',
+    'final.downloadTag': '下載 Windows 版 {tag}',
+    'final.notes': '發行說明',
+    'final.meta': '免費 · 可攜',
+    'footer.label': '相關連結',
+    'footer.changelog': '更新紀錄',
+    'footer.issues': '回報問題',
+    'footer.vpn': 'NordVPN(合作)',
+    'footer.donate': '贊助',
+    'footer.fine': '本程式以專有授權發布，不公開原始碼。個人使用不受限制，但禁止擅自修改、再散布與商業使用。TVer 是 TVer 株式會社的服務，與本專案無關。下載的影片請僅限個人觀看。',
+    'dialog.label': '放大的程式畫面',
+    'dialog.original': '開啟原始圖片',
+    'dialog.close': '關閉放大檢視',
+  },
+  es: {
+    'meta.title': 'TVer Downloader — Descarga programas de TVer (Japón)',
+    'meta.description': 'Aplicación para Windows que guarda vídeos de TVer, el servicio de streaming japonés. Series completas, subtítulos, conversión de códec y 7 idiomas.',
+    'skip': 'Saltar al contenido',
+    'nav.home': 'Inicio de TVer Downloader',
+    'nav.label': 'Menú principal',
+    'nav.overview': 'Resumen',
+    'nav.start': 'Cómo empezar',
+    'nav.screens': 'Pantallas',
+    'nav.features': 'Funciones',
+    'nav.language': 'Idioma',
+    'nav.github': 'Repositorio en GitHub',
+    'nav.download': 'Descargar',
+    'theme.toLight': 'Cambiar al tema claro',
+    'theme.toDark': 'Cambiar al tema oscuro',
+    'release.browse': 'Ver la última versión',
+    'release.latest': '{tag} · Última versión',
+    'release.open': 'Abrir la página de versiones',
+    'hero.title': 'Descarga TVer<br><span class="grad">de la forma más fácil.</span>',
+    'hero.lead': 'Solo trae la dirección del programa que te gusta.<br>De series completas a subtítulos y archivos ordenados, <span>todo en una sola ventana.</span>',
+    'facts.free': 'Gratis',
+    'facts.noinstall': 'Sin instalación',
+    'facts.portable': 'Aplicación portátil',
+    'hero.notice': '<strong>Necesitas una VPN japonesa.</strong>TVer solo funciona desde direcciones IP de Japón.<br>Al iniciarse, la aplicación te dice desde qué país te conectas.',
+    'hero.shotAlt': 'Ventana principal de TVer Downloader. Cada descarga aparece como una tarjeta con su miniatura, progreso, velocidad y tiempo restante.',
+    'points.label': 'Funciones principales',
+    'points.series': 'Series completas',
+    'points.seriesSub': 'Elige episodios y bájalos de una vez',
+    'points.subs': 'Subtítulos en japonés',
+    'points.subsSub': 'Integrados o en SRT · VTT',
+    'points.codec': 'Original o AVC · HEVC',
+    'points.codecSub': 'Recodificación acelerada por NVIDIA',
+    'points.theme': 'Tema claro · oscuro',
+    'points.themeSub': 'De día o a altas horas',
+    'points.lang': 'Varios idiomas',
+    'points.langSub': '7 idiomas, cambio al instante',
+    'start.title': 'Empezar lleva solo tres pasos.',
+    'start.lead': 'Sin instalador. La aplicación prepara sola las herramientas que necesita.',
+    'step1.title': 'Descarga y ejecuta',
+    'step1.text': 'Descomprime en cualquier carpeta y ejecuta <code>TVerDownloader.exe</code>. yt-dlp y FFmpeg se preparan automáticamente.',
+    'step2.title': 'Conéctate a una VPN japonesa',
+    'step2.text': 'Conéctate a un servidor en Japón. Comprueba en la aplicación el país actual y empieza a descargar.',
+    'step3.title': 'Trae una dirección de TVer',
+    'step3.text': 'Al copiar una dirección, el campo se rellena solo. Pulsa <strong>Descargar</strong>. Si es una serie, elige los episodios que quieras.',
+    'screens.title': 'Echa un vistazo a las pantallas reales.',
+    'screens.lead': 'De las descargas al historial, los favoritos y los ajustes, tal como se ven en la aplicación.',
+    'screens.zoom': 'Ver en grande',
+    'screens.prev': 'Pantalla anterior',
+    'screens.next': 'Pantalla siguiente',
+    'screens.carousel': 'carrusel',
+    'screens.label': 'Pantallas de la aplicación',
+    'screens.pick': 'Elegir pantalla',
+    'screens.slide': 'diapositiva',
+    'screens.dot': 'Ver la pantalla {title}',
+    'screens.zoomLabel': 'Ver en grande la pantalla {title}',
+    'slide1.title': 'Descargas',
+    'slide1.caption': 'Consulta de un vistazo el progreso y el tiempo restante de cada descarga.',
+    'slide1.alt': 'Lista de descargas en el tema claro. Cada tarjeta muestra la miniatura, la barra de progreso, la velocidad y el tiempo restante.',
+    'slide2.title': 'Historial',
+    'slide2.caption': 'Lo que ya descargaste se vuelve a encontrar en el historial.',
+    'slide2.alt': 'La pestaña Historial con las miniaturas y los datos de los vídeos descargados.',
+    'slide3.title': 'Favoritos',
+    'slide3.caption': 'Reúne tus series favoritas y comprueba si hay episodios nuevos.',
+    'slide3.alt': 'La pestaña Favoritos con las miniaturas de las series y la hora de la última comprobación.',
+    'slide4.title': 'Ajustes',
+    'slide4.caption': 'Configura idioma, calidad, subtítulos y nombres de archivo a tu manera.',
+    'slide4.alt': 'La ventana de ajustes para elegir el idioma, la carpeta de guardado y las descargas simultáneas.',
+    'slide5.title': 'Tema oscuro',
+    'slide5.caption': 'Las mismas funciones, otro ambiente. También hay tema oscuro.',
+    'slide5.alt': 'Ventana principal de TVer Downloader en el tema oscuro.',
+    'slide6.title': 'Acerca de',
+    'slide6.caption': 'Busca nuevas versiones y actualiza desde la propia aplicación.',
+    'slide6.alt': 'La ventana Acerca de, donde puedes buscar una nueva versión.',
+    'features.title': 'Todo lo que necesitas.<br>Nada que estorbe.',
+    'features.lead': 'Desde que traes la dirección hasta que el archivo queda ordenado. Céntrate en los programas; la aplicación se encarga del resto.',
+    'series.title': 'De un episodio<br>a la serie completa.',
+    'series.text': 'Copia o arrastra una dirección. Elige los episodios de una serie, descárgalos de una vez y baja varios fragmentos a la vez.',
+    'fav.title': 'Que no se te escape<br>ninguna serie favorita.',
+    'fav.text': 'La aplicación busca episodios nuevos de tus series favoritas. Une los enlaces repetidos y restaura desde una copia los archivos dañados.',
+    'fav.tag': 'Favoritos · Historial',
+    'fav.sheet1': 'Mis series',
+    'fav.sheet1Sub': 'Tus programas en un solo lugar',
+    'fav.sheet2': 'Episodios nuevos',
+    'fav.sheet2Sub': 'Favoritos los vigila por ti',
+    'subs.title': 'Subtítulos incluidos, sin complicaciones.',
+    'subs.text': 'Integra en el vídeo los subtítulos japoneses disponibles o guárdalos aparte como archivos SRT · VTT.',
+    'codec.title': 'Calidad a tu gusto.',
+    'codec.text': 'Conserva el original o conviértelo a AVC · HEVC. Compatible con la aceleración por hardware de NVIDIA.',
+    'codec.original': 'Original',
+    'name.title': 'Ordenado a tu manera.',
+    'name.text': 'Cambia el orden de fecha de emisión, serie y episodio. Puedes ver el nombre del archivo antes de guardarlo.',
+    'name.date': 'Fecha',
+    'name.series': 'Serie',
+    'name.episode': 'Episodio',
+    'name.preview': '2026.09.09_Serie_Ep01.mp4',
+    'me.title': 'En tu idioma y a tu gusto.',
+    'me.text': 'Empieza con un idioma conocido y un tema cómodo. El idioma cambia en cuanto lo eliges.',
+    'me.langs': 'Idiomas disponibles',
+    'me.themeSub': 'De día o a altas horas.',
+    'final.title': 'Los momentos que quieres ver,<br>de la forma más sencilla.',
+    'final.lead': 'Empieza tu propia biblioteca con TVer Downloader.',
+    'final.download': 'Descargar para Windows',
+    'final.downloadTag': 'Descargar {tag} para Windows',
+    'final.notes': 'Notas de la versión',
+    'final.meta': 'Gratis · Portátil',
+    'footer.label': 'Enlaces relacionados',
+    'footer.changelog': 'Registro de cambios',
+    'footer.issues': 'Informar de un error',
+    'footer.vpn': 'NordVPN (afiliado)',
+    'footer.donate': 'Apoyar',
+    'footer.fine': 'Este programa se distribuye con una licencia propietaria y su código fuente no es público. El uso personal es libre, pero no se permite modificarlo, redistribuirlo ni usarlo con fines comerciales sin autorización. TVer es un servicio de TVer Inc. y no tiene relación con este proyecto. Usa los vídeos descargados solo para verlos de forma personal.',
+    'dialog.label': 'Pantalla ampliada',
+    'dialog.original': 'Abrir la imagen original',
+    'dialog.close': 'Cerrar la vista ampliada',
+  },
+  th: {
+    'meta.title': 'TVer Downloader — โปรแกรมดาวน์โหลดวิดีโอ TVer ของญี่ปุ่น',
+    'meta.description': 'โปรแกรมบน Windows สำหรับเก็บวิดีโอจาก TVer บริการสตรีมมิงของญี่ปุ่น ดาวน์โหลดทั้งซีรีส์ บันทึกคำบรรยาย แปลงโคเดก และรองรับ 7 ภาษา',
+    'skip': 'ข้ามไปยังเนื้อหา',
+    'nav.home': 'หน้าแรกของ TVer Downloader',
+    'nav.label': 'เมนูหลัก',
+    'nav.overview': 'ภาพรวม',
+    'nav.start': 'เริ่มต้นใช้งาน',
+    'nav.screens': 'หน้าจอโปรแกรม',
+    'nav.features': 'ฟีเจอร์หลัก',
+    'nav.language': 'ภาษา',
+    'nav.github': 'คลังโค้ดบน GitHub',
+    'nav.download': 'ดาวน์โหลด',
+    'theme.toLight': 'เปลี่ยนเป็นธีมสว่าง',
+    'theme.toDark': 'เปลี่ยนเป็นธีมมืด',
+    'release.browse': 'ดูเวอร์ชันล่าสุด',
+    'release.latest': '{tag} · เวอร์ชันล่าสุด',
+    'release.open': 'เปิดหน้ารุ่นที่เผยแพร่',
+    'hero.title': 'เก็บวิดีโอ TVer ของญี่ปุ่น<br><span class="grad">ด้วยวิธีที่ง่ายที่สุด</span>',
+    'hero.lead': 'แค่นำที่อยู่ของรายการที่ชอบมา<br>ตั้งแต่ดาวน์โหลดทั้งซีรีส์ไปจนถึงคำบรรยายและจัดชื่อไฟล์ <span>จบได้ในหน้าต่างเดียว</span>',
+    'facts.free': 'ฟรี',
+    'facts.noinstall': 'ไม่ต้องติดตั้ง',
+    'facts.portable': 'แอปพกพา',
+    'hero.notice': '<strong>ต้องใช้ VPN ของญี่ปุ่น</strong>TVer ใช้งานได้จาก IP ของญี่ปุ่นเท่านั้น<br>เมื่อเปิดโปรแกรม จะแจ้งให้ทราบว่าคุณกำลังเชื่อมต่อจากประเทศใด',
+    'hero.shotAlt': 'หน้าจอหลักของ TVer Downloader วิดีโอที่กำลังดาวน์โหลดแต่ละรายการแสดงเป็นการ์ด พร้อมภาพปก ความคืบหน้า ความเร็ว และเวลาที่เหลือ',
+    'points.label': 'ฟีเจอร์หลัก',
+    'points.series': 'ดาวน์โหลดทั้งซีรีส์',
+    'points.seriesSub': 'เลือกเฉพาะตอนที่ต้องการแล้วโหลดทีเดียว',
+    'points.subs': 'คำบรรยายภาษาญี่ปุ่น',
+    'points.subsSub': 'ฝังในวิดีโอหรือบันทึกเป็น SRT · VTT',
+    'points.codec': 'คุณภาพต้นฉบับ · แปลงโคเดก',
+    'points.codecSub': 'AVC · HEVC เร่งความเร็วด้วย NVIDIA',
+    'points.theme': 'ธีมสว่าง · มืด',
+    'points.themeSub': 'ทั้งกลางวันและยามดึก',
+    'points.lang': 'รองรับหลายภาษา',
+    'points.langSub': '7 ภาษา เปลี่ยนได้ทันที',
+    'start.title': 'เริ่มต้นได้ในสามขั้นตอน',
+    'start.lead': 'ไม่ต้องติดตั้ง โปรแกรมจะเตรียมเครื่องมือที่จำเป็นให้เอง',
+    'step1.title': 'ดาวน์โหลดแล้วเปิดใช้งาน',
+    'step1.text': 'แตกไฟล์ไว้ในโฟลเดอร์ที่ต้องการ แล้วเปิด <code>TVerDownloader.exe</code> โปรแกรมจะเตรียม yt-dlp และ FFmpeg ให้อัตโนมัติ',
+    'step2.title': 'เชื่อมต่อ VPN ของญี่ปุ่น',
+    'step2.text': 'เชื่อมต่อกับเซิร์ฟเวอร์ในญี่ปุ่น ตรวจสอบประเทศที่เชื่อมต่ออยู่ในโปรแกรม แล้วเริ่มดาวน์โหลดได้เลย',
+    'step3.title': 'นำที่อยู่ TVer มา',
+    'step3.text': 'เมื่อคัดลอกที่อยู่ ช่องป้อนข้อมูลจะถูกกรอกให้เอง แล้วกด <strong>ดาวน์โหลด</strong> หากเป็นซีรีส์ เลือกเฉพาะตอนที่ต้องการได้',
+    'screens.title': 'ลองดูหน้าจอจริง',
+    'screens.lead': 'ตั้งแต่ดาวน์โหลด ประวัติ รายการโปรด จนถึงการตั้งค่า ตามที่เห็นในโปรแกรมจริง',
+    'screens.zoom': 'ดูภาพขยาย',
+    'screens.prev': 'หน้าจอก่อนหน้า',
+    'screens.next': 'หน้าจอถัดไป',
+    'screens.carousel': 'ภาพสไลด์',
+    'screens.label': 'หน้าจอโปรแกรม',
+    'screens.pick': 'เลือกหน้าจอ',
+    'screens.slide': 'สไลด์',
+    'screens.dot': 'ดูหน้าจอ {title}',
+    'screens.zoomLabel': 'ดูหน้าจอ {title} แบบขยาย',
+    'slide1.title': 'ดาวน์โหลด',
+    'slide1.caption': 'ดูความคืบหน้าและเวลาที่เหลือของทุกรายการได้ในแวบเดียว',
+    'slide1.alt': 'รายการดาวน์โหลดในธีมสว่าง การ์ดแต่ละใบแสดงภาพปก แถบความคืบหน้า ความเร็ว และเวลาที่เหลือ',
+    'slide2.title': 'ประวัติ',
+    'slide2.caption': 'วิดีโอที่ดาวน์โหลดแล้ว หาเจอได้อีกครั้งในประวัติ',
+    'slide2.alt': 'แท็บประวัติที่แสดงภาพปกและข้อมูลของวิดีโอที่ดาวน์โหลดแล้ว',
+    'slide3.title': 'รายการโปรด',
+    'slide3.caption': 'รวบรวมซีรีส์ที่ชอบ แล้วตรวจหาตอนใหม่',
+    'slide3.alt': 'แท็บรายการโปรดที่แสดงภาพปกของซีรีส์และเวลาที่ตรวจสอบล่าสุด',
+    'slide4.title': 'ตั้งค่า',
+    'slide4.caption': 'ตั้งค่าภาษา คุณภาพ คำบรรยาย และชื่อไฟล์ได้ตามใจ',
+    'slide4.alt': 'หน้าต่างตั้งค่าสำหรับเลือกภาษา โฟลเดอร์บันทึก และจำนวนดาวน์โหลดพร้อมกัน',
+    'slide5.title': 'ธีมมืด',
+    'slide5.caption': 'ฟีเจอร์เดิม บรรยากาศใหม่ มีธีมมืดให้ด้วย',
+    'slide5.alt': 'หน้าจอหลักของ TVer Downloader ในธีมมืด',
+    'slide6.title': 'เกี่ยวกับ',
+    'slide6.caption': 'ตรวจหาเวอร์ชันใหม่และอัปเดตได้จากในโปรแกรม',
+    'slide6.alt': 'หน้าต่างเกี่ยวกับ ที่ใช้ตรวจหาเวอร์ชันใหม่',
+    'features.title': 'มีครบทุกฟีเจอร์ที่ต้องการ<br>ขั้นตอนยุ่งยากก็ง่ายขึ้น',
+    'features.lead': 'ตั้งแต่นำที่อยู่มาจนไฟล์ถูกจัดเก็บเรียบร้อย<br>คุณโฟกัสที่รายการ ส่วนที่เหลือโปรแกรมจัดการให้',
+    'series.title': 'ตั้งแต่ตอนเดียว<br>จนถึงทั้งซีรีส์',
+    'series.text': 'คัดลอกหรือลากที่อยู่มาวาง เลือกตอนที่ต้องการจากซีรีส์แล้วดาวน์โหลดทีเดียว พร้อมดาวน์โหลดหลายชิ้นส่วนไปพร้อมกัน',
+    'fav.title': 'ไม่พลาด<br>ซีรีส์ที่ชอบ',
+    'fav.text': 'โปรแกรมจะตรวจหาตอนใหม่ของซีรีส์โปรดให้ รวมลิงก์ของซีรีส์เดียวกันเป็นหนึ่ง และกู้คืนไฟล์ที่เสียหายจากข้อมูลสำรอง',
+    'fav.tag': 'รายการโปรด · ประวัติดาวน์โหลด',
+    'fav.sheet1': 'ซีรีส์ของฉัน',
+    'fav.sheet1Sub': 'รายการที่ชอบรวมไว้ในที่เดียว',
+    'fav.sheet2': 'ตรวจหาตอนใหม่',
+    'fav.sheet2Sub': 'รายการโปรดคอยดูให้',
+    'subs.title': 'คำบรรยายก็มาด้วย สะดวกสบาย',
+    'subs.text': 'ฝังคำบรรยายภาษาญี่ปุ่นที่มีให้ลงในวิดีโอ<br>หรือบันทึกแยกเป็นไฟล์ SRT · VTT',
+    'codec.title': 'คุณภาพตามที่ชอบ',
+    'codec.text': 'คงต้นฉบับไว้ หรือแปลงเป็น AVC · HEVC รองรับการเร่งความเร็วด้วยฮาร์ดแวร์ NVIDIA',
+    'codec.original': 'ต้นฉบับ',
+    'name.title': 'จัดเก็บในแบบของคุณ',
+    'name.text': 'สลับลำดับวันที่ออกอากาศ ซีรีส์ และตอนได้ และดูตัวอย่างชื่อไฟล์ก่อนบันทึก',
+    'name.date': 'วันออกอากาศ',
+    'name.series': 'ซีรีส์',
+    'name.episode': 'ตอน',
+    'name.preview': '2026.09.09_ซีรีส์_ตอน01.mp4',
+    'me.title': 'ในภาษาและสไตล์ของคุณ',
+    'me.text': 'เริ่มต้นด้วยภาษาที่คุ้นเคยและธีมที่สบายตา ภาษาจะเปลี่ยนทันทีที่เลือก',
+    'me.langs': 'ภาษาที่รองรับ',
+    'me.themeSub': 'ทั้งกลางวันและยามดึก',
+    'final.title': 'ช่วงเวลาที่อยากดู<br>เก็บไว้ได้ง่ายที่สุด',
+    'final.lead': 'เริ่มสร้างคลังวิดีโอของคุณเองกับ TVer Downloader',
+    'final.download': 'ดาวน์โหลดสำหรับ Windows',
+    'final.downloadTag': 'ดาวน์โหลด {tag} สำหรับ Windows',
+    'final.notes': 'บันทึกประจำรุ่น',
+    'final.meta': 'ฟรี · พกพา',
+    'footer.label': 'ลิงก์ที่เกี่ยวข้อง',
+    'footer.changelog': 'บันทึกการเปลี่ยนแปลง',
+    'footer.issues': 'แจ้งปัญหา',
+    'footer.vpn': 'NordVPN (พันธมิตร)',
+    'footer.donate': 'สนับสนุน',
+    'footer.fine': 'โปรแกรมนี้เผยแพร่ภายใต้สัญญาอนุญาตแบบกรรมสิทธิ์ และไม่เปิดเผยซอร์สโค้ด ใช้งานส่วนตัวได้อย่างอิสระ แต่ห้ามแก้ไข แจกจ่ายซ้ำ หรือใช้เชิงพาณิชย์โดยไม่ได้รับอนุญาต TVer เป็นบริการของบริษัท TVer Inc. และไม่มีส่วนเกี่ยวข้องกับโครงการนี้ โปรดใช้วิดีโอที่ดาวน์โหลดเพื่อรับชมส่วนตัวเท่านั้น',
+    'dialog.label': 'หน้าจอโปรแกรมแบบขยาย',
+    'dialog.original': 'เปิดรูปต้นฉบับ',
+    'dialog.close': 'ปิดภาพขยาย',
+  },
+};
+const PAGE_LANGS = Object.keys(STRINGS);
+let pageLang = 'ko';
+const languageListeners = [];
+
+function t(key, vars = {}) {
+  const raw = STRINGS[pageLang][key] ?? STRINGS.en[key] ?? STRINGS.ko[key] ?? key;
+  return raw.replace(/\{(\w+)\}/g, (match, name) => name in vars ? vars[name] : match);
+}
+
+function i18nAttrs(element) {
+  return element.dataset.i18nAttr.split(';').map(pair => pair.split(':'));
+}
+
+function applyLanguage(code) {
+  pageLang = PAGE_LANGS.includes(code) ? code : 'en';
+  const root = document.documentElement;
+  root.lang = pageLang;
+  document.title = t('meta.title');
+  document.querySelector('meta[name="description"]').content = t('meta.description');
+  document.querySelectorAll('[data-i18n]').forEach(element => { element.innerHTML = t(element.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-attr]').forEach(element => {
+    i18nAttrs(element).forEach(([attribute, key]) => element.setAttribute(attribute, t(key)));
+  });
+  document.getElementById('lang-select').value = pageLang;
+  languageListeners.forEach(listener => listener());
+}
+
+function setupLanguage() {
+  const korean = STRINGS.ko;
+  korean['meta.title'] = document.title;
+  korean['meta.description'] = document.querySelector('meta[name="description"]').content;
+  document.querySelectorAll('[data-i18n]').forEach(element => { korean[element.dataset.i18n] = element.innerHTML; });
+  document.querySelectorAll('[data-i18n-attr]').forEach(element => {
+    i18nAttrs(element).forEach(([attribute, key]) => { korean[key] = element.getAttribute(attribute); });
+  });
+  const select = document.getElementById('lang-select');
+  select.closest('.lang-picker').hidden = false;
+  select.addEventListener('change', () => {
+    try { localStorage.setItem('tver-page-lang', select.value); } catch {}
+    applyLanguage(select.value);
+  });
+  applyLanguage(document.documentElement.lang);
+}
+
 const RELEASES = 'https://github.com/deuxdoom/TVerDownloader/releases';
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 
@@ -600,6 +1383,14 @@ function isSafeReleaseUrl(value, asset = false) {
 async function syncRelease() {
   const label = document.getElementById('release-label');
   const pill = document.getElementById('release-pill');
+  const size = document.getElementById('fact-size');
+  const release = { tag: '', failed: false, zip: false, size: '' };
+  const render = () => {
+    label.textContent = release.failed ? t('release.open') : release.tag ? t('release.latest', { tag: release.tag }) : t('release.browse');
+    if (release.size) size.textContent = release.size;
+    if (release.zip) document.querySelectorAll('[data-download]').forEach(button => button.setAttribute('aria-label', t('final.downloadTag', { tag: release.tag })));
+  };
+  languageListeners.push(render);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
   try {
@@ -607,21 +1398,22 @@ async function syncRelease() {
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
     if (typeof data.tag_name !== 'string' || !isSafeReleaseUrl(data.html_url)) throw new Error('release');
-    label.textContent = data.tag_name + ' · 최신 릴리스';
+    release.tag = data.tag_name;
     pill.href = data.html_url;
     const asset = (Array.isArray(data.assets) ? data.assets : []).find(item =>
       typeof item.name === 'string' && /\.zip$/i.test(item.name) && isSafeReleaseUrl(item.browser_download_url, true));
     if (asset) {
-      document.querySelectorAll('[data-download]').forEach(button => {
-        button.href = asset.browser_download_url;
-        button.setAttribute('aria-label', 'Windows용 ' + data.tag_name + ' 내려받기');
-      });
-      if (Number.isFinite(asset.size) && asset.size > 0) document.getElementById('fact-size').textContent = (asset.size / 1048576).toFixed(1) + ' MB';
+      release.zip = true;
+      document.querySelectorAll('[data-download]').forEach(button => { button.href = asset.browser_download_url; });
+      if (Number.isFinite(asset.size) && asset.size > 0) release.size = (asset.size / 1048576).toFixed(1) + ' MB';
     }
   } catch {
-    label.textContent = '릴리스 페이지 열기';
+    release.failed = true;
     pill.href = RELEASES + '/latest';
-  } finally { clearTimeout(timeout); }
+  } finally {
+    clearTimeout(timeout);
+    render();
+  }
 }
 
 function setupTheme() {
@@ -629,10 +1421,11 @@ function setupTheme() {
   const button = document.getElementById('theme-toggle');
   const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : systemTheme.matches;
   const label = () => {
-    button.setAttribute('aria-label', dark() ? '밝은 테마로 바꾸기' : '어두운 테마로 바꾸기');
+    button.setAttribute('aria-label', t(dark() ? 'theme.toLight' : 'theme.toDark'));
     document.querySelectorAll('meta[name="theme-color"]').forEach(meta => meta.content = dark() ? '#080c14' : '#fafbfe');
   };
   label();
+  languageListeners.push(label);
   button.hidden = false;
   systemTheme.addEventListener('change', label);
   button.addEventListener('click', () => {
@@ -672,16 +1465,22 @@ function setupGallery() {
 
   slides.forEach((slide, i) => {
     slide.setAttribute('role', 'group');
-    slide.setAttribute('aria-roledescription', '슬라이드');
-    slide.setAttribute('aria-label', (i + 1) + ' / ' + slides.length + ' · ' + slide.dataset.title);
     const button = document.createElement('button');
     button.type = 'button';
-    button.setAttribute('aria-label', slide.dataset.title + ' 화면 보기');
-    button.title = slide.dataset.title;
     button.append(document.createElement('span'));
     button.addEventListener('click', () => go(i));
     dots.append(button);
   });
+  function label() {
+    slides.forEach((slide, i) => {
+      slide.setAttribute('aria-roledescription', t('screens.slide'));
+      slide.setAttribute('aria-label', (i + 1) + ' / ' + slides.length + ' · ' + slide.dataset.title);
+      dots.children[i].setAttribute('aria-label', t('screens.dot', { title: slide.dataset.title }));
+      dots.children[i].title = slide.dataset.title;
+    });
+  }
+  label();
+  languageListeners.push(() => { label(); paint(); });
 
   const bar = i => dots.children[i].firstChild;
   function fill() {
@@ -699,7 +1498,7 @@ function setupGallery() {
     count.textContent = String(index + 1).padStart(2, '0') + ' / ' + String(slides.length).padStart(2, '0');
     Array.from(dots.children).forEach((button, i) => button.setAttribute('aria-current', String(i === index)));
     prev.disabled = next.disabled = false;
-    zoom.setAttribute('aria-label', slides[index].dataset.title + ' 화면 확대해서 보기');
+    zoom.setAttribute('aria-label', t('screens.zoomLabel', { title: slides[index].dataset.title }));
     preload();
     fill();
   }
@@ -879,6 +1678,7 @@ function setupCardLight() {
   });
 }
 
+setupLanguage();
 setupTheme();
 setupGallery();
 setupCardLight();
