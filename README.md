@@ -2,12 +2,12 @@
 
 <p align="center">
   <a href="https://deuxdoom.github.io/TVerDownloader/"><img src="https://img.shields.io/badge/%EA%B3%B5%EC%8B%9D%20%ED%99%88%ED%8E%98%EC%9D%B4%EC%A7%80-%EB%B0%94%EB%A1%9C%EA%B0%80%EA%B8%B0-0078F0?style=for-the-badge&logo=github&logoColor=white&labelColor=2f353a" alt="TVer Downloader 공식 홈페이지 바로가기"></a>
+  <a href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><img src="https://img.shields.io/github/v/release/deuxdoom/TVerDownloader?style=for-the-badge&label=%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C&labelColor=2f353a&color=16a34a" alt="최신 버전 다운로드"></a>
 </p>
 
 <p align="center">
   <b>소스 코드는 공개하지 않습니다.</b><br>
-  이 저장소에서는 사용 안내, 변경 내역, 공식 소개 페이지를 제공합니다.<br>
-  실행 프로그램은 <a href="https://github.com/deuxdoom/TVerDownloader/releases/latest">최신 릴리스</a>에서 받을 수 있습니다.
+  이 저장소에서는 사용 안내, 변경 내역, 공식 소개 페이지를 제공합니다.
 </p>
 
 <p align="center">
