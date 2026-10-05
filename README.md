@@ -1,27 +1,34 @@
-![TVerDownloader 메인 UI](docs/img/app-light.png)
+<h1 align="center"><img src="docs/img/logo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)</h1>
 
 <p align="center">
-  <a href="https://deuxdoom.github.io/TVerDownloader/">
-    <img src="https://img.shields.io/badge/%EA%B3%B5%EC%8B%9D%20%ED%99%88%ED%8E%98%EC%9D%B4%EC%A7%80-%EB%B0%94%EB%A1%9C%EA%B0%80%EA%B8%B0-0078F0?style=for-the-badge&logo=github&logoColor=white&labelColor=2f353a" alt="TVer Downloader 공식 홈페이지 바로가기">
-  </a>
+  <a href="https://deuxdoom.github.io/TVerDownloader/"><img src="https://img.shields.io/badge/%EA%B3%B5%EC%8B%9D%20%ED%99%88%ED%8E%98%EC%9D%B4%EC%A7%80-%EB%B0%94%EB%A1%9C%EA%B0%80%EA%B8%B0-0078F0?style=for-the-badge&logo=github&logoColor=white&labelColor=2f353a" alt="TVer Downloader 공식 홈페이지 바로가기"></a>
 </p>
 
-# <img src="docs/img/logo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
+<p align="center">
+  <b>소스 코드는 공개하지 않습니다.</b><br>
+  이 저장소에서는 사용 안내, 변경 내역, 공식 소개 페이지를 제공합니다.<br>
+  실행 프로그램은 <a href="https://github.com/deuxdoom/TVerDownloader/releases/latest">최신 릴리스</a>에서 받을 수 있습니다.
+</p>
 
-**소스 코드는 공개하지 않습니다.** 이 저장소에는 사용 안내, 변경 내역 및 공식 소개 페이지를 제공하며, 실행 프로그램은 [최신 릴리스](https://github.com/deuxdoom/TVerDownloader/releases/latest)에서 받을 수 있습니다.
+<p align="center">
+  <a href="https://refer-nordvpn.com/RRXwGuSQXTe"><img src="https://img.shields.io/badge/NORDVPN-73%25%ED%95%A0%EC%9D%B8%203%EA%B0%9C%EC%9B%94%20%EB%AC%B4%EB%A3%8C-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white" alt="NordVPN 73%할인 + 3개월 무료"></a>
+  <a href="https://toon.at/donate/deuxdoom"><img src="https://img.shields.io/badge/%ED%9B%84%EC%9B%90%ED%95%98%EA%B8%B0-%ED%88%AC%EB%84%A4%EC%9D%B4%EC%85%98-ff69b4?style=for-the-badge&logo=githubsponsors" alt="후원하기"></a>
+</p>
 
-[![NordVPN 74%할인 + 3개월 무료](https://img.shields.io/badge/NORDVPN-74%25%ED%95%A0%EC%9D%B8%203개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white)](https://refer-nordvpn.com/RRXwGuSQXTe)
-[![후원하기](https://img.shields.io/badge/후원하기-투네이션-ff69b4?style=for-the-badge&logo=githubsponsors)](https://toon.at/donate/deuxdoom)
+<p align="center">
+  <a href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><img src="https://img.shields.io/github/v/release/deuxdoom/TVerDownloader?style=flat&logo=github&logoColor=white&label=RELEASE&labelColor=2f353a&color=0ea5e9" alt="RELEASE"></a>
+  <a href="https://github.com/deuxdoom/TVerDownloader/releases/latest"><img src="https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?style=flat&logo=github&logoColor=white&label=DOWNLOADS@LATEST&labelColor=2f353a" alt="Downloads Latest"></a>
+  <a href="https://github.com/deuxdoom/TVerDownloader/releases"><img src="https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?style=flat&logo=github&logoColor=white&label=DOWNLOADS&labelColor=2f353a" alt="Downloads Total"></a>
+  <a href="#-라이선스-및-저작권-license--copyright"><img src="https://img.shields.io/badge/LICENSE-All_Rights_Reserved-f43f5e?style=flat&labelColor=2f353a" alt="LICENSE"></a>
+  <br>
+  <img src="https://img.shields.io/badge/PLATFORM-WINDOWS%20X64-0078d4?style=flat&logo=windows&logoColor=white&labelColor=2f353a" alt="Platform">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/PYTHON-3.10%2B-3776ab?style=flat&logo=python&logoColor=white&labelColor=2f353a" alt="PYTHON"></a>
+  <a href="https://pypi.org/project/PyQt6/"><img src="https://img.shields.io/badge/PYQT6-GUI-10b981?style=flat&logo=qt&logoColor=white&labelColor=2f353a" alt="PYQT6"></a>
+  <a href="https://github.com/yt-dlp/yt-dlp"><img src="https://img.shields.io/badge/MADE%20WITH-yt--dlp-f97316?style=flat&labelColor=2f353a" alt="Made with yt-dlp"></a>
+  <a href="https://ffmpeg.org/"><img src="https://img.shields.io/badge/MADE%20WITH-FFmpeg-007808?style=flat&logo=ffmpeg&logoColor=white&labelColor=2f353a" alt="Made with FFmpeg"></a>
+</p>
 
-[![RELEASE](https://img.shields.io/github/release/deuxdoom/TVerDownloader?style=flat&logo=github&logoColor=white&label=RELEASE&labelColor=2f353a&color=0ea5e9)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![Downloads Latest](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/latest/total?logo=github&style=flat&label=DOWNLOADS@LATEST)](https://github.com/deuxdoom/TVerDownloader/releases/latest)
-[![Downloads Total](https://img.shields.io/github/downloads/deuxdoom/TVerDownloader/total?logo=github&style=flat&label=DOWNLOADS)](https://github.com/deuxdoom/TVerDownloader/releases)
-[![LICENSE](https://img.shields.io/badge/LICENSE-All_Rights_Reserved-f43f5e?style=flat&labelColor=2f353a)](#-라이선스-및-저작권-license--copyright)  
-[![Platform](https://img.shields.io/badge/PLATFORM-WINDOWS%20X64-blue?style=flat&logo=windows)](https://github.com/deuxdoom/TVerDownloader)
-[![PYTHON](https://img.shields.io/badge/PYTHON-3.10%2B-3776ab?style=flat&logo=python&logoColor=white&labelColor=2f353a)](https://www.python.org/)
-[![PYQT6](https://img.shields.io/badge/PYQT6-GUI-10b981?style=flat&logo=qt&logoColor=white&labelColor=2f353a)](https://pypi.org/project/PyQt6/)  
-[![Made with yt-dlp](https://img.shields.io/badge/made%20with-yt--dlp-orange?style=plastic)](https://github.com/yt-dlp/yt-dlp)
-[![Made with FFmpeg](https://img.shields.io/badge/made%20with-FFmpeg-black?style=plastic&logo=ffmpeg)](https://ffmpeg.org/)
+![TVerDownloader 메인 UI](docs/img/app-light.png)
 
 ---
 
