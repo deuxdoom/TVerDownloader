@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TVer Downloader 내려받기</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<style>
+  :root { color-scheme: light dark; --bg: light-dark(#fafbfe, #080c14); --ink: light-dark(#171f30, #eff4ff); --muted: light-dark(#59687f, #97a6bd); --accent: light-dark(#0067d9, #5baaff); }
+  * { box-sizing: border-box; margin: 0; }
+  body { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--ink); font-family: Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif; text-align: center; line-height: 1.7; word-break: keep-all; }
+  img { display: block; width: 56px; height: 56px; margin: 0 auto 20px; }
+  h1 { font-size: 20px; letter-spacing: -.03em; }
+  p { margin-top: 8px; font-size: 14px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <img src="img/logo.png" width="56" height="56" alt="">
+  <h1 id="status">최신 버전을 내려받는 중입니다…</h1>
+  <p>Downloading the latest version (.zip)…</p>
+  <p>자동으로 시작되지 않으면 <a id="fallback" href="https://github.com/deuxdoom/TVerDownloader/releases/latest">최신 릴리스 페이지</a>에서 받으세요.</p>
+</main>
+<script>
+(async () => {
+  const fallback = 'https://github.com/deuxdoom/TVerDownloader/releases/latest';
+  const link = document.getElementById('fallback');
+  const isZip = value => {
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'github.com'
+        && url.pathname.startsWith('/deuxdoom/TVerDownloader/releases/download/') && /\.zip$/i.test(url.pathname);
+    } catch { return false; }
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch('https://api.github.com/repos/deuxdoom/TVerDownloader/releases/latest', { signal: controller.signal, headers: { Accept: 'application/vnd.github+json' } });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    const asset = (Array.isArray(data.assets) ? data.assets : []).find(item => typeof item.name === 'string' && isZip(item.browser_download_url));
+    if (!asset) throw new Error('zip');
+    link.href = asset.browser_download_url;
+    link.textContent = asset.name;
+    if (typeof data.tag_name === 'string') document.getElementById('status').textContent = data.tag_name + ' 내려받기를 시작합니다.';
+    location.href = asset.browser_download_url;
+  } catch {
+    location.replace(fallback);
+  } finally { clearTimeout(timeout); }
+})();
+</script>
+</body>
+</html>
