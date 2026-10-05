@@ -23,6 +23,18 @@
 
 ---
 
+<p align="center">
+  <a href="#-간단-소개"><img src="https://img.shields.io/badge/%EA%B0%84%EB%8B%A8_%EC%86%8C%EA%B0%9C-2f353a?style=for-the-badge" alt="간단 소개"></a>
+  <a href="#-시스템-요구-사항"><img src="https://img.shields.io/badge/%EC%8B%9C%EC%8A%A4%ED%85%9C_%EC%9A%94%EA%B5%AC_%EC%82%AC%ED%95%AD-2f353a?style=for-the-badge" alt="시스템 요구 사항"></a>
+  <a href="#-주요-기능"><img src="https://img.shields.io/badge/%EC%A3%BC%EC%9A%94_%EA%B8%B0%EB%8A%A5-2f353a?style=for-the-badge" alt="주요 기능"></a>
+  <a href="#-사용-방법"><img src="https://img.shields.io/badge/%EC%82%AC%EC%9A%A9_%EB%B0%A9%EB%B2%95-2f353a?style=for-the-badge" alt="사용 방법"></a>
+  <a href="#-주의-사항"><img src="https://img.shields.io/badge/%EC%A3%BC%EC%9D%98_%EC%82%AC%ED%95%AD-2f353a?style=for-the-badge" alt="주의 사항"></a>
+  <a href="#-백업할-파일"><img src="https://img.shields.io/badge/%EB%B0%B1%EC%97%85%ED%95%A0_%ED%8C%8C%EC%9D%BC-2f353a?style=for-the-badge" alt="백업할 파일"></a>
+  <a href="#-개발-정보"><img src="https://img.shields.io/badge/%EA%B0%9C%EB%B0%9C_%EC%A0%95%EB%B3%B4-2f353a?style=for-the-badge" alt="개발 정보"></a>
+  <a href="#-기여-및-응원"><img src="https://img.shields.io/badge/%EA%B8%B0%EC%97%AC_%EB%B0%8F_%EC%9D%91%EC%9B%90-2f353a?style=for-the-badge" alt="기여 및 응원"></a>
+  <a href="#-라이선스-및-저작권-license--copyright"><img src="https://img.shields.io/badge/%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4_%EB%B0%8F_%EC%A0%80%EC%9E%91%EA%B6%8C-2f353a?style=for-the-badge" alt="라이선스 및 저작권"></a>
+</p>
+
 ## 📌 간단 소개
 
 - **TVer Downloader**는 일본 티버 스트리밍 플랫폼의 동영상을 다운로드하도록 도와주는 GUI 기반의 프로그램입니다.
@@ -98,7 +110,8 @@
 - **제목 표시줄이 없는 한 덩이 창** — 윈도우가 그리던 제목 표시줄 대신 프로그램 머리글 줄이 그 자리를 대신함. 네 모서리가 둥글고 오른쪽 아래로 옅은 그림자가 져 바탕 화면 위에 떠 있는 것처럼 보임. 머리글 줄의 빈 곳을 끌면 창이 따라오고 두 번 누르면 최대화되며, 최대화하면 모서리가 각지고 그림자도 사라짐. 창 크기는 예전처럼 가장자리와 모서리를 끌어 바꿈
 - **최소화 · 최대화 · 닫기 단추가 머리글 줄 오른쪽에** — 닫기만 마우스를 올렸을 때 빨갛게 물듦(되돌릴 수 없는 동작이라 구별). 최소화는 지금까지처럼 트레이로 내려가고, 닫기는 설정에 정해 둔 대로 움직임. 머리글 줄 왼쪽에는 프로그램 심벌이 이름 로고와 나란히 섬
 - **설정 · 정보 · 다중 추가 · 시리즈 선택 · 알림 창도 같은 모양** — 모든 창이 제목 표시줄 없이 같은 제목 줄(아이콘 · 제목 · 닫기)과 둥근 모서리, 그림자를 쓰고 제목 줄을 끌어 옮길 수 있음. 알림 창은 큰 아이콘을 제목 줄로 옮겨 작아졌고 글과 단추가 창 한가운데에 섬. 모든 창은 프로그램 한가운데에 뜨고, 프로그램이 트레이에 내려가 있으면 화면 한가운데에 뜸
-- **다운로드 카드** — 16:9 썸네일, 상태를 나타내는 세로 색 띠, 진행 중에만 은은하게 밝기가 변하는 애니메이션
+- **세 목록이 같은 카드** — 다운로드 · 기록 · 즐겨찾기 모두 같은 높이와 16:9 썸네일. 제목은 두 줄까지 보이고 더 길면 말줄임표로 줄여 마우스를 올리면 전체가 나옴. 기록 · 즐겨찾기는 `제목 → 날짜 → 주소` 차례로 놓이고, 긴 주소는 회차 번호가 남도록 가운데를 줄임
+- **상태를 나타내는 세로 색 띠** — 진한 색은 받는 중 · 오류처럼 지금 봐야 할 카드에만 쓰고, 받는 중에만 은은하게 밝기가 변함. 다 받은 카드와 기록 · 즐겨찾기는 흐린 색
 - **영상 길이 표시** — 재생 · 폴더 아이콘 왼쪽에 `45분`처럼 굵게. 1분이 안 되면 `45초`로, 길이를 모르면 표시하지 않음
 - **완료 시 재생 · 폴더 열기 버튼 상시 노출** (더블클릭 재생도 그대로 동작). 마우스를 올리면 재생은 초록, 폴더 열기는 노랑으로 물듦
 - **목록에서 오른쪽 클릭** — 재다운로드 · 파일 재생 · 파일 위치 열기 · 썸네일 저장을 한자리에서. 받기가 끝난 항목도 기록 탭으로 옮겨 가지 않고 그 자리에서 다시 받을 수 있음(진행 중이거나 대기 중인 항목은 중지 · 대기열에서 제거가 대신 나옴)

@@ -687,7 +687,7 @@ function setupGallery() {
   let pointerFocus = false;
   const held = { hover: false, focus: false, pointer: false };
   const canAutoplay = () => slides.length > 1 && !held.hover && !held.focus && !held.pointer
-    && !reducedMotion.matches && !dialog.open && !document.hidden;
+    && !dialog.open && !document.hidden;
   function restartAutoplay() {
     clearTimeout(autoplay);
     autoplay = null;
@@ -721,7 +721,6 @@ function setupGallery() {
     if (!controls.contains(event.relatedTarget)) hold('focus', false);
   });
   document.addEventListener('visibilitychange', restartAutoplay);
-  reducedMotion.addEventListener('change', restartAutoplay);
   dialog.addEventListener('close', restartAutoplay);
 
   prev.hidden = next.hidden = slides.length < 2;
