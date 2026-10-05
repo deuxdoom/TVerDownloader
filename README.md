@@ -6,7 +6,9 @@
   </a>
 </p>
 
-# <img src="assets/applogo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
+# <img src="docs/img/logo.png" width="28" alt="TVer Downloader Logo"> 티버 다운로더 (TVer Downloader)
+
+**소스 코드는 공개하지 않습니다.** 이 저장소에는 사용 안내, 변경 내역 및 공식 소개 페이지를 제공하며, 실행 프로그램은 [최신 릴리스](https://github.com/deuxdoom/TVerDownloader/releases/latest)에서 받을 수 있습니다.
 
 [![NordVPN 74%할인 + 3개월 무료](https://img.shields.io/badge/NORDVPN-74%25%ED%95%A0%EC%9D%B8%203개월%20무료-0054a6?style=for-the-badge&logo=nordvpn&logoColor=black&labelColor=white)](https://refer-nordvpn.com/RRXwGuSQXTe)
 [![후원하기](https://img.shields.io/badge/후원하기-투네이션-ff69b4?style=for-the-badge&logo=githubsponsors)](https://toon.at/donate/deuxdoom)
@@ -47,7 +49,6 @@
 ## 💻 시스템 요구 사항
 
 - Windows 10 / 11 (x64)
-- Python 3.10 이상 (소스로 직접 실행할 경우)
 - 인터넷 연결 및 일본 VPN 필요
 - 런타임 에러가 발생할 경우: [Microsoft Visual C++ 재배포 가능 패키지 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 
@@ -153,8 +154,6 @@
 | `설정`          | 창을 꺼내지 않고 설정만 열기                            |
 | `프로그램 종료`     | 묻지 않고 바로 종료                                 |
 
-> `윈도우 시작 시 실행`은 배포된 실행 파일에서만 켤 수 있습니다. 소스로 직접 실행할 때는 흐리게 표시됩니다.
-
 ### 키보드 단축키
 
 | 기본 조합        | 동작            | 언제                       |
@@ -172,6 +171,8 @@
 ---
 
 ## 🚀 사용 방법
+
+[최신 릴리스](https://github.com/deuxdoom/TVerDownloader/releases/latest)에서 배포용 ZIP을 내려받아 압축을 푼 뒤, `TVerDownloader.exe`를 실행하세요. GitHub의 `Code > Download ZIP`은 실행 프로그램이 아닙니다.
 
 1. TVer 영상 *URL*을 입력창에 넣기 — 붙여넣기, 주소창에서 끌어다 놓기, 클립보드 자동 인식 중 편한 방법으로
 2. **설정** 메뉴에서 저장 폴더, 화질, 동시 다운로드 수, 파일명 규칙 등 조정
@@ -199,7 +200,7 @@
 - TVer는 일본 내 서비스이므로, **일본 VPN 환경**에서만 정상 동작합니다.
 - 다운로드한 콘텐츠의 **저작권 및 이용 약관**을 반드시 준수하세요.
 - **Windows에서 'PC 보호' 또는 '서명되지 않은 파일' 경고**가 표시될 수 있습니다.  
-  이 프로그램은 직접 빌드한 프로젝트로, 소스코드가 있으니 안심하고 실행해도 됩니다.
+  배포 파일은 [공식 GitHub 릴리스](https://github.com/deuxdoom/TVerDownloader/releases)에서 내려받아 주세요.
 - **업데이트는 프로그램 안에서 하는 것이 안전합니다.** 새 버전이 나오면 뜨는 안내창의 `지금 업데이트`를 누르면 알아서 교체되고, 설정 · 기록 · 즐겨찾기는 그대로 남습니다. **직접 덮어쓸 때는** 반드시 `TVerDownloader.exe` **파일**과 `_internal` **폴더**를 **함께** 바꿔야 합니다. 
 - 네트워크 환경 문제로 다운로드가 실패할 경우, **설정 > 고급**의 `SSL 인증서 검증 건너뛰기`를 활성화하면 해결될 수 있습니다. 단, 보안상 필요한 경우에만 사용하세요.
 
@@ -240,7 +241,7 @@
 
 ## 🤝 기여 및 응원
 
-- 버그 제보 및 코드 기여: [Issues](https://github.com/deuxdoom/TVerDownloader/issues)
+- 버그 제보 및 기능 제안: [Issues](https://github.com/deuxdoom/TVerDownloader/issues)
 - 상단의 [NordVPN 링크](https://refer-nordvpn.com/RRXwGuSQXTe) 로 가입시 개발자에게도 도움이 됩니다.
 - 개발자 유튜브: [YouTube 구독](https://www.youtube.com/@LE_SSERAFIM?sub_confirmation=1)
 - Star 별 ⭐️을 눌러주시면 큰 힘이 됩니다.
@@ -256,6 +257,6 @@
 - ❌ **무단 수정 및 가공 금지**: 원본 소스 코드를 임의로 수정, 변조하여 새로운 프로그램인 것처럼 위장하거나 배포하는 행위를 엄격히 금지합니다.
 - ❌ **무단 재배포 금지**: 공식 GitHub Repository 릴리즈를 통하지 않은 타 사이트, 블로그, 커뮤니티 등에 2차 배포(실행 파일 및 소스 코드 업로드)하는 것을 금지합니다. (출처 링크 공유만 허용)
 - ❌ **상업적 이용 금지**: 본 프로그램을 어떠한 형태의 영리 목적으로도 사용할 수 없습니다.
-- ✅ **Fork 및 개인적 사용 허용**: GitHub 시스템을 통한 단순 Fork, 개인적인 목적의 다운로드, 소스 코드 열람, 개인 환경에서의 로컬 빌드 및 사용은 자유롭게 허용됩니다. 단, Fork한 저장소에서도 소스 코드의 임의 수정, 가공 및 재배포는 금지됩니다.
+- ✅ **개인적 사용 허용**: 공식 GitHub 릴리스에서 제공하는 프로그램을 개인적인 목적으로 내려받아 사용하는 것은 허용됩니다.
 
-> ⚠️ **안내:** 본 프로젝트는 소스코드가 공개되어 있으나, 무단 도용을 방지하기 위해 오픈소스 라이선스(GPL, MIT 등)가 아닌 **독점 라이선스(Proprietary License)** 를 채택하고 있습니다. 본 명시 사항을 위반하여 발생하는 모든 법적 문제에 대한 책임은 전적으로 위반자에게 있습니다.
+> ⚠️ **안내:** 본 프로젝트의 소스 코드는 공개하지 않으며, **독점 라이선스(Proprietary License)** 를 채택하고 있습니다. 본 명시 사항을 위반하여 발생하는 모든 법적 문제에 대한 책임은 전적으로 위반자에게 있습니다.
